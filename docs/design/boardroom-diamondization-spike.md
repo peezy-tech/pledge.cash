@@ -1,12 +1,12 @@
 # Boardroom diamond protocol: design and evidence
 
-> **Status: canonical implementation; final local acceptance in progress;
-> target-chain deployment pending.**
+> **Status: Boardroom architecture record; liquidity and deployment evidence predates the Uniswap v4 generation.**
 >
-> This is the sole Boardroom product line in the unreleased repository. Both
-> chain `998` and `10143` artifacts are pending, no target-chain transaction has
-> been broadcast, and mainnet remains a NO-GO. The architecture does not
-> extract custody or add a redemption sidecar.
+> The kernel/facet and policy conclusions remain relevant. Custom-AMM,
+> locked-liquidity, x402, chain-998, byte-size, and test-count details below are
+> historical. Use `docs/amm-protocol.md`, `docs/deployment.md`, and the release-A/B
+> manifests for the current implementation. Chain `10143` remains pending, no
+> target-chain transaction has been broadcast, and mainnet remains a NO-GO.
 
 ## Outcome
 

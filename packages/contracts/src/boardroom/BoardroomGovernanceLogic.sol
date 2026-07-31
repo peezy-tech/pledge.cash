@@ -5,6 +5,7 @@ import {BoardroomToken} from "./BoardroomToken.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {BoardroomAssetStorage} from "./storage/BoardroomAssetStorage.sol";
 import {BoardroomCoreStorage} from "./storage/BoardroomCoreStorage.sol";
+import {BoardroomLiquidityStorage} from "./storage/BoardroomLiquidityStorage.sol";
 import {BoardroomObligationStorage} from "./storage/BoardroomObligationStorage.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
@@ -41,9 +42,15 @@ interface IBoardroomCanonicalLiquidity {
 
     function tokenB() external view returns (address);
 
-    function pool() external view returns (address);
+    function poolId() external view returns (bytes32);
+
+    function poolManager() external view returns (address);
 
     function isClosed() external view returns (bool);
+}
+
+interface IBoardroomCanonicalLiquidityPolicy {
+    function poolManager() external view returns (address);
 }
 
 interface IBoardroomClosableObligation {
@@ -220,16 +227,22 @@ contract BoardroomGovernanceLogic {
         BoardroomObligationStorage.layout().parentTransitionActive = false;
     }
 
-    function recordLockedLiquidityFromDistribution(
+    function recordProtocolLiquidityFromDistribution(
         address policyRegistry,
         address shareToken,
-        address locker,
-        address pool
+        address vault,
+        bytes32 poolId
     ) external {
         address parent = msg.sender;
         _beginParentTransition(parent);
-        address policy = IBoardroomCanonicalLiquidity(locker).factory();
-        _registerObligation(policyRegistry, shareToken, policy, locker, BoardroomObligationStorage.Kind.Liquidity, pool);
+        address policy = IBoardroomCanonicalLiquidity(vault).factory();
+        BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
+        if (liquidity.vault != vault || liquidity.poolId != poolId || poolId == bytes32(0)) {
+            revert InvalidObligation(vault);
+        }
+        _registerObligation(
+            policyRegistry, shareToken, policy, vault, BoardroomObligationStorage.Kind.Liquidity, address(0)
+        );
         _pruneObligation(shareToken, parent);
         BoardroomObligationStorage.layout().parentTransitionActive = false;
     }
@@ -290,6 +303,10 @@ contract BoardroomGovernanceLogic {
         ) {
             shares.registerEncumberedAccount(obligation);
         }
+        if (kind == BoardroomObligationStorage.Kind.Liquidity) {
+            address poolManager = IBoardroomCanonicalLiquidity(obligation).poolManager();
+            if (!shares.isEncumberedAccount(poolManager)) shares.registerEncumberedAccount(poolManager);
+        }
         if (auxiliary != address(0)) {
             if (!shares.isEncumberedAccount(auxiliary)) shares.registerEncumberedAccount(auxiliary);
             _addDependency(shareToken, obligation, auxiliary);
@@ -320,9 +337,13 @@ contract BoardroomGovernanceLogic {
             IBoardroomCanonicalLiquidity liquidity = IBoardroomCanonicalLiquidity(obligation);
             address tokenA = liquidity.tokenA();
             address tokenB = liquidity.tokenB();
+            BoardroomLiquidityStorage.Layout storage canonicalLiquidity = BoardroomLiquidityStorage.layout();
             if (
                 liquidity.factory() != policy || liquidity.boardroom() != address(this)
-                    || (tokenA != shareToken && tokenB != shareToken) || liquidity.pool() != auxiliary
+                    || (tokenA != shareToken && tokenB != shareToken) || auxiliary != address(0)
+                    || liquidity.poolId() == bytes32(0) || canonicalLiquidity.vault != obligation
+                    || canonicalLiquidity.poolId != liquidity.poolId()
+                    || liquidity.poolManager() != IBoardroomCanonicalLiquidityPolicy(policy).poolManager()
             ) revert InvalidObligation(obligation);
             return;
         }
@@ -357,9 +378,9 @@ contract BoardroomGovernanceLogic {
             return;
         }
         if (kind == BoardroomObligationStorage.Kind.Liquidity) {
+            _addDependency(shareToken, obligation, obligation);
             _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("tokenA()"))));
             _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("tokenB()"))));
-            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("pool()"))));
         }
     }
 
@@ -449,7 +470,7 @@ contract BoardroomGovernanceLogic {
         if (kind == IBoardroomObligationPolicy.ObligationKind.Distribution) {
             return BoardroomObligationStorage.Kind.Distribution;
         }
-        if (kind == IBoardroomObligationPolicy.ObligationKind.LockedLiquidity) {
+        if (kind == IBoardroomObligationPolicy.ObligationKind.Liquidity) {
             return BoardroomObligationStorage.Kind.Liquidity;
         }
         if (kind == IBoardroomObligationPolicy.ObligationKind.Reward) return BoardroomObligationStorage.Kind.Reward;

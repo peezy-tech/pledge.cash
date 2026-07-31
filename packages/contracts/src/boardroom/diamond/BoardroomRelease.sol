@@ -252,7 +252,7 @@ library BoardroomRelease {
         return _add(
             routes,
             count,
-            BoardroomExecutionFacet.recordLockedLiquidityFromDistribution.selector,
+            BoardroomExecutionFacet.recordProtocolLiquidityFromDistribution.selector,
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
         );
@@ -322,7 +322,7 @@ library BoardroomRelease {
         count = _add(
             routes,
             count,
-            BoardroomMarketFacet.returnProtocolLiquidityAsLp.selector,
+            BoardroomMarketFacet.returnProtocolLiquidityClaims.selector,
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
         );
@@ -408,9 +408,9 @@ library BoardroomRelease {
         count = _addView(routes, count, facet, IBoardroom.isLockedLiquidity.selector);
         count = _addView(routes, count, facet, IBoardroom.isRedeemableAsset.selector);
         count = _addView(routes, count, facet, IBoardroom.launched.selector);
-        count = _addView(routes, count, facet, IBoardroom.liquidityLocker.selector);
+        count = _addView(routes, count, facet, IBoardroom.liquidityVault.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityMutationAllowed.selector);
-        count = _addView(routes, count, facet, IBoardroom.liquidityPool.selector);
+        count = _addView(routes, count, facet, IBoardroom.liquidityPoolId.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityQuoteAsset.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityReservation.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityStatus.selector);

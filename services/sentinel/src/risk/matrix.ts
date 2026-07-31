@@ -4,15 +4,15 @@ import {
   boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
   erc20Abi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
-  migratingBondingCurveAbi
+  migratingBondingCurveAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi
 } from "@pledge.cash/sdk";
 import { toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
 
 import type { Severity } from "../types";
 
-export const RULESET_VERSION = 7;
+export const RULESET_VERSION = 8;
 
 export type RiskRuleId =
   | "controller-configuration"
@@ -27,6 +27,7 @@ export type RiskRuleId =
   | "add-protocol-liquidity"
   | "close-protocol-liquidity"
   | "claim-protocol-liquidity-fees"
+  | "release-protocol-liquidity-claims"
   | "remove-protocol-liquidity"
   | "cancel-bonding-curve"
   | "register-redeemable-asset"
@@ -43,7 +44,7 @@ export type RiskRuleTarget =
   | "external"
   | "bonding-curve"
   | "liquidity-factory"
-  | "liquidity-locker"
+  | "liquidity-vault"
   | "policy-registry";
 
 export type RiskRuleDefinition = {
@@ -87,13 +88,18 @@ export const SELECTORS = {
     approve: selector(erc20Abi, "approve", ["address", "uint256"])
   },
   liquidityFactory: {
-    addLockedLiquidity: selector(lockedLiquidityFactoryAbi, "addLockedLiquidity", ["tuple"]),
-    closeLockedLiquidity: selector(lockedLiquidityFactoryAbi, "closeLockedLiquidity", []),
-    createLockedLiquidity: selector(lockedLiquidityFactoryAbi, "createLockedLiquidity", ["tuple"]),
-    removeLockedLiquidity: selector(lockedLiquidityFactoryAbi, "removeLockedLiquidity", ["tuple"])
+    addProtocolLiquidity: selector(pledgeV4LiquidityFactoryAbi, "addProtocolLiquidity", ["tuple"]),
+    closeProtocolLiquidity: selector(pledgeV4LiquidityFactoryAbi, "closeProtocolLiquidity", []),
+    createProtocolLiquidity: selector(pledgeV4LiquidityFactoryAbi, "createProtocolLiquidity", ["tuple"]),
+    removeProtocolLiquidity: selector(pledgeV4LiquidityFactoryAbi, "removeProtocolLiquidity", ["tuple"])
   },
-  liquidityLocker: {
-    claimFees: selector(lockedLiquidityAbi, "claimFees", [])
+  liquidityVault: {
+    claimFees: selector(pledgeV4LiquidityVaultAbi, "claimFees", [])
+  },
+  protocolLiquidityBoardroom: {
+    closeAfterWindDown: selector(boardroomAbi, "closeProtocolLiquidityAfterWindDown", ["bytes32"]),
+    exit: selector(boardroomAbi, "exitProtocolLiquidity", ["bytes32", "uint256", "uint256", "uint256"]),
+    returnClaims: selector(boardroomAbi, "returnProtocolLiquidityClaims", ["bytes32"])
   },
   bondingCurve: {
     cancel: selector(migratingBondingCurveAbi, "cancel", [])
@@ -189,39 +195,60 @@ export const RISK_MATRIX = [
     target: "action"
   },
   {
-    detail: "Creates the permanent singleton protocol-liquidity locker, pool, and quote-asset identity.",
+    detail: "Creates the canonical pledge.cash vault and Uniswap v4 PoolId for permanent protocol liquidity.",
     id: "create-protocol-liquidity",
-    selector: SELECTORS.liquidityFactory.createLockedLiquidity,
+    selector: SELECTORS.liquidityFactory.createProtocolLiquidity,
     severity: "high",
     target: "liquidity-factory"
   },
   {
-    detail: "Adds Boardroom assets to the permanent canonical protocol-liquidity pair.",
+    detail: "Adds Boardroom assets to the canonical full-range Uniswap v4 position.",
     id: "add-protocol-liquidity",
-    selector: SELECTORS.liquidityFactory.addLockedLiquidity,
+    selector: SELECTORS.liquidityFactory.addProtocolLiquidity,
     severity: "medium",
     target: "liquidity-factory"
   },
   {
     detail: "Explicitly and irreversibly closes an empty canonical protocol-liquidity position.",
     id: "close-protocol-liquidity",
-    selector: SELECTORS.liquidityFactory.closeLockedLiquidity,
+    selector: SELECTORS.liquidityFactory.closeProtocolLiquidity,
     severity: "medium",
     target: "liquidity-factory"
   },
   {
-    detail: "Removes some or all protocol-owned liquidity back to the Boardroom.",
+    detail: "Removes some or all protocol-owned Uniswap v4 liquidity back to the Boardroom.",
     id: "remove-protocol-liquidity",
-    selector: SELECTORS.liquidityFactory.removeLockedLiquidity,
+    selector: SELECTORS.liquidityFactory.removeProtocolLiquidity,
     severity: "medium",
     target: "liquidity-factory"
   },
   {
-    detail: "Forwards accrued canonical locker fees to the Boardroom without moving LP principal.",
+    detail: "Collects the canonical v4 position fees, forwarding 95% to the Boardroom and 5% to the protocol recipient.",
     id: "claim-protocol-liquidity-fees",
-    selector: SELECTORS.liquidityLocker.claimFees,
+    selector: SELECTORS.liquidityVault.claimFees,
     severity: "low",
-    target: "liquidity-locker"
+    target: "liquidity-vault"
+  },
+  {
+    detail: "Releases the protocol-owned P4LP claims to the Boardroom during wind-down without immediately removing the position.",
+    id: "release-protocol-liquidity-claims",
+    selector: SELECTORS.protocolLiquidityBoardroom.returnClaims,
+    severity: "medium",
+    target: "boardroom"
+  },
+  {
+    detail: "Exits the protocol-owned Uniswap v4 position to the Boardroom during wind-down.",
+    id: "remove-protocol-liquidity",
+    selector: SELECTORS.protocolLiquidityBoardroom.exit,
+    severity: "medium",
+    target: "boardroom"
+  },
+  {
+    detail: "Closes an empty protocol-liquidity vault after wind-down.",
+    id: "close-protocol-liquidity",
+    selector: SELECTORS.protocolLiquidityBoardroom.closeAfterWindDown,
+    severity: "medium",
+    target: "boardroom"
   },
   {
     detail: "Cancels the singleton primary sale into its bounded sell-only unwind.",

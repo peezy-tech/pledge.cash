@@ -57,7 +57,7 @@ the canonical root deployment route.
 
 The creation fee is chain-native and does not hard-code a gas-token symbol.
 The wider root stack supplies a chain-specific wrapped-native address for
-Boardroom and AMM accounting. The repository has a deployment wrapper for
+Boardroom and v4-liquidity accounting. The repository has a deployment wrapper for
 Monad testnet (`10143`), but its checked-in protocol-v1 artifact is
 **pending**. The file is not a contract address or
 evidence of a live `TokenGrantFactory`.

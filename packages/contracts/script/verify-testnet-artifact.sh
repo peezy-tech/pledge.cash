@@ -185,14 +185,12 @@ local_release_code_hash() {
   )"
   module_architecture="$(
     encoded_hash \
-      "f(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)" \
+      "f(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)" \
       "$(creation_code_hash BoardroomPolicyRegistry)" \
       "$(creation_code_hash AssetPolicy)" \
       "$(creation_code_hash ProtocolFeeRouter)" \
       "$(creation_code_hash TokenGrantFactory)" \
-      "$(creation_code_hash AmmFactory)" \
-      "$(creation_code_hash AmmRouter)" \
-      "$(creation_code_hash LockedLiquidityFactory)" \
+      "$(creation_code_hash PledgeV4LiquidityFactory)" \
       "$(creation_code_hash DistributionFactory)" \
       "$(creation_code_hash BoardroomRewardsFactory)" \
       "$(creation_code_hash BondMarketFactory)"
@@ -376,23 +374,19 @@ verify_release_provenance() {
     "TokenGrantFactory" TokenGrantFactory tokenGrantFactory tokenGrantFactoryCodeHash \
     "f(address,address)" "$bootstrap" "$(field boardroomFactory)"
   verify_release_deployment \
-    "AmmFactory" AmmFactory ammFactory ammFactoryCodeHash \
-    "f(address,address)" "$bootstrap" "$(field boardroomFactory)"
-  verify_release_deployment \
-    "AmmRouter" AmmRouter ammRouter ammRouterCodeHash \
-    "f(address,address)" "$(field ammFactory)" "$(field wrappedNative)"
-  verify_release_deployment \
-    "LockedLiquidityFactory" LockedLiquidityFactory lockedLiquidityFactory lockedLiquidityFactoryCodeHash \
-    "f(address,address)" "$(field ammRouter)" "$(field boardroomFactory)"
+    "PledgeV4LiquidityFactory" PledgeV4LiquidityFactory pledgeV4LiquidityFactory \
+    pledgeV4LiquidityFactoryCodeHash \
+    "f(address,address,address,address)" "$(field uniswapV4PoolManager)" "$(field boardroomFactory)" \
+    "$(field protocolFeeRouter)" "$bootstrap"
   verify_release_deployment \
     "DistributionFactory" DistributionFactory distributionFactory distributionFactoryCodeHash \
-    "f(address,address)" "$(field lockedLiquidityFactory)" "$(field tokenGrantFactory)"
+    "f(address,address)" "$(field pledgeV4LiquidityFactory)" "$(field tokenGrantFactory)"
   verify_release_deployment \
     "BoardroomRewardsFactory" BoardroomRewardsFactory boardroomRewardsFactory boardroomRewardsFactoryCodeHash \
     "f(address)" "$(field boardroomFactory)"
   verify_release_deployment \
     "BondMarketFactory" BondMarketFactory bondMarketFactory bondMarketFactoryCodeHash \
-    "f(address,address)" "$(field ammFactory)" "$(field boardroomFactory)"
+    "f(address,address)" "$(field pledgeV4LiquidityFactory)" "$(field boardroomFactory)"
 }
 
 normalized_receipt() {
@@ -1023,7 +1017,7 @@ verify_live_active_release() {
 }
 
 verify_protocol_wiring() {
-  local governance registry policy asset fee_router grants amm router locker distribution rewards bonds factory
+  local governance registry policy asset fee_router grants liquidity hook distribution rewards bonds factory
 
   governance="$(field protocolGovernance)"
   registry="$(field protocolFacetRegistry)"
@@ -1031,9 +1025,8 @@ verify_protocol_wiring() {
   asset="$(field assetPolicy)"
   fee_router="$(field protocolFeeRouter)"
   grants="$(field tokenGrantFactory)"
-  amm="$(field ammFactory)"
-  router="$(field ammRouter)"
-  locker="$(field lockedLiquidityFactory)"
+  liquidity="$(field pledgeV4LiquidityFactory)"
+  hook="$(field pledgeV4Hook)"
   distribution="$(field distributionFactory)"
   rewards="$(field boardroomRewardsFactory)"
   bonds="$(field bondMarketFactory)"
@@ -1048,8 +1041,7 @@ verify_protocol_wiring() {
     "BoardroomPolicyRegistry|$policy|boardroomPolicyRegistryOwner" \
     "AssetPolicy|$asset|assetPolicyOwner" \
     "ProtocolFeeRouter|$fee_router|protocolFeeRouterOwner" \
-    "TokenGrantFactory|$grants|tokenGrantFactoryOwner" \
-    "AmmFactory|$amm|ammFactoryOwner"; do
+    "TokenGrantFactory|$grants|tokenGrantFactoryOwner"; do
     IFS='|' read -r label address owner_field <<<"$owner_spec"
     expect_address_equal "$label artifact owner" "$governance" "$(field "$owner_field")"
     expect_address_equal "$label live owner" "$governance" "$(call_value "$address" "owner()(address)")"
@@ -1091,27 +1083,46 @@ verify_protocol_wiring() {
   expect_equal "TokenGrantFactory creation fee" "$(field creationFee)" "$(call_value "$grants" "creationFee()(uint256)")"
   expect_address_equal \
     "TokenGrantFactory BoardroomFactory" "$factory" "$(call_value "$grants" "boardroomFactory()(address)")"
-  expect_address_equal "AmmFactory fee manager" "$(field ammFeeManager)" "$(call_value "$amm" "feeManager()(address)")"
   expect_address_equal \
-    "AmmFactory protocol fee recipient" "$fee_router" "$(call_value "$amm" "protocolFeeRecipient()(address)")"
-  expect_address_equal "AmmFactory router" "$router" "$(call_value "$amm" "liquidityRouter()(address)")"
-  expect_address_equal "AmmFactory reservation manager" "$locker" "$(call_value "$amm" "reservationManager()(address)")"
-  expect_address_equal "AmmFactory BoardroomFactory" "$factory" "$(call_value "$amm" "boardroomFactory()(address)")"
-  expect_address_equal "AmmRouter factory" "$amm" "$(call_value "$router" "factory()(address)")"
+    "PledgeV4LiquidityFactory PoolManager" \
+    "$(field uniswapV4PoolManager)" \
+    "$(call_value "$liquidity" "poolManager()(address)")"
   expect_address_equal \
-    "AmmRouter wrapped native" "$(field wrappedNative)" "$(call_value "$router" "wrappedNative()(address)")"
-  expect_address_equal "LockedLiquidityFactory router" "$router" "$(call_value "$locker" "ammRouter()(address)")"
+    "PledgeV4LiquidityFactory protocol fee recipient" \
+    "$fee_router" \
+    "$(call_value "$liquidity" "protocolFeeRecipient()(address)")"
   expect_address_equal \
-    "LockedLiquidityFactory BoardroomFactory" "$factory" "$(call_value "$locker" "boardroomFactory()(address)")"
+    "PledgeV4LiquidityFactory BoardroomFactory" \
+    "$factory" \
+    "$(call_value "$liquidity" "boardroomFactory()(address)")"
+  expect_address_equal "PledgeV4LiquidityFactory hook" "$hook" "$(call_value "$liquidity" "hook()(address)")"
+  expect_hash_equal \
+    "PledgeV4LiquidityFactory hook salt" \
+    "$(field pledgeV4HookSalt)" \
+    "$(call_value "$liquidity" "hookSalt()(bytes32)")"
   expect_address_equal \
-    "DistributionFactory locker" "$locker" "$(call_value "$distribution" "lockedLiquidityFactory()(address)")"
+    "PledgeV4Hook predicted address" \
+    "$hook" \
+    "$(call_value "$liquidity" "predictHookAddress(bytes32)(address)" "$(field pledgeV4HookSalt)")"
+  expect_address_equal \
+    "PledgeV4Hook PoolManager" \
+    "$(field uniswapV4PoolManager)" \
+    "$(call_value "$hook" "poolManager()(address)")"
+  expect_address_equal "PledgeV4Hook factory" "$liquidity" "$(call_value "$hook" "factory()(address)")"
+  expect_address_equal \
+    "DistributionFactory liquidity factory" \
+    "$liquidity" \
+    "$(call_value "$distribution" "liquidityFactory()(address)")"
   expect_address_equal \
     "DistributionFactory grants" "$grants" "$(call_value "$distribution" "tokenGrantFactory()(address)")"
   expect_address_equal \
     "DistributionFactory BoardroomFactory" "$factory" "$(call_value "$distribution" "boardroomFactory()(address)")"
   expect_address_equal \
     "BoardroomRewardsFactory BoardroomFactory" "$factory" "$(call_value "$rewards" "boardroomFactory()(address)")"
-  expect_address_equal "BondMarketFactory AmmFactory" "$amm" "$(call_value "$bonds" "ammFactory()(address)")"
+  expect_address_equal \
+    "BondMarketFactory liquidity factory" \
+    "$liquidity" \
+    "$(call_value "$bonds" "liquidityFactory()(address)")"
   expect_address_equal \
     "BondMarketFactory BoardroomFactory" "$factory" "$(call_value "$bonds" "boardroomFactory()(address)")"
 
@@ -1119,7 +1130,7 @@ verify_protocol_wiring() {
     "$(call_value "$asset" "isAssetAllowed(address)(bool)" "$(field wrappedNative)")"
   expect_equal "AssetPolicy registry allowance" "true" \
     "$(call_value "$policy" "isPolicyAllowed(address)(bool)" "$asset")"
-  for module in "$grants" "$distribution" "$bonds" "$locker" "$rewards"; do
+  for module in "$grants" "$distribution" "$bonds" "$liquidity" "$rewards"; do
     expect_equal "module policy identity $module" "true" \
       "$(call_value "$policy" "isModulePolicy(address)(bool)" "$module")"
     expect_equal "module policy allowance $module" "true" \
@@ -1142,26 +1153,30 @@ fi
 for required in \
   chainId sourceCommit protocolVersion deterministicDeployment deterministicDeploymentVersion \
   deterministicReleaseCodeHash deployer create2Factory deterministicDeployer deterministicDeployerOwner \
-  protocolGovernance protocolTreasury ammFeeManager wrappedNative \
+  protocolGovernance protocolTreasury wrappedNative \
+  uniswapV4PoolManager uniswapUniversalRouter uniswapV4Quoter uniswapV4StateView uniswapV4PositionManager permit2 \
   protocolFacetRegistry boardroomKernel boardroomPolicyRegistry boardroomFactory \
   boardroomControllerFactory boardroomControllerLogic boardroomGovernanceLogic boardroomRedemptionPayout \
   boardroomMarketLogic authorityFacet executionFacet marketFacet redemptionFacet viewFacet \
   activeFacetSetHash activeRelease requiredStorageVersion requiredStorageLayoutHash manifestHash \
   kernelSelectorSetHash selectorCount \
-  assetPolicy protocolFeeRouter tokenGrantFactory tokenGrantLogic ammFactory ammPoolImplementation ammRouter \
-  lockedLiquidityFactory lockedLiquidityLogic distributionFactory fixedPriceSaleLogic dutchAuctionLogic \
+  assetPolicy protocolFeeRouter tokenGrantFactory tokenGrantLogic pledgeV4LiquidityFactory \
+  pledgeV4LiquidityVaultImplementation pledgeV4Hook pledgeV4HookSalt \
+  distributionFactory fixedPriceSaleLogic dutchAuctionLogic \
   migratingBondingCurveLogic merkleAirdropLogic boardroomRewardsFactory boardroomRewardsLogic \
   bondMarketFactory bondMarketLogic \
   protocolFacetRegistryOwner boardroomPolicyRegistryOwner assetPolicyOwner protocolFeeRouterOwner \
-  tokenGrantFactoryOwner ammFactoryOwner protocolFeeRouterRecipient tokenGrantFeeRecipient \
-  ammProtocolFeeRecipient ammLiquidityRouter ammReservationManager creationFee \
+  tokenGrantFactoryOwner protocolFeeRouterRecipient tokenGrantFeeRecipient \
+  pledgeV4ProtocolFeeRecipient creationFee \
   deterministicDeployerCodeHash protocolFacetRegistryCodeHash boardroomKernelCodeHash \
   boardroomPolicyRegistryCodeHash boardroomFactoryCodeHash boardroomControllerFactoryCodeHash \
   boardroomControllerLogicCodeHash boardroomGovernanceLogicCodeHash boardroomRedemptionPayoutCodeHash \
   boardroomMarketLogicCodeHash authorityFacetCodeHash executionFacetCodeHash marketFacetCodeHash \
   redemptionFacetCodeHash viewFacetCodeHash assetPolicyCodeHash protocolFeeRouterCodeHash \
-  tokenGrantFactoryCodeHash tokenGrantLogicCodeHash ammFactoryCodeHash ammPoolImplementationCodeHash \
-  ammRouterCodeHash lockedLiquidityFactoryCodeHash lockedLiquidityLogicCodeHash distributionFactoryCodeHash \
+  tokenGrantFactoryCodeHash tokenGrantLogicCodeHash pledgeV4LiquidityFactoryCodeHash \
+  pledgeV4LiquidityVaultImplementationCodeHash pledgeV4HookCodeHash \
+  uniswapV4PoolManagerCodeHash uniswapUniversalRouterCodeHash uniswapV4QuoterCodeHash \
+  uniswapV4StateViewCodeHash uniswapV4PositionManagerCodeHash permit2CodeHash distributionFactoryCodeHash \
   fixedPriceSaleLogicCodeHash dutchAuctionLogicCodeHash migratingBondingCurveLogicCodeHash \
   merkleAirdropLogicCodeHash boardroomRewardsFactoryCodeHash boardroomRewardsLogicCodeHash \
   bondMarketFactoryCodeHash bondMarketLogicCodeHash wrappedNativeCodeHash \
@@ -1199,8 +1214,14 @@ for code_spec in \
   "BoardroomControllerFactory|boardroomControllerFactory|boardroomControllerFactoryCodeHash" \
   "BoardroomController implementation|boardroomControllerLogic|boardroomControllerLogicCodeHash" \
   "TokenGrant implementation|tokenGrantLogic|tokenGrantLogicCodeHash" \
-  "AMM pool implementation|ammPoolImplementation|ammPoolImplementationCodeHash" \
-  "LockedLiquidity implementation|lockedLiquidityLogic|lockedLiquidityLogicCodeHash" \
+  "PledgeV4LiquidityVault implementation|pledgeV4LiquidityVaultImplementation|pledgeV4LiquidityVaultImplementationCodeHash" \
+  "PledgeV4Hook|pledgeV4Hook|pledgeV4HookCodeHash" \
+  "Uniswap v4 PoolManager|uniswapV4PoolManager|uniswapV4PoolManagerCodeHash" \
+  "Uniswap Universal Router|uniswapUniversalRouter|uniswapUniversalRouterCodeHash" \
+  "Uniswap v4 Quoter|uniswapV4Quoter|uniswapV4QuoterCodeHash" \
+  "Uniswap v4 StateView|uniswapV4StateView|uniswapV4StateViewCodeHash" \
+  "Uniswap v4 PositionManager|uniswapV4PositionManager|uniswapV4PositionManagerCodeHash" \
+  "Permit2|permit2|permit2CodeHash" \
   "FixedPriceSale implementation|fixedPriceSaleLogic|fixedPriceSaleLogicCodeHash" \
   "DutchAuctionSale implementation|dutchAuctionLogic|dutchAuctionLogicCodeHash" \
   "MigratingBondingCurve implementation|migratingBondingCurveLogic|migratingBondingCurveLogicCodeHash" \
@@ -1220,4 +1241,3 @@ if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
 else
   echo "Verified canonical pledge.cash protocol artifact and live Boardroom release from $ARTIFACT"
 fi
-

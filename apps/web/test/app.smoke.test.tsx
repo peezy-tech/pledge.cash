@@ -4,8 +4,7 @@ import type {
   DiscoveredBoardroom,
   DiscoveredDistribution,
   DiscoveredGrant,
-  DiscoveredLockedLiquidity,
-  DiscoveredPool,
+  DiscoveredProtocolLiquidity,
   FixedPriceSaleState,
   MerkleAirdropState,
 } from "@pledge.cash/sdk";
@@ -183,12 +182,22 @@ const boardroomSnapshot: BoardroomSnapshot = {
         address: locker,
         factory: "0x7700000000000000000000000000000000000000" as Address,
         boardroom,
-        router: "0x7800000000000000000000000000000000000000" as Address,
+        poolManager: "0x7800000000000000000000000000000000000000" as Address,
+        protocolFeeRecipient: policyRegistry,
         tokenA: shareToken,
         tokenB: oldGrant.paymentToken,
-        pool,
-        seeded: true,
-        lockedLiquidity: 10n,
+        currency0: oldGrant.paymentToken,
+        currency1: shareToken,
+        hook: "0x7b000000000000000000000000000000000000000" as Address,
+        poolId: oldGrant.salt,
+        positionSalt: oldGrant.salt,
+        tickLower: -887_220,
+        tickUpper: 887_220,
+        poolFee: 3_000,
+        tickSpacing: 60,
+        liquidityState: 1,
+        positionLiquidity: 10n,
+        totalSupply: 10n,
       },
     },
   ],
@@ -219,29 +228,20 @@ const discoveredDistribution: DiscoveredDistribution = {
   transactionHash: "0x000000000000000000000000000000000000000000000000000000000000000b",
 };
 
-const discoveredLocker: DiscoveredLockedLiquidity = {
-  locker,
+const discoveredLocker: DiscoveredProtocolLiquidity = {
+  vault: locker,
   boardroom,
   factory: "0x7700000000000000000000000000000000000000" as Address,
-  pool,
-  tokenA: shareToken,
-  tokenB: oldGrant.paymentToken,
+  poolId: oldGrant.salt,
+  quoteAsset: oldGrant.paymentToken,
   amountA: 1000n,
   amountB: 2000n,
   liquidity: 3000n,
+  sqrtPriceX96: 1n << 96n,
   salt: oldGrant.salt,
+  curve: "0x0000000000000000000000000000000000000000",
   createdAtBlock: 12n,
   transactionHash: "0x000000000000000000000000000000000000000000000000000000000000000c",
-};
-
-const discoveredPool: DiscoveredPool = {
-  pool,
-  factory: "0x7800000000000000000000000000000000000000" as Address,
-  token0: shareToken,
-  token1: oldGrant.paymentToken,
-  poolCount: 1n,
-  createdAtBlock: 9n,
-  transactionHash: "0x0000000000000000000000000000000000000000000000000000000000000009",
 };
 
 const discoverySnapshot: DiscoverySnapshot = {
@@ -256,7 +256,6 @@ const discoverySnapshot: DiscoverySnapshot = {
   grantsByAddress: { [oldGrant.grantAddress.toLowerCase()]: oldGrant },
   distributionsByAddress: { [sale.toLowerCase()]: discoveredDistribution },
   lockersByAddress: { [locker.toLowerCase()]: discoveredLocker },
-  poolsByAddress: { [pool.toLowerCase()]: discoveredPool },
 };
 
 describe("web app shell", () => {
@@ -467,7 +466,7 @@ describe("web app shell", () => {
       histories: discoveryOrder.map((candidate) => ({ pool: candidate })),
       snapshot: {
         ...boardroomSnapshot,
-        lockedLiquiditySummaries: [{ address: locker, state: { pool: `0x${duplicate.slice(2).toUpperCase()}` } }],
+        lockedLiquiditySummaries: [{ address: `0x${duplicate.slice(2).toUpperCase()}` }],
       },
     } as unknown as ProductBoardroomDashboardState;
 
@@ -489,6 +488,8 @@ describe("web app shell", () => {
     const quote = {
       tokenA: { address: shareToken, decimals: 18 },
       tokenB: { address: policyRegistry, decimals: 6 },
+      amountADesired: 1n,
+      amountBDesired: 1n,
       amountA: 1n,
       amountB: 1n,
       amountAMin: 1n,
@@ -500,23 +501,20 @@ describe("web app shell", () => {
         exists: false,
         token0: shareToken,
         token1: policyRegistry,
-        reserve0: 0n,
-        reserve1: 0n,
-        reserveA: 0n,
-        reserveB: 0n,
         totalSupply: 0n,
+        poolId: oldGrant.salt,
       },
     };
 
     const newPool = studioProjectLiquidityQuote(quote, [pool]);
-    expect(newPool.error).toBe("This liquidity quote requires an existing project AMM pool.");
+    expect(newPool.error).toBe("This liquidity quote requires an existing canonical project Uniswap v4 pool.");
     expect(liquidityQuoteReady(newPool)).toBe(false);
 
     const existingUnrecorded = studioProjectLiquidityQuote({
       ...quote,
       pool: { ...quote.pool, exists: true },
     }, [pool]);
-    expect(existingUnrecorded.error).toBe("This liquidity quote is not scoped to an AMM pool owned by this project.");
+    expect(existingUnrecorded.error).toBe("This liquidity quote is not scoped to a canonical v4 vault owned by this project.");
     expect(liquidityQuoteReady(existingUnrecorded)).toBe(false);
 
     const removeQuote = studioProjectRemoveLiquidityQuote({
@@ -533,7 +531,7 @@ describe("web app shell", () => {
       amountBMin: 1n,
       slippageBps: 50,
     }, [pool]);
-    expect(removeQuote.error).toBe("This remove-liquidity quote is not scoped to an AMM pool owned by this project.");
+    expect(removeQuote.error).toBe("This remove-liquidity quote is not scoped to a canonical v4 vault owned by this project.");
     expect(removeLiquidityQuoteReady(removeQuote)).toBe(false);
 
     const recorded = studioProjectLiquidityQuote({
@@ -622,7 +620,7 @@ describe("web app shell", () => {
 
     expect(option?.status).toBe("Unavailable");
     expect(option?.group).toBe("unavailable");
-    expect(option?.reason).toContain("No current reserve snapshot was returned");
+    expect(option?.reason).toContain("No current v4 PoolId state was returned");
   });
 
   test("keeps legacy workspace routes while using product labels", () => {
@@ -688,10 +686,10 @@ describe("web app shell", () => {
     expect(html).toContain("My Boardrooms");
     expect(html).toContain("My Grants");
     expect(html).toContain("Boardroom Obligations");
-    expect(html).toContain("Pools And Liquidity");
+    expect(html).toContain("Uniswap v4 Protocol Liquidity");
     expect(html).toContain("Pledge Common");
     expect(html).toContain("Use Distribution");
-    expect(html).toContain("Use Locker");
+    expect(html).toContain("Use Vault");
   });
 
   test("gates discovery diagnostics actions while wallet sync is pending", () => {
@@ -1154,6 +1152,7 @@ describe("web app shell", () => {
           exit: noop,
           load: noop,
           predict: noop,
+          releaseClaims: noop,
           setLockedLiquidityAddress: noopSetter,
           setLockedLiquidityExitForm: noopSetter,
           setLockedLiquidityForm: noopSetter,
@@ -1202,7 +1201,7 @@ describe("web app shell", () => {
             boardroomFactory: "0x7900000000000000000000000000000000000000",
             distributionFactory: "0x7600000000000000000000000000000000000000",
             bondMarketFactory: "0x7500000000000000000000000000000000000000",
-            lockedLiquidityFactory: "0x7700000000000000000000000000000000000000",
+            pledgeV4LiquidityFactory: "0x7700000000000000000000000000000000000000",
           },
           pendingAction: undefined,
           runAction: async (_label, action) => action(),
@@ -1214,7 +1213,8 @@ describe("web app shell", () => {
     expect(html).toContain("Sequential Dutch Auction Bond");
     expect(html).toContain("Merkle Airdrop");
     expect(html).toContain("Migrating Bonding Curve");
-    expect(html).toContain("Locked Liquidity");
+    expect(html).toContain("Uniswap v4 Protocol Liquidity");
+    expect(html).toContain("Release P4LP Claims");
     expect(html).toContain("Wind-Down");
     expect(html).toContain("Winding down");
     expect(html).toContain("Loaded blocker details");
@@ -1222,7 +1222,7 @@ describe("web app shell", () => {
     expect(html).toContain("Settleable now");
     expect(html).toContain("Use Sale");
     expect(html).toContain("Use Airdrop");
-    expect(html).toContain("Use Locker");
+    expect(html).toContain("Use P4LP Vault");
     expect(html).toContain("Ordinary writes remain blocked");
     expect(html).toContain("Migrate Boardroom");
   });

@@ -4,3 +4,6 @@
 [submodule "packages/contracts/lib/solady"]
 	path = packages/contracts/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "packages/contracts/lib/v4-core"]
+	path = packages/contracts/lib/v4-core
+	url = https://github.com/Uniswap/v4-core.git

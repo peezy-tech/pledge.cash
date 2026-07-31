@@ -3,7 +3,7 @@ import type {
   BondMarketState,
   DutchAuctionState,
   FixedPriceSaleState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState as LockedLiquidityState,
   MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashDeployment,
@@ -188,6 +188,7 @@ export type LockedLiquidityPanelState = {
   exit: () => Promise<void>;
   load: () => Promise<void>;
   predict: () => Promise<void>;
+  releaseClaims: () => Promise<void>;
   remove: () => Promise<void>;
   setLockedLiquidityAddress: (address: string) => void;
   setLockedLiquidityExitForm: Dispatch<SetStateAction<LockedLiquidityExitForm>>;

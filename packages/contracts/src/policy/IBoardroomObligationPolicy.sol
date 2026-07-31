@@ -9,13 +9,14 @@ interface IBoardroomObligationPolicy is IBoardroomCallPolicy {
         None,
         Grant,
         Distribution,
-        LockedLiquidity,
+        Liquidity,
         Reward
     }
 
     /// @param kind Record category; `None` means the call creates no boardroom-tracked obligation.
-    /// @param account Issued grant, distribution, locked-liquidity, or reward contract address.
-    /// @param aux Additional issued object address, currently the AMM pool for locked liquidity.
+    /// @param account Issued grant, distribution, liquidity vault, or reward contract address.
+    /// @param aux Optional additional issued object address. Protocol liquidity leaves this zero because
+    /// Uniswap v4 pools are identified by `bytes32 PoolId`, not token contracts.
     struct Obligation {
         ObligationKind kind;
         address account;

@@ -54,12 +54,13 @@ Studio can coordinate these canonical modules while the Boardroom is active:
 - **Grant:** approve grant-token escrow, then create an escrow-backed schedule. Paid grants also admit their payment token as a potential treasury asset.
 - **Fixed-price sale:** approve project-share inventory, then create a sale whose buyer payments go directly to the Boardroom.
 - **Dutch auction:** approve project-share inventory, then create a finite descending-price sale. Finalization is
-  permissionless after expiry; any later locked-liquidity allocation is explicit and optional.
+  permissionless after expiry; any later P4LP-liquidity allocation is explicit and optional.
 - **Merkle airdrop:** approve project-share inventory and publish a root, claim window, and distribution-specific maximum grant-claim count. There is no global Boardroom grant-slot capacity.
-- **Migrating curve:** approve sale plus migration inventory, configure quote economics, and reserve the future locker and AMM initialization path.
-- **Locked liquidity:** approve both assets and create the one permanent Boardroom pool/locker pair. Liquidity may be
-  added repeatedly; after launch Active removals require delayed controller governance and always return assets to the
-  Boardroom, while WindingDown permits a permissionless full exit.
+- **Migrating curve:** approve sale plus migration inventory, configure quote economics, and reserve the future P4LP
+  vault and Uniswap v4 PoolId initialization path.
+- **Protocol liquidity:** approve both assets and create the one permanent Boardroom vault/PoolId pair. External deposits
+  mint P4LP while Active; delayed Boardroom governance can remove only protocol-held claims. WindingDown permits exact
+  full exit or the no-underlying-call Claims fallback.
 
 Most creation paths are batches. Every approval, target, policy, amount, salt, time, and slippage bound must match the intended module. Record predicted child addresses before submitting.
 
@@ -67,12 +68,12 @@ See [Distributions and liquidity](../understand/distributions-and-liquidity), [G
 
 ## 4. Operate the active project
 
-- Monitor open inventory, claim windows, curve reserves, global curve liability, grant expiries, LP fees, scalar
+- Monitor open inventory, claim windows, curve reserves, global curve liability, grant expiries, P4LP backing and fees, scalar
   obligation counts, and bounded discovery pages.
 - Close or cancel obsolete sales and airdrops so unused inventory returns to the Boardroom.
 - Verify the curve's lifetime, migration-price, unwind, and quarantine
   parameters before using a terminal path.
-- Claim locked-liquidity fees to the Boardroom where appropriate.
+- Collect fees earned by the protocol P4LP position to the Boardroom where appropriate.
 - Prune closed obligations to decrement active counts while preserving permanent provenance.
 - Keep Sentinel wallet coverage, Boardroom subscriptions, severity thresholds, and delivery channels current, but never treat an alert as onchain authority.
 
@@ -122,7 +123,7 @@ For each operation, preserve:
 - **A child read is incomplete:** do not operate from guessed state. Restore a capable RPC or inspect the child contract directly.
 - **A module is disabled:** new top-level Boardroom module creations are blocked. Existing child contracts are not
   paused: fixed-sale buys, airdrop claims, and curve trades can continue while their own and the Boardroom lifecycle
-  allow them. Reserved downstream grant/locker fulfillment and canonical cleanup also remain available.
+  allow them. Reserved downstream grant/vault fulfillment and canonical cleanup also remain available.
 - **Project must close:** stop new commitments and follow [Wind down and redeem](wind-down-and-redeem).
 
 ## Next steps

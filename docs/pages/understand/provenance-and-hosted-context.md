@@ -13,7 +13,7 @@ pledge.cash combines permissionless contracts with optional Sentinel services. T
 - Does its share token point back to it?
 - Was this grant created by the configured TokenGrantFactory?
 - Does this distribution belong to this Boardroom?
-- Does this locker or AMM pool match the canonical factories and token pair?
+- Do this P4LP vault, PoolKey, and PoolId match the canonical liquidity factory and Boardroom?
 - What do current storage, events, balances, and receipts prove?
 
 The selected network and deployment artifact are part of every answer. The same address text on another chain is a different identity.

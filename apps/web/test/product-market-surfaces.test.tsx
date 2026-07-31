@@ -37,8 +37,10 @@ const quoteToken = "0x4000000000000000000000000000000000000000" as Address;
 const sale = "0x5000000000000000000000000000000000000000" as Address;
 const pool = "0x6000000000000000000000000000000000000000" as Address;
 const curve = "0x6100000000000000000000000000000000000000" as Address;
-const locker = "0x6200000000000000000000000000000000000000" as Address;
+const locker = pool;
 const unrelatedPool = "0x6300000000000000000000000000000000000000" as Address;
+const poolId = `0x${"60".repeat(32)}` as const;
+const sqrtPriceX96 = 56_022_770_974_786_139_918_732n;
 const { JSDOM } = createRequire(import.meta.url)("../../../node_modules/.bun/node_modules/jsdom") as {
   JSDOM: new (html: string) => { window: Window & typeof globalThis & { close(): void } };
 };
@@ -77,12 +79,13 @@ const ammEntry: ProductBoardroomCatalogEntry = {
   distributionAddresses: [curve],
   distributionKind: "migrating-bonding-curve",
   locker,
-  path: "Migrated curve + AMM",
+  path: "Migrated curve + Uniswap v4",
   pool,
-  poolReserve0: 500_000_000n,
-  poolReserve1: 1_000n * 10n ** 18n,
-  poolToken0: quoteToken,
-  poolToken1: shareToken,
+  poolLiquidity: 707_106_781_186_548n,
+  poolPositionLiquidity: 707_106_781_186_548n,
+  poolSqrtPriceX96: sqrtPriceX96,
+  poolToken0: shareToken,
+  poolToken1: quoteToken,
   routeBuyInventory: 0n,
   routeClosed: true,
   routeEndTime: 9_999_999_999n,
@@ -105,14 +108,15 @@ function dashboardFixture(entry: ProductBoardroomCatalogEntry): ProductBoardroom
           address: curve,
           factory: "0xa000000000000000000000000000000000000000" as Address,
           boardroom,
-          lockedLiquidityFactory: "0xa100000000000000000000000000000000000000" as Address,
+          liquidityFactory: "0xa100000000000000000000000000000000000000" as Address,
           shareToken,
           quoteToken,
-          locker,
-          pool,
+          liquidityVault: locker,
+          liquidityPoolId: poolId,
           saleSupply: 10n * 10n ** 18n,
           migrationSupply: 90n * 10n ** 18n,
           remainingSaleShares: 0n,
+          outstandingCurveShareLiability: 0n,
           basePrice: 1_000_000n,
           slope: 0n,
           graduationQuoteTarget: 2_000_000n,
@@ -229,8 +233,7 @@ describe("product market surfaces", () => {
 
     const tinyEntry = {
       ...ammEntry,
-      poolReserve0: 10n,
-      poolReserve1: 1n * 10n ** 18n,
+      poolSqrtPriceX96: 250_541_448_375_047_931_187n,
     } satisfies ProductBoardroomCatalogEntry;
     const tinyDashboard = dashboardFixture(tinyEntry);
     const tiny = projectMarketViewModel(tinyDashboard);
@@ -255,7 +258,7 @@ describe("product market surfaces", () => {
 
     expect(view.marketCap.status).toBe("known");
     if (view.marketCap.status !== "known") throw new Error("Expected catalog-backed distributed supply");
-    expect(view.marketCap.value.units).toEqual({ numerator: 1n, denominator: 1n });
+    expect(formatRational(view.marketCap.value.units)).toBe("1");
   });
 
   test("keeps fixed-sale valuations unavailable while exact supply valuation remains independent of partial route history", () => {
@@ -309,17 +312,17 @@ describe("product market surfaces", () => {
 
     expect(view.marketCap.status).toBe("known");
     if (view.marketCap.status !== "known") throw new Error(view.marketCap.reason);
-    expect(view.marketCap.value.units).toEqual({ numerator: 70n, denominator: 1n });
+    expect(formatRational(view.marketCap.value.units)).toBe("70");
   });
 
   test("does not let an unrelated locked-liquidity pool override an active sale route", () => {
     const unrelatedCatalog = {
       ...saleEntry,
       pool: unrelatedPool,
-      poolReserve0: 500_000_000n,
-      poolReserve1: 1_000n * 10n ** 18n,
-      poolToken0: quoteToken,
-      poolToken1: shareToken,
+      poolLiquidity: 707_106_781_186_548n,
+      poolSqrtPriceX96: sqrtPriceX96,
+      poolToken0: shareToken,
+      poolToken1: quoteToken,
     } satisfies ProductBoardroomCatalogEntry;
     const saleDashboard = dashboardFixture(unrelatedCatalog);
     const view = projectMarketViewModel({
@@ -328,17 +331,27 @@ describe("product market surfaces", () => {
       snapshot: {
         ...saleDashboard.snapshot,
         lockedLiquiditySummaries: [{
-          address: locker,
+          address: unrelatedPool,
           state: {
-            address: locker,
+            address: unrelatedPool,
             factory: owner,
             boardroom,
-            router: owner,
+            poolManager: owner,
+            protocolFeeRecipient: owner,
             tokenA: shareToken,
             tokenB: quoteToken,
-            pool: unrelatedPool,
-            seeded: true,
-            lockedLiquidity: 1n,
+            currency0: shareToken,
+            currency1: quoteToken,
+            hook: owner,
+            poolId,
+            positionSalt: poolId,
+            tickLower: -887_220,
+            tickUpper: 887_220,
+            poolFee: 3_000,
+            tickSpacing: 60,
+            liquidityState: 1,
+            positionLiquidity: 1n,
+            totalSupply: 1n,
           },
         }],
       },
@@ -362,8 +375,9 @@ describe("product market surfaces", () => {
         locker: undefined,
         path: "Bonding curve",
         pool: undefined,
-        poolReserve0: undefined,
-        poolReserve1: undefined,
+        poolLiquidity: undefined,
+        poolPositionLiquidity: undefined,
+        poolSqrtPriceX96: undefined,
         poolToken0: undefined,
         poolToken1: undefined,
         routeBuyInventory: remaining,
@@ -384,7 +398,8 @@ describe("product market surfaces", () => {
             closed: false,
             curveStatus: 0,
             graduationLatched: false,
-            pool: "0x0000000000000000000000000000000000000000" as Address,
+            liquidityVault: "0x0000000000000000000000000000000000000000" as Address,
+            liquidityPoolId: `0x${"00".repeat(32)}` as `0x${string}`,
             remainingSaleShares: remaining,
             soldShares: 1n * 10n ** 18n,
             quoteReserve: 1_000_000n,
@@ -423,6 +438,7 @@ describe("product market surfaces", () => {
             liquidity: 1n,
             locker,
             pool: unrelatedPool,
+            poolId,
             quoteToBoardroom: 1n,
             quoteToLiquidity: 1n,
             sharesToLiquidity: 1n,

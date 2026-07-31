@@ -7,11 +7,11 @@ import {DutchAuctionSale} from "./DutchAuctionSale.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {MerkleAirdrop} from "./MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
-import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
+import {PledgeV4LiquidityFactory} from "../uniswap/PledgeV4LiquidityFactory.sol";
 
 interface IDistributionBoardroom {
     function launched() external view returns (bool);
@@ -36,8 +36,6 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 7;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant WAD = 1e18;
-    uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
-    uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
     uint256 internal constant MAX_CURVE_LIFETIME = 90 days;
     uint256 internal constant MAX_DUTCH_AUCTION_LIFETIME = 90 days;
     uint256 internal constant MAX_CURVE_SUPPLY = type(uint112).max;
@@ -50,7 +48,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         DutchAuction
     }
 
-    address public immutable lockedLiquidityFactory;
+    address public immutable liquidityFactory;
     address public immutable tokenGrantFactory;
     address public immutable boardroomFactory;
     address public immutable fixedPriceSaleLogic;
@@ -84,17 +82,17 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         bytes32 salt
     );
 
-    constructor(address lockedLiquidityFactory_, address tokenGrantFactory_) {
+    constructor(address liquidityFactory_, address tokenGrantFactory_) {
         if (
-            lockedLiquidityFactory_ == address(0) || lockedLiquidityFactory_.code.length == 0
-                || tokenGrantFactory_ == address(0) || tokenGrantFactory_.code.length == 0
+            liquidityFactory_ == address(0) || liquidityFactory_.code.length == 0 || tokenGrantFactory_ == address(0)
+                || tokenGrantFactory_.code.length == 0
         ) revert InvalidAddress();
         address expectedBoardroomFactory = IDistributionBoundFactory(tokenGrantFactory_).boardroomFactory();
-        address liquidityBoardroomFactory = IDistributionBoundFactory(lockedLiquidityFactory_).boardroomFactory();
+        address liquidityBoardroomFactory = IDistributionBoundFactory(liquidityFactory_).boardroomFactory();
         if (expectedBoardroomFactory == address(0) || liquidityBoardroomFactory != expectedBoardroomFactory) {
             revert IncoherentFactoryIdentity(expectedBoardroomFactory, liquidityBoardroomFactory);
         }
-        lockedLiquidityFactory = lockedLiquidityFactory_;
+        liquidityFactory = liquidityFactory_;
         tokenGrantFactory = tokenGrantFactory_;
         boardroomFactory = expectedBoardroomFactory;
         fixedPriceSaleLogic = address(new FixedPriceSale());
@@ -152,7 +150,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         external
         returns (address curve)
     {
-        if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
+        if (liquidityFactory == address(0)) revert InvalidAddress();
         if (
             IDistributionBoardroom(msg.sender).launched() || IDistributionBoardroom(msg.sender).primaryMarketMode() != 0
         ) {
@@ -187,8 +185,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         );
         if (curve != predictedCurve) revert InvalidAddress();
 
-        MigratingBondingCurve(curve).initialize(msg.sender, lockedLiquidityFactory, params);
-        LockedLiquidityFactory(lockedLiquidityFactory)
+        MigratingBondingCurve(curve).initialize(msg.sender, liquidityFactory, params);
+        PledgeV4LiquidityFactory(liquidityFactory)
             .reserveMigration(
                 expectedFacetSetHash, msg.sender, curve, params.shareToken, params.quoteToken, params.migrationSalt
             );
@@ -355,7 +353,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     }
 
     function _canCreateMigratingBondingCurve(address boardroom, bytes calldata data) internal view returns (bool) {
-        if (lockedLiquidityFactory == address(0)) return false;
+        if (liquidityFactory == address(0)) return false;
         if (bondingCurveOfBoardroom[boardroom] != address(0)) return false;
         if (data.length != MIGRATING_CURVE_CREATE_DATA_LENGTH) return false;
         try IDistributionBoardroom(boardroom).launched() returns (bool isLaunched) {
@@ -461,11 +459,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         uint256 quoteToLiquidity = FixedPointMathLib.fullMulDiv(fullSaleQuote, params.quoteToLpBps, BPS);
         uint256 terminalPrice = params.basePrice + FixedPointMathLib.fullMulDiv(params.slope, params.saleSupply, WAD);
         uint256 sharesToLiquidity = FixedPointMathLib.fullMulDiv(quoteToLiquidity, WAD, terminalPrice);
-        uint256 minimumShares = FixedPointMathLib.fullMulDivUp(sharesToLiquidity, MINIMUM_MIGRATION_FILL_BPS, BPS);
-        uint256 minimumQuote = FixedPointMathLib.fullMulDivUp(quoteToLiquidity, MINIMUM_MIGRATION_FILL_BPS, BPS);
         return sharesToLiquidity != 0 && sharesToLiquidity <= params.migrationSupply
-            && sharesToLiquidity <= type(uint112).max && quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max
-            && FixedPointMathLib.sqrt(minimumShares * minimumQuote) > AMM_MINIMUM_LIQUIDITY;
+            && sharesToLiquidity <= type(uint112).max && quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max;
     }
 
     function _requireAsset(address asset) internal view {

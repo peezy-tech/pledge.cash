@@ -17,16 +17,16 @@ const tokenA = "0x5000000000000000000000000000000000000000" as Address;
 const tokenB = "0x6000000000000000000000000000000000000000" as Address;
 const foreignToken = "0x7000000000000000000000000000000000000000" as Address;
 
-describe("project AMM scope", () => {
+describe("project Uniswap v4 scope", () => {
   const dashboard = {
     address: boardroom,
     catalog: [{ address: boardroom, pool: poolB }],
     histories: [{ pool: poolB }, { pool: poolA }],
     history: { pool: "0x0000000000000000000000000000000000000000" },
-    snapshot: { lockedLiquiditySummaries: [{ state: { pool: poolA } }] },
+    snapshot: { lockedLiquiditySummaries: [{ address: poolA }] },
   } as unknown as ProductBoardroomDashboardState;
 
-  test("derives a deterministic unique set and resolves address-scoped AMM routes", () => {
+  test("derives a deterministic unique set and resolves address-scoped v4 routes", () => {
     const pools = projectPoolAddresses(dashboard);
 
     expect(pools).toEqual([poolA, poolB]);
@@ -38,8 +38,8 @@ describe("project AMM scope", () => {
     const tokenList = {
       loaded: true,
       pools: [
-        { address: poolA, token0: tokenA, token1: tokenB, reserve0: 1n, reserve1: 1n },
-        { address: foreignPool, token0: tokenA, token1: foreignToken, reserve0: 1n, reserve1: 1n },
+        { address: poolA, token0: tokenA, token1: tokenB },
+        { address: foreignPool, token0: tokenA, token1: foreignToken },
       ],
       tokens: [
         { address: tokenA, pools: [poolA, foreignPool], pairAddresses: [tokenB, foreignToken], sources: ["pool"] },

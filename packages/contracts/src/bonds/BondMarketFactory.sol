@@ -16,14 +16,23 @@ interface IBondMarketFactoryBoardroomFactory {
     function isBoardroom(address boardroom) external view returns (bool);
 }
 
-interface IBondMarketFactoryAmmFactory {
-    function isPool(address pool) external view returns (bool);
+interface IBondMarketFactoryLiquidityFactory {
+    function isVault(address vault) external view returns (bool);
+
+    function vaultBoardroom(address vault) external view returns (address);
 
     function boardroomFactory() external view returns (address);
 }
 
-interface IBondMarketFactoryPool {
-    function tokens() external view returns (address token0, address token1);
+interface IBondMarketFactoryLiquidityVault {
+    function tokenA() external view returns (address);
+
+    function tokenB() external view returns (address);
+
+    function poolId() external view returns (bytes32);
+
+    function positionLiquidity() external view returns (uint128);
+
     function totalSupply() external view returns (uint256);
 }
 
@@ -31,7 +40,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
     uint256 internal constant CREATE_DATA_LENGTH = 4 + 32 * 11;
     uint256 public constant MAX_DISCOVERY_PAGE = 100;
 
-    address public immutable ammFactory;
+    address public immutable liquidityFactory;
     address public immutable boardroomFactory;
     address public immutable bondMarketLogic;
 
@@ -44,7 +53,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
     error IncoherentFactoryIdentity(address expected, address actual);
     error InvalidBoardroom(address boardroom);
     error InvalidQuoteToken(address quoteToken);
-    error InvalidLiquidityPool(address pool);
+    error InvalidLiquidityClaim(address claimToken);
     error InvalidDiscoveryPage(uint256 requested, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
@@ -58,17 +67,17 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         bytes32 salt
     );
 
-    constructor(address ammFactory_, address boardroomFactory_) {
+    constructor(address liquidityFactory_, address boardroomFactory_) {
         if (
-            ammFactory_ == address(0) || ammFactory_.code.length == 0 || boardroomFactory_ == address(0)
+            liquidityFactory_ == address(0) || liquidityFactory_.code.length == 0 || boardroomFactory_ == address(0)
                 || boardroomFactory_.code.length == 0
         ) revert InvalidAddress();
-        address ammBoardroomFactory = IBondMarketFactoryAmmFactory(ammFactory_).boardroomFactory();
-        if (ammBoardroomFactory != boardroomFactory_) {
-            revert IncoherentFactoryIdentity(boardroomFactory_, ammBoardroomFactory);
+        address liquidityBoardroomFactory = IBondMarketFactoryLiquidityFactory(liquidityFactory_).boardroomFactory();
+        if (liquidityBoardroomFactory != boardroomFactory_) {
+            revert IncoherentFactoryIdentity(boardroomFactory_, liquidityBoardroomFactory);
         }
 
-        ammFactory = ammFactory_;
+        liquidityFactory = liquidityFactory_;
         boardroomFactory = boardroomFactory_;
         bondMarketLogic = address(new BondMarket());
     }
@@ -80,7 +89,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         }
 
         address shareToken = IBondMarketFactoryBoardroom(boardroom).shareToken();
-        _validateQuoteToken(params.quoteToken, shareToken, params.kind);
+        _validateQuoteToken(boardroom, params.quoteToken, shareToken, params.kind);
         // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
         BoardroomCallbackLib.reserveRedeemableAsset(
             boardroom, BoardroomCallbackLib.boundFacetSetHash(boardroom), params.quoteToken
@@ -179,7 +188,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
             return false;
         }
 
-        if (!_isValidQuoteToken(params.quoteToken, shareToken, params.kind)) return false;
+        if (!_isValidQuoteToken(boardroom, params.quoteToken, shareToken, params.kind)) return false;
         if (params.capacity == 0 || params.minimumPrice == 0 || params.initialPrice < params.minimumPrice) {
             return false;
         }
@@ -193,14 +202,17 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         return uint256(params.start == 0 ? block.timestamp : params.start) + params.duration <= type(uint48).max;
     }
 
-    function _validateQuoteToken(address quoteToken, address shareToken, BondMarket.MarketKind kind) internal view {
-        if (!_isValidQuoteToken(quoteToken, shareToken, kind)) {
-            if (kind == BondMarket.MarketKind.Liquidity) revert InvalidLiquidityPool(quoteToken);
+    function _validateQuoteToken(address boardroom, address quoteToken, address shareToken, BondMarket.MarketKind kind)
+        internal
+        view
+    {
+        if (!_isValidQuoteToken(boardroom, quoteToken, shareToken, kind)) {
+            if (kind == BondMarket.MarketKind.Liquidity) revert InvalidLiquidityClaim(quoteToken);
             revert InvalidQuoteToken(quoteToken);
         }
     }
 
-    function _isValidQuoteToken(address quoteToken, address shareToken, BondMarket.MarketKind kind)
+    function _isValidQuoteToken(address boardroom, address quoteToken, address shareToken, BondMarket.MarketKind kind)
         internal
         view
         returns (bool)
@@ -209,18 +221,28 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         (bool readable,) = BestEffortTokenLib.tryBalanceOf(quoteToken, address(this));
         if (!readable) return false;
 
-        bool pool = IBondMarketFactoryAmmFactory(ammFactory).isPool(quoteToken);
-        if (kind == BondMarket.MarketKind.Reserve) return !pool;
-        if (!pool) return false;
+        IBondMarketFactoryLiquidityFactory factory = IBondMarketFactoryLiquidityFactory(liquidityFactory);
+        bool vault = factory.isVault(quoteToken);
+        if (kind == BondMarket.MarketKind.Reserve) return !vault;
+        if (!vault || factory.vaultBoardroom(quoteToken) != boardroom) return false;
 
-        try IBondMarketFactoryPool(quoteToken).tokens() returns (address token0, address token1) {
-            if (token0 != shareToken && token1 != shareToken) return false;
+        IBondMarketFactoryLiquidityVault claim = IBondMarketFactoryLiquidityVault(quoteToken);
+        address tokenA;
+        address tokenB;
+        try claim.tokenA() returns (address token) {
+            tokenA = token;
         } catch {
             return false;
         }
+        try claim.tokenB() returns (address token) {
+            tokenB = token;
+        } catch {
+            return false;
+        }
+        if (tokenA != shareToken && tokenB != shareToken) return false;
 
-        try IBondMarketFactoryPool(quoteToken).totalSupply() returns (uint256 supply) {
-            return supply > 1_000;
+        try claim.totalSupply() returns (uint256 supply) {
+            return supply != 0 && claim.poolId() != bytes32(0) && claim.positionLiquidity() == supply;
         } catch {
             return false;
         }

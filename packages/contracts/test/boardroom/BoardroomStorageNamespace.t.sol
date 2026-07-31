@@ -43,7 +43,7 @@ contract BoardroomStorageNamespaceHarness {
         BoardroomObligationStorage.layout().activeCount = 22;
         BoardroomAssetStorage.layout().frozenCount = 33;
         BoardroomPrimaryMarketStorage.layout().authorizedBoardroomFunding = 44;
-        BoardroomLiquidityStorage.layout().pool = address(0x5555);
+        BoardroomLiquidityStorage.layout().poolId = bytes32(uint256(0x5555));
         BoardroomRedemptionStorage.layout().supply = 66;
     }
 
@@ -55,7 +55,7 @@ contract BoardroomStorageNamespaceHarness {
             uint256 activeObligations,
             uint256 frozenAssets,
             uint256 authorizedFunding,
-            address liquidityPool,
+            bytes32 liquidityPoolId,
             uint256 redemptionSupply
         )
     {
@@ -63,7 +63,7 @@ contract BoardroomStorageNamespaceHarness {
         activeObligations = BoardroomObligationStorage.layout().activeCount;
         frozenAssets = BoardroomAssetStorage.layout().frozenCount;
         authorizedFunding = BoardroomPrimaryMarketStorage.layout().authorizedBoardroomFunding;
-        liquidityPool = BoardroomLiquidityStorage.layout().pool;
+        liquidityPoolId = BoardroomLiquidityStorage.layout().poolId;
         redemptionSupply = BoardroomRedemptionStorage.layout().supply;
     }
 }
@@ -93,14 +93,14 @@ contract BoardroomStorageNamespaceTest is Test {
             uint256 activeObligations,
             uint256 frozenAssets,
             uint256 authorizedFunding,
-            address liquidityPool,
+            bytes32 liquidityPoolId,
             uint256 redemptionSupply
         ) = harness.readEveryConcern();
         assertEq(governanceEpoch, 11);
         assertEq(activeObligations, 22);
         assertEq(frozenAssets, 33);
         assertEq(authorizedFunding, 44);
-        assertEq(liquidityPool, address(0x5555));
+        assertEq(liquidityPoolId, bytes32(uint256(0x5555)));
         assertEq(redemptionSupply, 66);
     }
 

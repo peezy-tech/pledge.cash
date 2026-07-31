@@ -156,31 +156,41 @@ export type MerkleAirdropGrantClaimTerms = {
   salt: Hex;
 };
 
-export type LockedLiquidityTerms = {
+export type ProtocolLiquidityTerms = {
   tokenA: Address;
   tokenB: Address;
   amountADesired: bigint;
   amountBDesired: bigint;
   amountAMin: bigint;
   amountBMin: bigint;
+  sqrtPriceX96: bigint;
   deadline: bigint;
   salt: Hex;
 };
 
-export type LockedLiquidityAddTerms = Omit<LockedLiquidityTerms, "salt">;
+export type ProtocolLiquidityAddTerms = Omit<ProtocolLiquidityTerms, "salt" | "sqrtPriceX96">;
 
-export type BoardroomLockedLiquidityTerms = {
+export type BoardroomProtocolLiquidityTerms = {
   quoteToken: Address;
   shareAmountDesired: bigint;
   quoteAmountDesired: bigint;
   shareAmountMin: bigint;
   quoteAmountMin: bigint;
+  sqrtPriceX96: bigint;
   deadline: bigint;
   salt: Hex;
   shareTokenSide?: "tokenA" | "tokenB";
 };
 
-export type BoardroomLockedLiquidityAddTerms = Omit<BoardroomLockedLiquidityTerms, "salt">;
+export type BoardroomProtocolLiquidityAddTerms = Omit<BoardroomProtocolLiquidityTerms, "salt" | "sqrtPriceX96">;
+
+export type UniswapV4PoolKey = {
+  currency0: Address;
+  currency1: Address;
+  fee: number;
+  tickSpacing: number;
+  hooks: Address;
+};
 
 export type GrantCreationArgs = readonly [
   Address,
@@ -267,11 +277,11 @@ export type MigratingBondingCurveState = {
   address: Address;
   factory: Address;
   boardroom: Address;
-  lockedLiquidityFactory: Address;
+  liquidityFactory: Address;
   shareToken: Address;
   quoteToken: Address;
-  locker: Address;
-  pool: Address;
+  liquidityVault: Address;
+  liquidityPoolId: Hex;
   saleSupply: bigint;
   migrationSupply: bigint;
   remainingSaleShares: bigint;
@@ -348,16 +358,26 @@ export type MerkleAirdropClaimState = {
   claimed: boolean;
 };
 
-export type LockedLiquidityState = {
+export type ProtocolLiquidityVaultState = {
   address: Address;
   factory: Address;
   boardroom: Address;
-  router: Address;
+  poolManager: Address;
+  protocolFeeRecipient: Address;
   tokenA: Address;
   tokenB: Address;
-  pool: Address;
+  currency0: Address;
+  currency1: Address;
+  hook: Address;
+  poolId: Hex;
+  positionSalt: Hex;
+  tickLower: number;
+  tickUpper: number;
+  poolFee: number;
+  tickSpacing: number;
   liquidityState: number;
-  lockedLiquidity: bigint;
+  positionLiquidity: bigint;
+  totalSupply: bigint;
 };
 
 export type FactoryState = {
@@ -471,8 +491,8 @@ export type BoardroomState = {
   bondingCurve: Address;
   primaryMarketQuoteAsset: Address;
   liquidityStatus: number;
-  liquidityLocker: Address;
-  liquidityPool: Address;
+  liquidityVault: Address;
+  liquidityPoolId: Hex;
   liquidityQuoteAsset: Address;
 };
 
@@ -593,27 +613,18 @@ export type DiscoveredDistribution = {
   transactionHash: Hex;
 };
 
-export type DiscoveredLockedLiquidity = {
-  locker: Address;
+export type DiscoveredProtocolLiquidity = {
+  vault: Address;
   boardroom: Address;
   factory: Address;
-  pool: Address;
-  tokenA: Address;
-  tokenB: Address;
+  poolId: Hex;
+  quoteAsset: Address;
   amountA: bigint;
   amountB: bigint;
   liquidity: bigint;
+  sqrtPriceX96: bigint;
   salt: Hex;
-  createdAtBlock: bigint;
-  transactionHash: Hex;
-};
-
-export type DiscoveredPool = {
-  pool: Address;
-  factory: Address;
-  token0: Address;
-  token1: Address;
-  poolCount: bigint;
+  curve: Address;
   createdAtBlock: bigint;
   transactionHash: Hex;
 };

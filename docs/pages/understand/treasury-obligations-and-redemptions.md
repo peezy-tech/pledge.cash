@@ -5,7 +5,9 @@ description: Understand why grants, distributions, and liquidity must close befo
 
 # Treasury obligations and redemptions
 
-A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants, distributions, curves, and locked liquidity can hold project shares or return external assets later. The protocol records them as obligations so wind-down accounts for those paths first.
+A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants, distributions, curves, and its P4LP
+vault can hold project shares or return external assets later. The protocol records them as obligations so wind-down
+accounts for those paths first.
 
 ## Redeemable assets
 
@@ -20,8 +22,8 @@ explicitly during a bounded snapshot page instead of silently skipped or allowed
 
 - a grant may return unvested or expired escrow;
 - a sale or airdrop may return unallocated shares;
-- a curve may return shares and quote reserve or create locked liquidity;
-- a locker may return underlying assets or, in a hostile-token fallback, the LP token itself.
+- a curve may return shares and quote reserve or create the canonical P4LP vault;
+- a vault may return underlying assets or, in a hostile-token fallback, register protocol-held P4LP itself.
 
 Redemptions open only after active obligation counts reach zero and every frozen asset-registry entry has been processed.
 Permissionless pruning removes terminal members from active accounting while permanent provenance tombstones remain.
@@ -45,4 +47,6 @@ This is why a lower post-transaction share balance is not proof that every asset
 
 ## Hostile-token boundaries
 
-Exact-transfer checks prevent taxed or no-op transfers from silently corrupting balances. Bounded calls, quarantine, and LP fallback protect liveness, but they cannot make a malicious token valuable or transferable. A quarantined amount or LP fallback is explicit evidence of unresolved asset quality, not a guaranteed cash payout.
+Exact-transfer checks prevent taxed or no-op transfers from silently corrupting balances. Bounded calls, quarantine, and
+the no-underlying-call P4LP fallback protect liveness, but they cannot make a malicious token valuable or transferable.
+A quarantined amount or P4LP claim is explicit evidence of unresolved asset quality, not a guaranteed cash payout.

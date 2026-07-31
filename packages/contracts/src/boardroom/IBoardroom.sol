@@ -159,7 +159,8 @@ interface IBoardroom {
 
     function recordGrantFromDistribution(bytes32 expectedFacetSetHash, address grant) external;
 
-    function recordLockedLiquidityFromDistribution(bytes32 expectedFacetSetHash, address locker, address pool) external;
+    function recordProtocolLiquidityFromDistribution(bytes32 expectedFacetSetHash, address vault, bytes32 poolId)
+        external;
 
     function obligationOf(address obligation)
         external
@@ -231,16 +232,16 @@ interface IBoardroom {
 
     function liquidityStatus() external view returns (BoardroomLiquidityStorage.Status);
 
-    function liquidityLocker() external view returns (address);
+    function liquidityVault() external view returns (address);
 
-    function liquidityPool() external view returns (address);
+    function liquidityPoolId() external view returns (bytes32);
 
     function liquidityQuoteAsset() external view returns (address);
 
     function liquidityReservation()
         external
         view
-        returns (address curve, address expectedLocker, bytes32 pairKey, bytes32 salt, uint256 expiresAt);
+        returns (address curve, address expectedVault, bytes32 expectedPoolId, bytes32 salt, uint256 expiresAt);
 
     function precommitBondingCurve(
         bytes32 expectedFacetSetHash,
@@ -254,34 +255,33 @@ interface IBoardroom {
 
     function precommitProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external;
 
     function activateProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external;
 
     function releaseProtocolLiquidityReservation(
         bytes32 expectedFacetSetHash,
         address curve,
-        bytes32 pairKey,
+        bytes32 expectedPoolId,
         bytes32 salt
     ) external;
 
     function settleBondingCurve(bytes32 expectedFacetSetHash) external;
 
-    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address locker) external;
+    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address vault) external;
 
     function lockedLiquidityExitAllowed() external view returns (bool);
 
@@ -294,7 +294,7 @@ interface IBoardroom {
         uint256 deadline
     ) external returns (uint256 amountA, uint256 amountB, uint256 liquidity);
 
-    function returnProtocolLiquidityAsLp(bytes32 expectedFacetSetHash) external returns (uint256 liquidity);
+    function returnProtocolLiquidityClaims(bytes32 expectedFacetSetHash) external returns (uint256 claims);
 
     function closeProtocolLiquidityAfterWindDown(bytes32 expectedFacetSetHash) external;
 }

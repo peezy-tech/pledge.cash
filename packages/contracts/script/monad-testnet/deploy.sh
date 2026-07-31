@@ -43,12 +43,26 @@ if [[ -z "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER:-}" ]]; then
 fi
 require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER"
 
-for role in PLEDGE_CASH_PROTOCOL_GOVERNANCE PLEDGE_CASH_PROTOCOL_TREASURY PLEDGE_CASH_AMM_FEE_MANAGER; do
+for role in PLEDGE_CASH_PROTOCOL_GOVERNANCE PLEDGE_CASH_PROTOCOL_TREASURY; do
   if [[ -z "${!role:-}" ]]; then
     echo "Set $role before dry-running or broadcasting." >&2
     exit 1
   fi
   require_address "$role" "${!role}"
+done
+
+for dependency in \
+  UNISWAP_V4_POOL_MANAGER \
+  UNISWAP_UNIVERSAL_ROUTER \
+  UNISWAP_V4_QUOTER \
+  UNISWAP_V4_STATE_VIEW \
+  UNISWAP_V4_POSITION_MANAGER \
+  PERMIT2_ADDRESS; do
+  if [[ -z "${!dependency:-}" ]]; then
+    echo "Set $dependency to the canonical deployment for chain 10143 before dry-running or broadcasting." >&2
+    exit 1
+  fi
+  require_address "$dependency" "${!dependency}"
 done
 
 if [[ -n "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER:-}" ]]; then

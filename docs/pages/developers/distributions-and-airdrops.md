@@ -16,8 +16,8 @@ terminal provenance failure. Preserve a distinct identity per distribution addre
 same type.
 
 Bond markets use a distinct `BondMarketFactory`. Verify `isBondMarket`, reciprocal factory and Boardroom fields, and the
-verified project share token. A liquidity bond's quote token must also be a funded pool from the configured AmmFactory
-that contains that share token.
+verified project share token. A liquidity bond's quote token must be the creating Boardroom's funded P4LP claim from the
+configured `PledgeV4LiquidityFactory`, and its PoolKey must contain that share token.
 
 ## Bond quotes and positions
 
@@ -39,13 +39,14 @@ For a Dutch auction, read `currentPrice` and `getPaymentAmount` again immediatel
 client must not cache an earlier quote as a clearing price. `settlementPrice` is the last successful purchase price;
 `totalPayment` is the authoritative proceeds accumulator because buyers may execute at different prices. Finalization
 is permissionless at `endTime`, when the end-exclusive purchase window closes. Liquidity is never automatic: a later
-Boardroom action chooses explicit amounts and
-minimums, uses settlement price only for a new pool's initial ratio, and uses live reserves for an existing pool.
+Boardroom action chooses explicit amounts, minimums, and the initial `sqrtPriceX96`. If the canonical vault already
+exists, additions use its fixed PoolKey and live v4 state.
 
 Read the global `outstandingCurveShareLiability` and derive a holder's current sellable amount as the lesser of that
 liability and its transferable share balance. Do not persist recipient-specific rights. Once graduation latches, disable
 buy and sell. The final permissionless migration, unwind, and quarantine paths remain decision-gated; quarantined
-recovery currently fails closed.
+recovery currently fails closed. Derive migration `sqrtPriceX96` from the curve's current `migrationAmounts`; the
+contract independently bounds it against `terminalCurvePrice`.
 
 ## Merkle manifests
 

@@ -15,8 +15,8 @@ Network support is not the same as a live protocol deployment. The app can offer
 | Local Anvil | `31337` | Generated locally and ignored by Git | Use only for the local scenario that produced it |
 | Mainnet | — | No supported deployment | Treat any claimed mainnet address as unsupported |
 
-The checked-in `998.json` and `10143.json` files contain pending status only
-and do not certify usable factory addresses. A local proof, old transaction,
+The checked-in `10143.json` file contains pending status only and does not
+certify usable factory addresses. A local proof, old transaction,
 screenshot, or candidate file is not a promoted public identity.
 
 ## Default RPCs
@@ -30,7 +30,6 @@ RPC availability proves only that a chain can answer. It does not prove the pled
 
 The app stores network selection locally and supports direct selection with:
 
-- `?chain=998`
 - `?chain=10143`
 - `?chain=31337`
 
@@ -45,10 +44,11 @@ A usable deployment artifact binds:
   release and facet-set hash, 97-route/code-hash inventory, required storage
   version/layout, and root factory, policy, helper, router, and fee addresses;
 - wrapped-native address;
-- ownership, governance, treasury, and fee-manager roles;
+- ownership, governance, and treasury roles;
+- PoolManager, Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and their code hashes;
 - immutable reciprocal wiring between registry, kernel, BoardroomFactory,
   ControllerFactory, controller implementation, governance, market, and payout
-  helpers, plus grant, distribution, AMM, and liquidity factories;
+  helpers, plus grant, distribution, Pledge v4 liquidity, and bond-market factories;
 - runtime code hashes and live post-broadcast verification.
 
 A subsystem marked pending is unavailable. The app should fail closed instead of reusing stale addresses.

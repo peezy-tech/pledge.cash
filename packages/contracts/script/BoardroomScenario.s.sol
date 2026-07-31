@@ -3,8 +3,9 @@ pragma solidity ^0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../src/amm/AmmFactory.sol";
-import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {BondMarket} from "../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
@@ -20,7 +21,6 @@ import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.s
 import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
-import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {BoardroomRewards} from "../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../src/rewards/BoardroomRewardsFactory.sol";
@@ -42,6 +42,8 @@ import {BoardroomViewFacetV2} from "../src/boardroom/diamond/BoardroomViewFacetV
 import {ProtocolFacetRegistry} from "../src/boardroom/diamond/ProtocolFacetRegistry.sol";
 import {ProtocolFacetTypes} from "../src/boardroom/diamond/ProtocolFacetTypes.sol";
 import {PledgeCashBoardroomScenarioSalts} from "../src/deployment/PledgeCashBoardroomScenarioSalts.sol";
+import {PledgeV4LiquidityFactory} from "../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {V4PoolManagerMock} from "../test/helpers/V4PoolManagerMock.sol";
 
 /// @notice Local release-A to release-B protocol scenario.
 /// @dev It never writes chain deployment artifacts and has no broadcast command.
@@ -58,7 +60,6 @@ contract BoardroomScenario is Script {
     address internal holder;
     address internal protocolGovernance;
     address internal protocolTreasury;
-    address internal ammFeeManager;
     WETH internal wrappedNative;
     BoardroomPolicyRegistry internal policyRegistry;
     ProtocolFacetRegistry internal registry;
@@ -72,10 +73,9 @@ contract BoardroomScenario is Script {
     BoardroomToken internal graduatedCurveShares;
     AssetPolicy internal assetPolicy;
     ProtocolFeeRouter internal protocolFeeRouter;
-    AmmFactory internal ammFactory;
-    AmmRouter internal ammRouter;
+    V4PoolManagerMock internal poolManager;
     TokenGrantFactory internal tokenGrantFactory;
-    LockedLiquidityFactory internal lockedLiquidityFactory;
+    PledgeV4LiquidityFactory internal liquidityFactory;
     DistributionFactory internal distributionFactory;
     BoardroomRewardsFactory internal rewardsFactory;
     BondMarketFactory internal bondMarketFactory;
@@ -89,10 +89,10 @@ contract BoardroomScenario is Script {
     MigratingBondingCurve internal graduatedCurve;
     BondMarket internal bondMarket;
     BoardroomController internal controller;
-    address internal liquidityLocker;
-    address internal liquidityPool;
-    address internal graduatedCurveLocker;
-    address internal graduatedCurvePool;
+    address internal liquidityVault;
+    bytes32 internal liquidityPoolId;
+    address internal graduatedCurveVault;
+    bytes32 internal graduatedCurvePoolId;
     BoardroomRelease.Facets internal facets;
     bytes32 internal releaseAHash;
     bytes32 internal releaseBHash;
@@ -234,50 +234,39 @@ contract BoardroomScenario is Script {
         tokenGrantFactory = new TokenGrantFactory{salt: PledgeCashBoardroomScenarioSalts.TOKEN_GRANT_FACTORY}(
             bootstrapAuthority, address(factory)
         );
-        ammFactory =
-            new AmmFactory{salt: PledgeCashBoardroomScenarioSalts.AMM_FACTORY}(bootstrapAuthority, address(factory));
-        ammRouter = new AmmRouter{salt: PledgeCashBoardroomScenarioSalts.AMM_ROUTER}(
-            address(ammFactory), address(wrappedNative)
+        poolManager = new V4PoolManagerMock{salt: PledgeCashBoardroomScenarioSalts.V4_POOL_MANAGER}();
+        liquidityFactory = new PledgeV4LiquidityFactory{salt: PledgeCashBoardroomScenarioSalts.V4_LIQUIDITY_FACTORY}(
+            IPoolManager(address(poolManager)), address(factory), address(protocolFeeRouter), bootstrapAuthority
         );
-        lockedLiquidityFactory = new LockedLiquidityFactory{
-            salt: PledgeCashBoardroomScenarioSalts.LOCKED_LIQUIDITY_FACTORY
-        }(
-            address(ammRouter), address(factory)
-        );
+        liquidityFactory.deployHook(_mineHookSalt(liquidityFactory));
         distributionFactory = new DistributionFactory{salt: PledgeCashBoardroomScenarioSalts.DISTRIBUTION_FACTORY}(
-            address(lockedLiquidityFactory), address(tokenGrantFactory)
+            address(liquidityFactory), address(tokenGrantFactory)
         );
         rewardsFactory =
             new BoardroomRewardsFactory{salt: PledgeCashBoardroomScenarioSalts.REWARDS_FACTORY}(address(factory));
         bondMarketFactory = new BondMarketFactory{salt: PledgeCashBoardroomScenarioSalts.BOND_MARKET_FACTORY}(
-            address(ammFactory), address(factory)
+            address(liquidityFactory), address(factory)
         );
 
         tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));
-        ammFactory.setFeeManager(ammFeeManager);
-        ammFactory.setProtocolFeeRecipient(address(protocolFeeRouter));
-        ammFactory.setLiquidityRouter(address(ammRouter));
-        ammFactory.setReservationManager(address(lockedLiquidityFactory));
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(bondMarketFactory), true);
-        assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(liquidityFactory), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
         policyRegistry.registerModulePolicy(address(distributionFactory));
         policyRegistry.registerModulePolicy(address(rewardsFactory));
         policyRegistry.registerModulePolicy(address(bondMarketFactory));
-        policyRegistry.registerModulePolicy(address(lockedLiquidityFactory));
+        policyRegistry.registerModulePolicy(address(liquidityFactory));
     }
 
     function _loadAuthorityConfiguration(address bootstrapAuthority) internal {
         protocolGovernance = vm.envOr("PLEDGE_CASH_PROTOCOL_GOVERNANCE", bootstrapAuthority);
         protocolTreasury = vm.envOr("PLEDGE_CASH_PROTOCOL_TREASURY", bootstrapAuthority);
-        ammFeeManager = vm.envOr("PLEDGE_CASH_AMM_FEE_MANAGER", bootstrapAuthority);
         require(protocolGovernance != address(0), "protocol-governance");
         require(protocolTreasury != address(0), "protocol-treasury");
-        require(ammFeeManager != address(0), "amm-fee-manager");
     }
 
     function _handoffRootOwnership(address bootstrapAuthority) internal {
@@ -287,7 +276,6 @@ contract BoardroomScenario is Script {
         assetPolicy.transferOwnership(protocolGovernance);
         protocolFeeRouter.transferOwnership(protocolGovernance);
         tokenGrantFactory.transferOwnership(protocolGovernance);
-        ammFactory.transferOwnership(protocolGovernance);
     }
 
     function _publishReleaseAAndCreate(address bootstrapAuthority) internal {
@@ -328,14 +316,14 @@ contract BoardroomScenario is Script {
         _createMerkleAirdropAndGrant();
         _createDirectTreasuryGrant();
         _createBondMarket();
-        _createLockedLiquidity();
+        _createProtocolLiquidity();
         _createAuxiliaryCurve(bootstrapAuthority);
         _createGraduatingCurve(bootstrapAuthority);
         require(boardroom.activeObligationCount() == 8, "real-obligations-not-recorded");
         require(curveBoardroom.activeObligationCount() == 1, "curve-obligation-not-recorded");
         require(graduatedCurveBoardroom.activeObligationCount() == 1, "graduated-curve-obligation-not-recorded");
         require(boardroom.rewardPool() == address(rewards), "reward-pool-not-recorded");
-        require(boardroom.liquidityLocker() == liquidityLocker, "liquidity-not-recorded");
+        require(boardroom.liquidityVault() == liquidityVault, "liquidity-not-recorded");
     }
 
     function _fundRewards() internal {
@@ -552,33 +540,36 @@ contract BoardroomScenario is Script {
         );
     }
 
-    function _createLockedLiquidity() internal {
-        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+    function _createProtocolLiquidity() internal {
+        PledgeV4LiquidityFactory.CreateParams memory params = PledgeV4LiquidityFactory.CreateParams({
             tokenA: address(shares),
             tokenB: address(wrappedNative),
             amountADesired: 100 ether,
             amountBDesired: 20 ether,
             amountAMin: 95 ether,
             amountBMin: 19 ether,
+            sqrtPriceX96: _sqrtPriceX96(address(shares), address(wrappedNative), 100 ether, 20 ether),
             deadline: block.timestamp + 1 hours,
             salt: keccak256("protocol-local-locked-liquidity")
         });
         BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](3);
-        calls[0] = _approvalCall(address(shares), address(lockedLiquidityFactory), params.amountADesired);
-        calls[1] = _approvalCall(address(wrappedNative), address(lockedLiquidityFactory), params.amountBDesired);
+        calls[0] = _approvalCall(address(shares), address(liquidityFactory), params.amountADesired);
+        calls[1] = _approvalCall(address(wrappedNative), address(liquidityFactory), params.amountBDesired);
         calls[2] = BoardroomFacetTypes.Call({
-            policy: address(lockedLiquidityFactory),
-            target: address(lockedLiquidityFactory),
+            policy: address(liquidityFactory),
+            target: address(liquidityFactory),
             value: 0,
-            data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+            data: abi.encodeCall(PledgeV4LiquidityFactory.createProtocolLiquidity, (params))
         });
         bytes[] memory results = boardroom.executeBatch(releaseAHash, calls);
-        (liquidityLocker, liquidityPool,,,) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
+        (liquidityVault, liquidityPoolId,,,) = abi.decode(results[2], (address, bytes32, uint256, uint256, uint256));
         require(
-            liquidityLocker == lockedLiquidityFactory.predictLockedLiquidityAddress(address(boardroom), params.salt),
-            "liquidity-locker-prediction"
+            liquidityVault == liquidityFactory.predictLiquidityVaultAddress(address(boardroom), params.salt),
+            "liquidity-vault-prediction"
         );
-        require(ammFactory.isPool(liquidityPool), "liquidity-pool");
+        require(
+            liquidityPoolId == liquidityFactory.poolIdFor(address(shares), address(wrappedNative)), "liquidity-pool"
+        );
     }
 
     function _createAuxiliaryCurve(address bootstrapAuthority) internal {
@@ -733,11 +724,13 @@ contract BoardroomScenario is Script {
         uint256 migratedShares;
         uint256 migratedQuote;
         uint256 migratedLiquidity;
-        (graduatedCurveLocker, graduatedCurvePool, migratedShares, migratedQuote, migratedLiquidity) =
-            graduatedCurve.migrate(graduatedCurveBoardroom.facetSetHash(), 5 ether, 5 ether, block.timestamp + 1 hours);
+        (graduatedCurveVault, graduatedCurvePoolId, migratedShares, migratedQuote, migratedLiquidity) =
+            graduatedCurve.migrate(
+                graduatedCurveBoardroom.facetSetHash(), 5 ether, 5 ether, 1 << 96, block.timestamp + 1 hours
+            );
         require(migratedShares == 5 ether && migratedQuote == 5 ether, "graduated-migration-amounts");
         require(migratedLiquidity != 0, "graduated-migration-liquidity");
-        require(graduatedCurveBoardroom.liquidityLocker() == graduatedCurveLocker, "graduated-liquidity-not-activated");
+        require(graduatedCurveBoardroom.liquidityVault() == graduatedCurveVault, "graduated-liquidity-not-activated");
         (,, bool curveObligationActive,) = graduatedCurveBoardroom.obligationOf(address(graduatedCurve));
         require(
             graduatedCurveBoardroom.activeObligationCount() == 1 && !curveObligationActive,
@@ -909,7 +902,7 @@ contract BoardroomScenario is Script {
 
         if (proveMigrationGate) {
             (bool writeSucceeded, bytes memory revertData) =
-                address(boardroom).call(abi.encodeCall(IBoardroom.returnProtocolLiquidityAsLp, (releaseBHash)));
+                address(boardroom).call(abi.encodeCall(IBoardroom.returnProtocolLiquidityClaims, (releaseBHash)));
             require(
                 !writeSucceeded && _revertSelector(revertData) == BoardroomKernel.StorageMigrationRequired.selector,
                 "pre-migration-write-not-blocked"
@@ -929,7 +922,7 @@ contract BoardroomScenario is Script {
                 data: abi.encodeCall(BondMarket.close, ())
             })
         );
-        require(boardroom.returnProtocolLiquidityAsLp(releaseBHash) != 0, "lp-not-returned");
+        require(boardroom.returnProtocolLiquidityClaims(releaseBHash) != 0, "claims-not-returned");
         boardroom.closeProtocolLiquidityAfterWindDown(releaseBHash);
         require(boardroom.activeObligationCount() == 0, "resumed-terminal-obligations");
     }
@@ -943,7 +936,9 @@ contract BoardroomScenario is Script {
 
     function _finalizeGraduatedCurveLiquidity() internal {
         graduatedCurveBoardroom.migrateBoardroom(releaseBHash);
-        require(graduatedCurveBoardroom.returnProtocolLiquidityAsLp(releaseBHash) != 0, "graduated-lp-not-returned");
+        require(
+            graduatedCurveBoardroom.returnProtocolLiquidityClaims(releaseBHash) != 0, "graduated-claims-not-returned"
+        );
         graduatedCurveBoardroom.closeProtocolLiquidityAfterWindDown(releaseBHash);
         require(graduatedCurveBoardroom.activeObligationCount() == 0, "graduated-terminal-obligation");
         require(!graduatedCurveBoardroom.migrationRequired(), "graduated-boardroom-migration");
@@ -967,15 +962,12 @@ contract BoardroomScenario is Script {
         require(assetPolicy.owner() == expectedProtocolGovernance, "asset-policy-owner");
         require(protocolFeeRouter.owner() == expectedProtocolGovernance, "fee-router-owner");
         require(tokenGrantFactory.owner() == expectedProtocolGovernance, "grant-factory-owner");
-        require(ammFactory.owner() == expectedProtocolGovernance, "amm-factory-owner");
         require(protocolFeeRouter.feeRecipient() == protocolTreasury, "fee-router-recipient");
         require(tokenGrantFactory.feeRecipient() == address(protocolFeeRouter), "grant-fee-recipient");
         require(tokenGrantFactory.creationFee() == 0, "grant-creation-fee");
-        require(ammFactory.feeManager() == ammFeeManager, "amm-fee-manager");
-        require(ammFactory.protocolFeeRecipient() == address(protocolFeeRouter), "amm-fee-recipient");
-        require(ammFactory.liquidityRouter() == address(ammRouter), "amm-router");
-        require(ammFactory.reservationManager() == address(lockedLiquidityFactory), "amm-reservation-manager");
-        require(ammFactory.boardroomFactory() == address(factory), "amm-boardroom-factory");
+        require(address(liquidityFactory.poolManager()) == address(poolManager), "v4-pool-manager");
+        require(liquidityFactory.protocolFeeRecipient() == address(protocolFeeRouter), "v4-fee-recipient");
+        require(liquidityFactory.boardroomFactory() == address(factory), "v4-boardroom-factory");
         require(tokenGrantFactory.boardroomFactory() == address(factory), "grant-boardroom-factory");
         require(registry.activeFacetSetHash() == releaseBHash, "active-release-hash");
         require(registry.activeRelease() == 2, "active-release-number");
@@ -1004,6 +996,26 @@ contract BoardroomScenario is Script {
         require(curveBoardroom.appliedStorageVersion() == 2, "curve-boardroom-storage-version");
         require(graduatedCurveBoardroom.appliedStorageVersion() == 2, "graduated-boardroom-storage-version");
         require(graduatedCurveBoardroom.activeObligationCount() == 0, "graduated-boardroom-obligations");
+    }
+
+    function _mineHookSalt(PledgeV4LiquidityFactory factory_) internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(factory_.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
+    }
+
+    function _sqrtPriceX96(address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+        internal
+        pure
+        returns (uint160 result)
+    {
+        (uint256 amount0, uint256 amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
+        uint256 ratioX192 = FullMath.mulDiv(amount1, uint256(1) << 192, amount0);
+        uint256 sqrtRatioX96 = FixedPointMathLib.sqrt(ratioX192);
+        require(sqrtRatioX96 <= type(uint160).max, "sqrt-price-overflow");
+        result = uint160(sqrtRatioX96);
     }
 
     function _revertSelector(bytes memory revertData) internal pure returns (bytes4 selector) {

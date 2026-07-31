@@ -37,7 +37,7 @@ batches. Pruning removes active counts but never erases provenance.
 Factories expose canonical creation events and bounded append-only discovery
 pages. Discovery history is not a protocol-capacity or lifecycle dependency.
 No public transition iterates over all lifetime grants, distributions, bonds,
-or lockers.
+or liquidity vaults.
 
 ## Redeemable assets and snapshotting
 
@@ -87,7 +87,7 @@ The immutable terminal bounds are:
 - 30-day sell-only unwind;
 - 30-day quote quarantine;
 - seven-day holder-veto window;
-- 50-basis-point maximum AMM price deviation.
+- 50-basis-point maximum v4 initialization-price deviation.
 
 Cancellation, expiry, or failed migration enters the bounded unwind.
 Permissionless migration uses the terminal marginal curve price and consumes
@@ -97,21 +97,20 @@ wind-down after quarantine and an unvetoed window.
 
 ## Protocol-owned liquidity
 
-Each Boardroom has one permanent quote identity, at most one canonical pool,
-and at most one canonical locker:
+Each Boardroom has one permanent quote identity, at most one canonical Uniswap v4 PoolId,
+and at most one canonical P4LP vault:
 
 ```text
 Unconfigured -> Active -> Closed
 ```
 
-Prelaunch setup and repeated additions target that same position. After launch,
-active removal requires delayed controller governance and returns assets only
-to the Boardroom. During wind-down, full exit is permissionless; when hostile
-underlying tokens prevent exact removal, the LP token can return to the
-Boardroom as the liveness fallback.
+Prelaunch setup and repeated additions target that same full-range position. After launch, active removal requires
+delayed controller governance, can burn only protocol-held P4LP, and returns assets only to the Boardroom. During
+wind-down, full exit is permissionless; when hostile underlying tokens prevent exact removal, the vault enters Claims
+without calling them and protocol-held P4LP becomes a Boardroom redemption asset.
 
-A zero LP balance is not closure. Closure is explicit, empty,
-reservation-free, and irreversible. Snapshotting and open redemptions reject
+Exact exit closes an empty vault. The Claims fallback separately closes and prunes the Boardroom obligation while
+preserving proportional underlying rights for external P4LP holders. Snapshotting and open redemptions reject active
 liquidity mutation.
 
 ## ERC-7201 storage and migration
@@ -144,7 +143,7 @@ same-version activation needs no storage migration.
    dependency, open liquidity position, or curve quote.
 5. One frozen asset registry and supply determine all credits and exact
    payouts.
-6. One lifetime curve, quote identity, pool, and locker cannot be replaced or
+6. One lifetime curve, quote identity, PoolId, and P4LP vault cannot be replaced or
    duplicated.
 7. Holder curve sell rights remain fungible without exceeding global
    liability.

@@ -2,11 +2,12 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmPool} from "../../src/amm/AmmPool.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {IBoardroom as Boardroom} from "../../src/boardroom/IBoardroom.sol";
 import {BoardroomFacetBase} from "../../src/boardroom/diamond/BoardroomFacetBase.sol";
@@ -23,8 +24,9 @@ import {DistributionFactory} from "../../src/distribution/DistributionFactory.so
 import {DutchAuctionSale} from "../../src/distribution/DutchAuctionSale.sol";
 import {FixedPriceSale} from "../../src/distribution/FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
-import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
+import {PledgeV4Hook} from "../../src/uniswap/PledgeV4Hook.sol";
+import {PledgeV4LiquidityFactory} from "../../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {PledgeV4LiquidityVault} from "../../src/uniswap/PledgeV4LiquidityVault.sol";
 import {MerkleAirdrop} from "../../src/distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../../src/distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
@@ -32,6 +34,7 @@ import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 import {CanonicalBoardroomTestSetup} from "../helpers/CanonicalBoardroomTestSetup.sol";
+import {V4PoolManagerMock} from "../helpers/V4PoolManagerMock.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -249,6 +252,8 @@ contract FakeDistributionGrantCaller {
     }
 }
 
+contract DistributionFeeRecipient {}
+
 contract DistributionTest is CanonicalBoardroomTestSetup {
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
         "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
@@ -263,10 +268,9 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
     BoardroomPolicyRegistry internal policyRegistry;
     AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
-    AmmFactory internal ammFactory;
+    V4PoolManagerMock internal poolManager;
     WETH internal wrappedNative;
-    AmmRouter internal ammRouter;
-    LockedLiquidityFactory internal lockedLiquidityFactory;
+    PledgeV4LiquidityFactory internal liquidityFactory;
     TokenGrantFactory internal tokenGrantFactory;
     DistributionFactory internal distributionFactory;
     BoardroomRewardsFactory internal rewardsFactory;
@@ -297,13 +301,14 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = _deployCanonicalBoardroomFactory(policyRegistry, address(wrappedNative));
-        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
-        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
-        lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));
-        ammFactory.setLiquidityRouter(address(ammRouter));
-        ammFactory.setReservationManager(address(lockedLiquidityFactory));
+        poolManager = new V4PoolManagerMock();
+        DistributionFeeRecipient feeRecipient = new DistributionFeeRecipient();
+        liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(boardroomFactory), address(feeRecipient), address(this)
+        );
+        liquidityFactory.deployHook(_mineHookSalt());
         tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));
-        distributionFactory = new DistributionFactory(address(lockedLiquidityFactory), address(tokenGrantFactory));
+        distributionFactory = new DistributionFactory(address(liquidityFactory), address(tokenGrantFactory));
         rewardsFactory = new BoardroomRewardsFactory(address(boardroomFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
@@ -313,7 +318,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
         policyRegistry.registerModulePolicy(address(distributionFactory));
-        policyRegistry.registerModulePolicy(address(lockedLiquidityFactory));
+        policyRegistry.registerModulePolicy(address(liquidityFactory));
         policyRegistry.registerModulePolicy(address(rewardsFactory));
         paymentToken.mint(buyer, 10_000_000000);
     }
@@ -442,7 +447,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
     }
 
     function testDutchAuctionCanSeedCanonicalLiquidityAfterSettlement() public {
-        assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(liquidityFactory), true);
         assetPolicy.setAssetAllowed(address(paymentToken), true);
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-liquidity");
         DutchAuctionSale auction = _createDutchAuction(
@@ -460,13 +465,14 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         uint256 liquidityShares = 100 ether;
         uint256 liquidityQuote = 300_000000;
-        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+        PledgeV4LiquidityFactory.CreateParams memory params = PledgeV4LiquidityFactory.CreateParams({
             tokenA: address(shareToken),
             tokenB: address(paymentToken),
             amountADesired: liquidityShares,
             amountBDesired: liquidityQuote,
             amountAMin: liquidityShares * 95 / 100,
             amountBMin: liquidityQuote * 95 / 100,
+            sqrtPriceX96: _sqrtPriceX96(address(shareToken), address(paymentToken), liquidityShares, liquidityQuote),
             deadline: block.timestamp,
             salt: keccak256("dutch-auction-liquidity-lock")
         });
@@ -475,30 +481,30 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
             address(assetPolicy),
             address(shareToken),
             0,
-            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), liquidityShares)
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), liquidityShares)
         );
         calls[1] = _policyCall(
             address(assetPolicy),
             address(paymentToken),
             0,
-            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), liquidityQuote)
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), liquidityQuote)
         );
         calls[2] = _policyCall(
-            address(lockedLiquidityFactory),
-            address(lockedLiquidityFactory),
+            address(liquidityFactory),
+            address(liquidityFactory),
             0,
-            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+            abi.encodeCall(PledgeV4LiquidityFactory.createProtocolLiquidity, (params))
         );
 
         vm.prank(owner);
         bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
-        (address locker, address pool,,,) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
+        (address vault, bytes32 poolId,,,) = abi.decode(results[2], (address, bytes32, uint256, uint256, uint256));
 
         assertEq(auction.settlementPrice(), 3_000000);
-        assertEq(boardroom.liquidityLocker(), locker);
-        assertEq(boardroom.liquidityPool(), pool);
+        assertEq(boardroom.liquidityVault(), vault);
+        assertEq(boardroom.liquidityPoolId(), poolId);
         assertEq(boardroom.liquidityQuoteAsset(), address(paymentToken));
-        assertGt(LockedLiquidity(locker).lockedLiquidity(), 0);
+        assertGt(PledgeV4LiquidityVault(vault).positionLiquidity(), 0);
     }
 
     function testDutchAuctionCancellationAndWindDownLifecycleAreBounded() public {
@@ -1291,17 +1297,30 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         uint256 minQuoteLiquidity = 237_500000;
 
         vm.prank(buyer);
-        (address locker, address pool, uint256 shares, uint256 quote, uint256 liquidity) =
-            curve.migrate(_expectedFacetSetHash(boardroom), minShareLiquidity, minQuoteLiquidity, block.timestamp);
-        assertTrue(locker != address(0));
-        assertTrue(pool != address(0));
-        assertEq(shares, 125 ether);
-        assertEq(quote, 250_000000);
+        (address vault, bytes32 poolId, uint256 shares, uint256 quote, uint256 liquidity) = curve.migrate(
+            _expectedFacetSetHash(boardroom),
+            minShareLiquidity,
+            minQuoteLiquidity,
+            _curveSqrtPrice(curve),
+            block.timestamp
+        );
+        assertTrue(vault != address(0));
+        assertTrue(poolId != bytes32(0));
+        assertGe(shares, minShareLiquidity);
+        assertLe(shares, 125 ether);
+        assertGe(quote, minQuoteLiquidity);
+        assertLe(quote, 250_000000);
         assertGt(liquidity, 0);
         assertEq(curve.terminalCurvePrice(), PRICE);
         assertEq(curve.outstandingCurveShareLiability(), 0);
-        assertEq(boardroom.liquidityLocker(), locker);
+        assertEq(boardroom.liquidityVault(), vault);
+        assertEq(boardroom.liquidityPoolId(), poolId);
+        assertTrue(shareToken.isEncumberedAccount(address(poolManager)));
+        assertEq(
+            shareToken.encumberedSupply(), shareToken.balanceOf(address(poolManager)) + shareToken.balanceOf(vault)
+        );
         assertEq(uint8(boardroom.primaryMarketMode()), uint8(BoardroomPrimaryMarketStorage.Mode.GeneralAvailability));
+        _assertP4LPClaimWindDown(boardroom, shareToken, vault);
     }
 
     function testMigrationRollsBackIfHostileQuoteCallbackStartsWindDown() public {
@@ -1319,9 +1338,10 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         curve.buy(CURVE_BUY_SHARES + CURVE_SELL_SHARES, buyer, CURVE_GRADUATION_TARGET, block.timestamp);
         assertTrue(curve.canMigrate());
 
+        uint160 sqrtPriceX96 = _curveSqrtPrice(curve);
         quote.armWindDown(address(boardroom));
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, sqrtPriceX96, block.timestamp);
 
         assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.Active));
         assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurvePhase.Graduated));
@@ -1330,8 +1350,8 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertTrue(curve.migrationReservationHeld());
         assertEq(curve.quoteReserve(), CURVE_GRADUATION_TARGET);
         assertEq(curve.outstandingCurveShareLiability(), CURVE_BUY_SHARES + CURVE_SELL_SHARES);
-        assertEq(boardroom.liquidityLocker(), address(0));
-        assertEq(boardroom.liquidityPool(), address(0));
+        assertEq(boardroom.liquidityVault(), address(0));
+        assertEq(boardroom.liquidityPoolId(), bytes32(0));
     }
 
     function testMigratingBondingCurveSellRightsFollowTransferredSharesUnderGlobalLiability() public {
@@ -1539,15 +1559,16 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertEq(shareToken.allowance(address(boardroom), address(distributionFactory)), 0);
 
         assetPolicy.setAssetAllowed(address(paymentToken), true);
-        assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(liquidityFactory), true);
         paymentToken.mint(address(boardroom), 10_000000);
-        LockedLiquidityFactory.CreateParams memory liquidityParams = LockedLiquidityFactory.CreateParams({
+        PledgeV4LiquidityFactory.CreateParams memory liquidityParams = PledgeV4LiquidityFactory.CreateParams({
             tokenA: address(shareToken),
             tokenB: address(paymentToken),
             amountADesired: 10 ether,
             amountBDesired: 10_000000,
             amountAMin: 9.5 ether,
             amountBMin: 9_500000,
+            sqrtPriceX96: _sqrtPriceX96(address(shareToken), address(paymentToken), 10 ether, 10_000000),
             deadline: block.timestamp,
             salt: keccak256("curve-competing-liquidity")
         });
@@ -1556,24 +1577,24 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
             address(assetPolicy),
             address(shareToken),
             0,
-            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), 10 ether)
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), 10 ether)
         );
         liquidityCalls[1] = _policyCall(
             address(assetPolicy),
             address(paymentToken),
             0,
-            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), 10_000000)
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), 10_000000)
         );
         liquidityCalls[2] = _policyCall(
-            address(lockedLiquidityFactory),
-            address(lockedLiquidityFactory),
+            address(liquidityFactory),
+            address(liquidityFactory),
             0,
-            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (liquidityParams))
+            abi.encodeCall(PledgeV4LiquidityFactory.createProtocolLiquidity, (liquidityParams))
         );
         vm.prank(owner);
         vm.expectRevert();
         boardroom.executeBatch(_expectedFacetSetHash(boardroom), liquidityCalls);
-        assertEq(boardroom.liquidityLocker(), address(0));
+        assertEq(boardroom.liquidityVault(), address(0));
 
         vm.prank(owner);
         boardroom.startWindDown(_expectedFacetSetHash(boardroom));
@@ -1675,15 +1696,16 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         vm.prank(owner);
         boardroom.startWindDown(_expectedFacetSetHash(boardroom));
+        uint160 sqrtPriceX96 = _curveSqrtPrice(curve);
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, sqrtPriceX96, block.timestamp);
         vm.warp(curve.phaseEndsAt() + 1);
         curve.fallbackToUnwind();
 
         assertFalse(curve.isClosed());
         assertTrue(boardroom.isIssuedDistribution(address(curve)));
         assertEq(curve.outstandingCurveShareLiability(), 250 ether);
-        assertEq(boardroom.liquidityLocker(), address(0));
+        assertEq(boardroom.liquidityVault(), address(0));
 
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
         curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
@@ -1736,11 +1758,14 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         vm.stopPrank();
     }
 
-    function testMigratingBondingCurveRejectsAttackerSeededCanonicalPoolAtomically() public {
+    function testCanonicalHookRejectsAttackerInitializationBeforeCurveReservation() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-attacker-seeded-pool");
-        address pool = ammFactory.createPool(address(shareToken), address(paymentToken));
+        PoolKey memory key = liquidityFactory.poolKeyFor(address(shareToken), address(paymentToken));
+        bytes32 poolId = liquidityFactory.poolIdFor(address(shareToken), address(paymentToken));
+        uint160 sqrtPriceX96 = _sqrtPriceX96(address(shareToken), address(paymentToken), 1 ether, PRICE);
         vm.prank(buyer);
-        paymentToken.transfer(pool, 1);
+        vm.expectRevert(abi.encodeWithSelector(PledgeV4Hook.PoolInitializationNotAuthorized.selector, poolId));
+        poolManager.initialize(key, sqrtPriceX96);
 
         uint256 totalShares = CURVE_SALE_SHARES + CURVE_MIGRATION_SHARES;
         bytes32 salt = keccak256("curve-attacker-seeded-pool-create");
@@ -1763,17 +1788,18 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         vm.startPrank(owner);
         boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), totalShares);
-        vm.expectRevert(abi.encodeWithSelector(LockedLiquidityFactory.PoolAlreadySeeded.selector, pool));
         boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
-        assertEq(predictedCurve.code.length, 0);
-        assertEq(uint8(boardroom.primaryMarketMode()), 0);
-        assertEq(boardroom.bondingCurve(), address(0));
-        assertEq(distributionFactory.bondingCurveOfBoardroom(address(boardroom)), address(0));
-        assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 0);
-        (address reservedCurve,,,,,,) = lockedLiquidityFactory.migrationReservationOf(address(boardroom));
-        assertEq(reservedCurve, address(0));
+        assertGt(predictedCurve.code.length, 0);
+        assertEq(uint8(boardroom.primaryMarketMode()), 1);
+        assertEq(boardroom.bondingCurve(), predictedCurve);
+        assertEq(distributionFactory.bondingCurveOfBoardroom(address(boardroom)), predictedCurve);
+        assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
+        (address reservedCurve,, bytes32 expectedPoolId,,,) =
+            liquidityFactory.migrationReservationOf(address(boardroom));
+        assertEq(reservedCurve, predictedCurve);
+        assertEq(expectedPoolId, poolId);
         assertEq(shareToken.allowance(address(boardroom), address(distributionFactory)), 0);
     }
 
@@ -1901,8 +1927,14 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertTrue(curve.canMigrate());
         assertEq(curve.quoteReserve(), 500_000000);
 
+        uint160 sqrtPriceX96 = _curveSqrtPrice(curve);
+        uint160 wrongSqrtPriceX96 =
+            _sqrtPriceX96(curve.shareToken(), curve.quoteToken(), 1 ether, curve.terminalCurvePrice() * 2);
+        vm.expectPartialRevert(MigratingBondingCurve.MigrationPriceDeviation.selector);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, wrongSqrtPriceX96, block.timestamp);
+
         vm.expectRevert(abi.encodeWithSelector(MigratingBondingCurve.MigrationMinimumTooLow.selector, 0, 118.75 ether));
-        curve.migrate(_expectedFacetSetHash(boardroom), 0, 0, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 0, 0, sqrtPriceX96, block.timestamp);
 
         vm.prank(buyer);
         vm.expectRevert(
@@ -2006,8 +2038,8 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertEq(mutableQuote.balanceOf(address(curve)), 0);
     }
 
-    function testMigratingBondingCurvePolicyRejectsAmmInfeasibleBounds() public {
-        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-amm-bounds");
+    function testMigratingBondingCurvePolicyRejectsInfeasibleCurveBounds() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-bounds");
         MigratingBondingCurve.CreateParams memory params =
             _curveParams(address(shareToken), address(paymentToken), keccak256("curve-supply-overflow"));
 
@@ -2292,7 +2324,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         vm.stopPrank();
     }
 
-    function testDistributionPolicyRejectsMigratingCurveWithoutLockedLiquidityFactory() public {
+    function testDistributionPolicyRejectsMigratingCurveWithoutLiquidityFactory() public {
         vm.expectRevert(DistributionFactory.InvalidAddress.selector);
         new DistributionFactory(address(0), address(tokenGrantFactory));
     }
@@ -2780,6 +2812,66 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         assertEq(amountOut, expectedQuote);
         assertEq(shareToken.balanceOf(buyer), 0);
+    }
+
+    function _assertP4LPClaimWindDown(Boardroom boardroom, BoardroomToken shareToken, address vault) internal {
+        PledgeV4LiquidityVault liquidityVault = PledgeV4LiquidityVault(vault);
+        uint256 externalShareDeposit = 10 ether;
+        uint256 externalQuoteDeposit = 20_000000;
+        vm.startPrank(buyer);
+        shareToken.approve(vault, externalShareDeposit);
+        paymentToken.approve(vault, externalQuoteDeposit);
+        (,, uint128 externalClaims) = liquidityVault.depositLiquidityForClaims(
+            externalShareDeposit,
+            externalQuoteDeposit,
+            externalShareDeposit * 95 / 100,
+            externalQuoteDeposit * 95 / 100,
+            buyer,
+            block.timestamp
+        );
+        vm.stopPrank();
+        uint256 protocolClaims = liquidityVault.balanceOf(vault);
+
+        vm.prank(owner);
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
+        vm.prank(recipient);
+        assertEq(boardroom.returnProtocolLiquidityClaims(_expectedFacetSetHash(boardroom)), protocolClaims);
+        assertEq(liquidityVault.balanceOf(address(boardroom)), protocolClaims);
+        assertEq(uint8(liquidityVault.liquidityState()), uint8(PledgeV4LiquidityVault.LiquidityState.Claims));
+
+        vm.prank(recipient);
+        boardroom.closeProtocolLiquidityAfterWindDown(_expectedFacetSetHash(boardroom));
+        assertEq(boardroom.activeObligationCount(), 0);
+        assertTrue(boardroom.isRedeemableAsset(vault));
+
+        vm.prank(buyer);
+        (uint256 redeemedShares, uint256 redeemedQuote,) =
+            liquidityVault.redeemClaims(externalClaims, 0, 0, buyer, block.timestamp);
+        assertGt(redeemedShares, 0);
+        assertGt(redeemedQuote, 0);
+        assertEq(liquidityVault.balanceOf(address(boardroom)), protocolClaims);
+    }
+
+    function _curveSqrtPrice(MigratingBondingCurve curve) internal view returns (uint160) {
+        return _sqrtPriceX96(curve.shareToken(), curve.quoteToken(), 1 ether, curve.terminalCurvePrice());
+    }
+
+    function _sqrtPriceX96(address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+        internal
+        pure
+        returns (uint160 result)
+    {
+        (uint256 amount0, uint256 amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
+        uint256 ratioX192 = FullMath.mulDiv(amount1, uint256(1) << 192, amount0);
+        result = uint160(FixedPointMathLib.sqrt(ratioX192));
+    }
+
+    function _mineHookSalt() internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(liquidityFactory.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
     }
 
     function _policyCall(address policy, address target, uint256 value, bytes memory data)

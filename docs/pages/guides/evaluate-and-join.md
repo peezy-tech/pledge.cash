@@ -45,7 +45,7 @@ Read [Canonical identity](../reference/canonical-identity) for the checks behind
 | Dutch auction | Project shares from auction escrow | Payment token at the descending execution price | Fresh quote, maximum payment, deadline, and per-wallet cap |
 | Migrating curve | Project shares from curve inventory | Quote token held in the curve reserve | Maximum buy cost or minimum sell refund |
 | Merkle airdrop | Shares now or a vesting grant | Usually gas; a paid grant may require payment later | Exact published index, amount, proof, and claim mode |
-| AMM | Output token from a pool | Exact input token | Minimum output and quote deadline |
+| Uniswap v4 | Output token from the canonical PoolKey | Exact ERC20 input through Permit2 | Minimum output and quote deadline |
 
 A curve buy increases one global outstanding-share liability. Any current
 holder can sell up to the lesser of its transferable share balance and that
@@ -53,7 +53,8 @@ global liability, so sell rights follow shares through ERC20 transfers.
 Graduation pauses trading during the migration window; cancellation, expiry,
 or failed migration enters the bounded sell-only unwind.
 
-An AMM price is different from a sale or curve price. Check reserves, fee, slippage, route, and minimum output immediately before signing.
+A v4 spot price is different from a sale or curve price. Check PoolId, active liquidity, Quoter output, fee, slippage,
+route, Permit2 approval, and minimum output immediately before signing.
 
 ## 3. Review and submit
 

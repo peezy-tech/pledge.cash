@@ -65,7 +65,7 @@ export function ObligationLists({
           />
         ))}
       </ObligationColumn> : null}
-      {scope === "all" || scope === "liquidity" ? <ObligationColumn title="Locked Liquidity" emptyLabel="No lockers">
+      {scope === "all" || scope === "liquidity" ? <ObligationColumn title="Protocol Liquidity" emptyLabel="No vaults">
         {boardroomSnapshot.lockedLiquiditySummaries.map((locker) => (
           <LockerRow locker={locker} key={locker.address} setLockedLiquidityAddress={setLockedLiquidityAddress} />
         ))}
@@ -194,14 +194,15 @@ function LockerRow({ locker, setLockedLiquidityAddress }: { locker: BoardroomLoc
         <StatusBadge label={statusLabel} tone={statusTone} />
       </div>
       <Button size="sm" variant="secondary" onClick={() => setLockedLiquidityAddress(locker.address)}>
-        Use Locker
+        Use P4LP Vault
       </Button>
       {locker.error ? <p className="m-0 text-sm text-red-200">{locker.error}</p> : null}
       <Facts
         columns="one"
         items={[
-          { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
-          { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
+          { label: "Pool ID", value: <span className="break-all font-mono text-xs">{locker.state?.poolId ?? "Unknown"}</span> },
+          { label: "Position liquidity", value: locker.state?.positionLiquidity?.toString() ?? "Unknown" },
+          { label: "P4LP supply", value: formatTokenAmount(locker.state?.totalSupply, locker.liquidityMetadata) },
           { label: "Token pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
         ]}
       />

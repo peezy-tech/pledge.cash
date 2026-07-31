@@ -2,7 +2,7 @@ import {
   boardroomFactoryAbi,
   bondMarketFactoryAbi,
   distributionFactoryAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
   tokenGrantFactoryAbi,
   type Address,
   type BoardroomState,
@@ -10,17 +10,18 @@ import {
   type DutchAuctionState,
   type FixedPriceSaleState,
   type GrantState,
-  type LockedLiquidityState,
+  type ProtocolLiquidityVaultState as LockedLiquidityState,
   type MerkleAirdropState,
   type MigratingBondingCurveState,
   type PledgeCashDeployment,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
+import type { Hex } from "viem";
 
 export class CanonicalProvenanceError extends Error {
-  readonly entity: "Boardroom" | "distribution" | "grant" | "locked liquidity";
+  readonly entity: "Boardroom" | "distribution" | "grant" | "protocol liquidity";
 
-  constructor(entity: "Boardroom" | "distribution" | "grant" | "locked liquidity", message: string) {
+  constructor(entity: "Boardroom" | "distribution" | "grant" | "protocol liquidity", message: string) {
     super(message);
     this.name = "CanonicalProvenanceError";
     this.entity = entity;
@@ -159,14 +160,14 @@ export async function assertCanonicalMigratingBondingCurve(
 ): Promise<void> {
   await assertCanonicalDistributionBase(client, deployment, boardroom, curve, 1);
   const liquidityFactory = requireConfiguredAddress(
-    deployment?.lockedLiquidityFactory,
-    "LockedLiquidityFactory",
+    deployment?.pledgeV4LiquidityFactory,
+    "PledgeV4LiquidityFactory",
     "this bonding curve",
   );
-  if (!sameAddress(curve.lockedLiquidityFactory, liquidityFactory)) {
+  if (!sameAddress(curve.liquidityFactory, liquidityFactory)) {
     throw new CanonicalProvenanceError(
       "distribution",
-      "This bonding curve is not wired to the configured LockedLiquidityFactory.",
+      "This bonding curve is not wired to the configured PledgeV4LiquidityFactory.",
     );
   }
 }
@@ -178,57 +179,113 @@ export async function assertCanonicalLockedLiquidity(
   position: LockedLiquidityState,
 ): Promise<void> {
   const factory = requireConfiguredAddress(
-    deployment?.lockedLiquidityFactory,
-    "LockedLiquidityFactory",
-    "this locked-liquidity position",
+    deployment?.pledgeV4LiquidityFactory,
+    "PledgeV4LiquidityFactory",
+    "this protocol-liquidity position",
   );
-  const router = requireConfiguredAddress(deployment?.ammRouter, "AMM router", "this locked-liquidity position");
+  const poolManager = requireConfiguredAddress(
+    deployment?.uniswapV4PoolManager,
+    "Uniswap v4 PoolManager",
+    "this protocol-liquidity position",
+  );
+  const hook = requireConfiguredAddress(
+    deployment?.pledgeV4Hook,
+    "PledgeV4Hook",
+    "this protocol-liquidity position",
+  );
+  const protocolFeeRecipient = requireConfiguredAddress(
+    deployment?.pledgeV4ProtocolFeeRecipient,
+    "PledgeV4 protocol fee recipient",
+    "this protocol-liquidity position",
+  );
   if (!sameAddress(position.factory, factory)) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position was not created by the configured LockedLiquidityFactory.",
+      "protocol liquidity",
+      "This vault was not created by the configured PledgeV4LiquidityFactory.",
     );
   }
   if (!sameAddress(position.boardroom, boardroom.address)) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position does not belong to the verified Boardroom.",
+      "protocol liquidity",
+      "This vault does not belong to the verified Boardroom.",
+    );
+  }
+  if (!sameAddress(boardroom.liquidityVault, position.address)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This vault does not match the verified Boardroom liquidity record.",
+    );
+  }
+  if (!sameHex(boardroom.liquidityPoolId, position.poolId)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This PoolId does not match the verified Boardroom liquidity record.",
     );
   }
   const registered = await client.readContract({
     address: factory,
-    abi: lockedLiquidityFactoryAbi,
-    functionName: "isLocker",
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "isVault",
     args: [position.address],
   });
   if (!registered) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position is not registered by the configured LockedLiquidityFactory.",
+      "protocol liquidity",
+      "This vault is not registered by the configured PledgeV4LiquidityFactory.",
     );
   }
   const registeredBoardroom = await client.readContract({
     address: factory,
-    abi: lockedLiquidityFactoryAbi,
-    functionName: "lockerBoardroom",
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "vaultBoardroom",
     args: [position.address],
   });
   if (!sameAddress(registeredBoardroom, boardroom.address)) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position does not match the LockedLiquidityFactory Boardroom record.",
+      "protocol liquidity",
+      "This vault does not match the PledgeV4LiquidityFactory Boardroom record.",
     );
   }
-  if (!sameAddress(position.router, router)) {
+  const registeredVault = await client.readContract({
+    address: factory,
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "vaultForPoolId",
+    args: [position.poolId],
+  });
+  if (!sameAddress(registeredVault, position.address)) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position is not wired to the configured AMM router.",
+      "protocol liquidity",
+      "This vault does not match the PledgeV4LiquidityFactory PoolId record.",
+    );
+  }
+  if (!sameAddress(position.poolManager, poolManager)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This vault is not wired to the configured Uniswap v4 PoolManager.",
+    );
+  }
+  if (!sameAddress(position.hook, hook)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This vault is not wired to the configured PledgeV4Hook.",
+    );
+  }
+  if (!sameAddress(position.protocolFeeRecipient, protocolFeeRecipient)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This vault is not wired to the configured PledgeV4 protocol fee recipient.",
     );
   }
   if (!sameAddress(position.tokenA, boardroom.shareToken) && !sameAddress(position.tokenB, boardroom.shareToken)) {
     throw new CanonicalProvenanceError(
-      "locked liquidity",
-      "This position does not contain the verified Boardroom share token.",
+      "protocol liquidity",
+      "This vault does not contain the verified Boardroom share token.",
+    );
+  }
+  if (!samePair(position.tokenA, position.tokenB, position.currency0, position.currency1)) {
+    throw new CanonicalProvenanceError(
+      "protocol liquidity",
+      "This vault's Uniswap v4 currencies do not match its declared token pair.",
     );
   }
 }
@@ -314,4 +371,15 @@ function requireConfiguredAddress(
 
 function sameAddress(first: Address, second: Address): boolean {
   return first.toLowerCase() === second.toLowerCase();
+}
+
+function sameHex(first: Hex, second: Hex): boolean {
+  return first.toLowerCase() === second.toLowerCase();
+}
+
+function samePair(tokenA: Address, tokenB: Address, currency0: Address, currency1: Address): boolean {
+  return (
+    (sameAddress(tokenA, currency0) && sameAddress(tokenB, currency1))
+    || (sameAddress(tokenA, currency1) && sameAddress(tokenB, currency0))
+  );
 }

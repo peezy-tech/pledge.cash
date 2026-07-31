@@ -27,15 +27,19 @@ artifact and receipt evidence agree with live code.
 
 `Deploy.s.sol` deploys the complete protocol, publishes and activates
 Boardroom release A, configures module policies and fee routes, transfers the
-governed roots, and then attests the resulting graph. It deploys 21 protocol
-roots through `PledgeCashDeterministicDeployer`:
+governed roots, and then attests the resulting graph. It deploys 19 protocol
+roots through `PledgeCashDeterministicDeployer`, plus the deterministic deployer itself and a permission-bit-compatible
+CREATE2 hook:
 
 - `ProtocolFacetRegistry`, `BoardroomKernel`, `BoardroomFactory`, the policy
   registry, three immutable Boardroom helper roots, and the five release-A
   facets;
 - asset policy and protocol fee router;
-- token-grant, AMM, distribution, locked-liquidity, rewards, and bond-market
-  roots.
+- token-grant, Pledge v4 liquidity, distribution, rewards, and bond-market roots;
+- a `beforeInitialize`-only `PledgeV4Hook` mined and deployed after the liquidity factory address is known.
+
+PoolManager, Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and wrapped native are external inputs.
+The script requires code at every address and records each address and runtime code hash in the artifact.
 
 The factory creates its bound controller factory and controller
 implementation. Child implementations created by module factories are also
@@ -56,8 +60,7 @@ transfers these owners to `PLEDGE_CASH_PROTOCOL_GOVERNANCE`:
 - `BoardroomPolicyRegistry`;
 - `AssetPolicy`;
 - `ProtocolFeeRouter`;
-- `TokenGrantFactory`;
-- `AmmFactory`.
+- `TokenGrantFactory`.
 
 This is the genesis ceremony configuration, not a permanent owner pin.
 `protocolGovernance` records the configured genesis role, while
@@ -79,7 +82,6 @@ The other configured roles are:
 
 - `PLEDGE_CASH_PROTOCOL_TREASURY`, the recipient behind
   `ProtocolFeeRouter`;
-- `PLEDGE_CASH_AMM_FEE_MANAGER`, the bounded AMM operational authority;
 - `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`, which must be the broadcaster
   for the current deployment flow.
 
@@ -257,7 +259,12 @@ Start from `.env.example` and provide:
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0x...
 PLEDGE_CASH_PROTOCOL_TREASURY=0x...
-PLEDGE_CASH_AMM_FEE_MANAGER=0x...
+UNISWAP_V4_POOL_MANAGER=0x...
+UNISWAP_UNIVERSAL_ROUTER=0x...
+UNISWAP_V4_QUOTER=0x...
+UNISWAP_V4_STATE_VIEW=0x...
+UNISWAP_V4_POSITION_MANAGER=0x...
+PERMIT2_ADDRESS=0x...
 ```
 
 Monad dry runs and broadcasts require:
@@ -340,10 +347,9 @@ A promoted protocol-v1 artifact must bind at least:
   code hashes;
 - `activeFacetSetHash`, release number, required storage version/layout,
   manifest hash, kernel-selector-set hash, and selector count;
-- every module factory/implementation, wrapped-native token, fee routes, and
-  runtime code hash;
-- explicit governed-root owners, protocol governance, treasury, and AMM fee
-  manager.
+- every module factory/implementation, wrapped-native token, fee route, Pledge v4 hook, external Uniswap/Permit2
+  dependency, and runtime code hash;
+- explicit governed-root owners, protocol governance, and treasury.
 
 The verifier independently reconstructs release A from locally compiled
 facets, checks the canonical kernel-reserved selector set, and proves that the
@@ -373,8 +379,8 @@ deployment rehearsal:
 anvil --port 8547 --chain-id 31337
 ```
 
-With a deployed local wrapped-native contract and the four development roles
-configured, run `Deploy.s.sol`:
+With a deployed local wrapped-native contract, local v4 infrastructure, and the three deployment roles configured, run
+`Deploy.s.sol`:
 
 ```sh
 cd packages/contracts
@@ -382,8 +388,13 @@ PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 PLEDGE_CASH_PROTOCOL_TREASURY=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
-PLEDGE_CASH_AMM_FEE_MANAGER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 WRAPPED_NATIVE_ADDRESS=0x... \
+UNISWAP_V4_POOL_MANAGER=0x... \
+UNISWAP_UNIVERSAL_ROUTER=0x... \
+UNISWAP_V4_QUOTER=0x... \
+UNISWAP_V4_STATE_VIEW=0x... \
+UNISWAP_V4_POSITION_MANAGER=0x... \
+PERMIT2_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
   --rpc-url http://127.0.0.1:8547 \

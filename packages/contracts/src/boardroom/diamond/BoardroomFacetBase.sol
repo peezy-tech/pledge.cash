@@ -134,18 +134,18 @@ abstract contract BoardroomFacetBase is Ownable, ReentrancyGuard {
     event PrimaryMarketModeChanged(BoardroomPrimaryMarketStorage.Mode indexed mode);
     event BondingCurvePrecommitted(address indexed curve, address indexed quoteAsset, uint256 fundingAmount);
     event ProtocolLiquidityReserved(
-        address indexed expectedLocker,
+        address indexed expectedVault,
+        bytes32 indexed expectedPoolId,
         address indexed quoteAsset,
-        address indexed curve,
-        bytes32 pairKey,
+        address curve,
         bytes32 salt,
         uint256 expiresAt
     );
     event ProtocolLiquidityActivated(
-        address indexed locker, address indexed pool, address indexed quoteAsset, address curve
+        address indexed vault, bytes32 indexed poolId, address indexed quoteAsset, address curve
     );
-    event ProtocolLiquidityClosed(address indexed locker, address indexed pool, address indexed quoteAsset);
-    event ProtocolLiquidityReservationReleased(address indexed curve, address indexed expectedLocker, bytes32 salt);
+    event ProtocolLiquidityClosed(address indexed vault, bytes32 indexed poolId, address indexed quoteAsset);
+    event ProtocolLiquidityReservationReleased(address indexed curve, address indexed expectedVault, bytes32 salt);
 
     constructor(
         address redemptionPayoutLogic_,
@@ -181,8 +181,8 @@ abstract contract BoardroomFacetBase is Ownable, ReentrancyGuard {
         return BoardroomObligationStorage.layout().rewardPool;
     }
 
-    function _liquidityLocker() internal view returns (address) {
-        return BoardroomLiquidityStorage.layout().locker;
+    function _liquidityVault() internal view returns (address) {
+        return BoardroomLiquidityStorage.layout().vault;
     }
 
     function _executeCall(address policy, address target, uint256 value, bytes calldata data, address authority)

@@ -15,7 +15,7 @@ import {
   currentUnixTimestamp,
   deriveExecutableDistributionRoute,
   routeLiveness,
-  routeLivenessForAmm,
+  routeLivenessForUniswapV4,
   type ExecutableDistributionRoute,
   type RouteLiveness,
 } from "../../lib/market-data";
@@ -403,7 +403,7 @@ function unavailableRouteGuidance(
 ): string {
   if (option.reason) return option.reason;
   if (option.path === "migrating-bonding-curve" && options.some((candidate) => candidate.path === "amm" && candidate.available)) {
-    return "This curve has migrated. Choose the live AMM route to keep trading, or inspect its historical contract in the route details.";
+    return "This curve has migrated. Choose the live Uniswap v4 route to keep trading, or inspect its historical contract in the route details.";
   }
   if (option.path === "dutch-auction") {
     return "This auction is scheduled, ended, sold out, or cancelled. Its final settlement price and historical terms remain visible in the route details.";
@@ -453,7 +453,7 @@ export function participationOptions(
     });
   }
   if (pools.length === 0 && content.amm) {
-    const reason = "No AMM pool address is recorded for this project.";
+    const reason = "No canonical Uniswap v4 vault is recorded for this project.";
     const liveness = routeLiveness("unavailable", reason);
     options.push({
       available: false,
@@ -729,16 +729,16 @@ function ammLiveness(
   market: ParticipationPoolMarketState | undefined,
 ): RouteLiveness {
   if (pool) {
-    return routeLivenessForAmm({
+    return routeLivenessForUniswapV4({
       tokenPairVerified: sameAddress(pool.token0, projectToken) || sameAddress(pool.token1, projectToken),
-      reserve0: pool.reserve0,
-      reserve1: pool.reserve1,
+      liquidity: pool.liquidity,
+      sqrtPriceX96: pool.sqrtPriceX96,
     });
   }
   if (market?.loading) return routeLiveness("checking");
-  if (market?.error) return routeLiveness("unavailable", `Current AMM pool state could not be read: ${market.error}`);
-  if (market?.loaded) return routeLiveness("unavailable", "No current reserve snapshot was returned for this recorded pool address.");
-  return routeLiveness("unknown", "Current AMM tokens and reserves have not been loaded for this recorded pool address.");
+  if (market?.error) return routeLiveness("unavailable", `Current Uniswap v4 pool state could not be read: ${market.error}`);
+  if (market?.loaded) return routeLiveness("unavailable", "No current v4 PoolId state was returned for this recorded vault.");
+  return routeLiveness("unknown", "Current v4 PoolKey, slot0, and active liquidity have not been loaded for this recorded vault.");
 }
 
 function livenessPresentation(liveness: RouteLiveness): { group: ParticipationRouteGroup; reason?: string; status: string } {

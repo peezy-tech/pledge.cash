@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {BoardroomGovernanceLogic} from "../BoardroomGovernanceLogic.sol";
 import {BoardroomMarketLogic} from "../BoardroomMarketLogic.sol";
-import {LockedLiquidity} from "../../liquidity/LockedLiquidity.sol";
+import {PledgeV4LiquidityVault} from "../../uniswap/PledgeV4LiquidityVault.sol";
 import {BoardroomFacetBase} from "./BoardroomFacetBase.sol";
 import {BoardroomFacetTypes} from "./BoardroomFacetTypes.sol";
 
@@ -36,42 +36,53 @@ contract BoardroomMarketFacet is BoardroomFacetBase {
 
     function precommitProtocolLiquidity(
         bytes32,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external {
         _delegateMarket(
             abi.encodeCall(
                 BoardroomMarketLogic.precommitProtocolLiquidity,
-                (policyRegistryStorage, shareTokenStorage, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt)
+                (
+                    policyRegistryStorage,
+                    shareTokenStorage,
+                    expectedVault,
+                    expectedPoolId,
+                    quoteAsset,
+                    curve,
+                    salt,
+                    expiresAt
+                )
             )
         );
     }
 
     function activateProtocolLiquidity(
         bytes32,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external {
         _delegateMarket(
             abi.encodeCall(
                 BoardroomMarketLogic.activateProtocolLiquidity,
-                (policyRegistryStorage, locker, pool, quoteAsset, curve, pairKey, salt)
+                (policyRegistryStorage, vault, poolId, quoteAsset, curve, salt)
             )
         );
     }
 
-    function releaseProtocolLiquidityReservation(bytes32, address curve, bytes32 pairKey, bytes32 salt) external {
+    function releaseProtocolLiquidityReservation(bytes32, address curve, bytes32 expectedPoolId, bytes32 salt)
+        external
+    {
         _delegateMarket(
             abi.encodeCall(
-                BoardroomMarketLogic.releaseProtocolLiquidityReservation, (policyRegistryStorage, curve, pairKey, salt)
+                BoardroomMarketLogic.releaseProtocolLiquidityReservation,
+                (policyRegistryStorage, curve, expectedPoolId, salt)
             )
         );
     }
@@ -81,9 +92,9 @@ contract BoardroomMarketFacet is BoardroomFacetBase {
         _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, msg.sender)));
     }
 
-    function closeProtocolLiquidityFromFactory(bytes32, address locker) external {
-        _delegateMarket(abi.encodeCall(BoardroomMarketLogic.closeProtocolLiquidity, (policyRegistryStorage, locker)));
-        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, locker)));
+    function closeProtocolLiquidityFromFactory(bytes32, address vault) external {
+        _delegateMarket(abi.encodeCall(BoardroomMarketLogic.closeProtocolLiquidity, (policyRegistryStorage, vault)));
+        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, vault)));
     }
 
     function exitProtocolLiquidity(bytes32, uint256 amountAMin, uint256 amountBMin, uint256 deadline)
@@ -92,25 +103,26 @@ contract BoardroomMarketFacet is BoardroomFacetBase {
         returns (uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireStatus(BoardroomFacetTypes.BoardroomStatus.WindingDown);
-        address locker = _liquidityLocker();
-        if (locker == address(0)) revert ObligationNotActive(locker);
-        (amountA, amountB, liquidity) = LockedLiquidity(locker).exitToBoardroom(amountAMin, amountBMin, deadline);
+        address vault = _liquidityVault();
+        if (vault == address(0)) revert ObligationNotActive(vault);
+        (amountA, amountB, liquidity) = PledgeV4LiquidityVault(vault).exitToBoardroom(amountAMin, amountBMin, deadline);
     }
 
-    function returnProtocolLiquidityAsLp(bytes32) external nonReentrant returns (uint256 liquidity) {
+    function returnProtocolLiquidityClaims(bytes32) external nonReentrant returns (uint256 claims) {
         _requireStatus(BoardroomFacetTypes.BoardroomStatus.WindingDown);
-        address locker = _liquidityLocker();
-        if (locker == address(0)) revert ObligationNotActive(locker);
-        liquidity = LockedLiquidity(locker).returnLpToBoardroom();
+        address vault = _liquidityVault();
+        if (vault == address(0)) revert ObligationNotActive(vault);
+        claims = PledgeV4LiquidityVault(vault).releaseClaimsToBoardroom();
     }
 
     function closeProtocolLiquidityAfterWindDown(bytes32) external nonReentrant {
         _requireStatus(BoardroomFacetTypes.BoardroomStatus.WindingDown);
-        address locker = _liquidityLocker();
-        if (locker == address(0)) revert ObligationNotActive(locker);
-        LockedLiquidity(locker).close();
-        IBoardroomNativeLiquidityFactoryFinalizer(LockedLiquidity(locker).factory()).finalizeWindDownClosure();
-        _delegateMarket(abi.encodeCall(BoardroomMarketLogic.closeProtocolLiquidityForWindDown, (locker)));
-        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, locker)));
+        address vault = _liquidityVault();
+        if (vault == address(0)) revert ObligationNotActive(vault);
+        PledgeV4LiquidityVault liquidityVault = PledgeV4LiquidityVault(vault);
+        if (!liquidityVault.isClosed()) liquidityVault.close();
+        IBoardroomNativeLiquidityFactoryFinalizer(liquidityVault.factory()).finalizeWindDownClosure();
+        _delegateMarket(abi.encodeCall(BoardroomMarketLogic.closeProtocolLiquidityForWindDown, (vault)));
+        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, vault)));
     }
 }

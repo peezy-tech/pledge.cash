@@ -1,283 +1,218 @@
-# AMM And Locked Liquidity Protocol
+# Uniswap v4 And Protocol-Owned Liquidity
 
-This document describes the AMM and Boardroom-owned locked liquidity primitives in:
+This document describes the pledge.cash liquidity layer implemented by:
 
-- `packages/contracts/src/amm/AmmFactory.sol`
-- `packages/contracts/src/amm/AmmPool.sol`
-- `packages/contracts/src/amm/PoolFees.sol`
-- `packages/contracts/src/amm/AmmRouter.sol`
-- `packages/contracts/src/fees/ProtocolFeeRouter.sol`
-- `packages/contracts/src/liquidity/LockedLiquidityFactory.sol`
-- `packages/contracts/src/liquidity/LockedLiquidity.sol`
+- `packages/contracts/src/uniswap/PledgeV4Hook.sol`
+- `packages/contracts/src/uniswap/PledgeV4LiquidityFactory.sol`
+- `packages/contracts/src/uniswap/PledgeV4LiquidityVault.sol`
+- `packages/contracts/src/uniswap/PledgeV4LiquidityMath.sol`
+- the canonical Uniswap v4 `PoolManager`
 
-## Actors
+Uniswap v4 is the exchange engine. Boardroom policy remains the control plane. pledge.cash does not own a parallel AMM,
+router, reserve ledger, or TWAP implementation.
 
-- Liquidity provider: transfers ERC20 tokens into a pool and receives ERC20 LP tokens.
-- Trader: sends exact-input swaps through the router or directly to a pool.
-- Boardroom: can seed one locked LP position per pool through `LockedLiquidityFactory`.
-- Locked liquidity locker: holds a Boardroom-owned LP position, forwards LP fees to the Boardroom, and exits principal only during Boardroom wind-down.
+## Deployment boundary
 
-## Assets
+Every deployment pins these external contracts and records their code hashes:
 
-- Pool reserves: the two ERC20 tokens held by `AmmPool`.
-- LP swap fees: the LP share of the `30 bps` swap input fee, segregated into the pool's `PoolFees` vault and indexed to LP token holders.
-- Protocol swap fees: optional protocol share of the swap fee, paid to the factory's governance-controlled recipient. The
-  canonical deployment uses `ProtocolFeeRouter`, whose treasury destination remains rotatable across Boardroom
-  wind-downs.
-- LP principal: ERC20 LP tokens minted by the pool. Boardroom-owned principal sits inside a `LockedLiquidity` clone.
-- Native gas token: supported only through `AmmRouter` and its immutable wrapped-native token.
+- Uniswap v4 `PoolManager`;
+- Universal Router;
+- v4 Quoter;
+- v4 StateView;
+- v4 PositionManager;
+- Permit2.
 
-Pools support standard, non-rebasing ERC20 tokens whose transfers debit and credit the requested amount exactly. Tokens
-with transfer taxes, sender surcharges, rebases, balance-changing hooks, or mutable transfer behavior are outside the
-supported set. Router inputs and locked-liquidity funding enforce exact receipt, and fee-manager excess recovery also
-requires exact sender and recipient deltas. A negative rebase is rejected with `BalanceBelowReserve`; it cannot be
-silently synchronized into LP accounting.
+The pledge.cash deployment creates one hook, one liquidity-vault implementation, and one liquidity factory against those
+addresses. A deployment is incomplete if any external address is missing, has no code, or does not match the promoted
+artifact. Upgrading or replacing Uniswap infrastructure is a new protocol release, not an owner setting.
 
-`AmmFactory.owner()` is protocol governance. Governance may rotate the protocol fee recipient and the operational fee
-manager independently. The fee manager can reconcile untracked pool balances but cannot redirect protocol revenue.
-When the recipient is unset, all swap fees accrue to LPs. The canonical deployment script sets it to
-`ProtocolFeeRouter`, and
-`PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred there. Anyone may call `ProtocolFeeRouter` to forward
-its token or native balance to the configured treasury; only the fee router's owner may rotate that treasury.
+The current application supports ERC20 currencies only. Native input, wrapping, and unwrapping are deliberately disabled
+until the Universal Router action plan explicitly covers them.
 
-The nominal swap fee rounds up. Consequently, splitting one input across smaller swaps cannot reduce the total nominal
-fee. The pool carries both protocol-share division remainders and LP-index numerator remainders forward so repeated
-small swaps cannot systematically escape either allocation.
+## Canonical identity
 
-## State Machines
+For each Boardroom, `PledgeV4LiquidityFactory` permits at most one permanent protocol-liquidity identity:
 
-### Pool
+- one quote asset;
+- one full Uniswap v4 `PoolKey` and `PoolId`;
+- one deterministic P4LP vault;
+- one full-range position owned by that vault.
 
-1. Uninitialized clone.
-2. Initialized with sorted token pair, fee vault, empty reserves, and initial TWAP observation.
-3. Active pool where liquidity can be added, removed, swapped, and fee claims can be pulled by LP holders.
+Exactly one currency must be the Boardroom's canonical share token. The factory, vault, Boardroom, hook, PoolManager,
+currencies, fee, tick spacing, and PoolId must agree. A v4 pool has no pair-contract address; product routes use the vault
+address as their stable project-scoped handle and the PoolId as exchange identity.
 
-The factory creates exactly one pool for each sorted pair. Its immutable `boardroomFactory` identifies canonical
-Boardroom share tokens. An empty pool containing one of those shares cannot accept an unreserved first mint, even if
-someone created the pool while a governance action was waiting in the timelock.
+Third parties may create other v4 pools or positions. They are ordinary Uniswap liquidity and do not become pledge.cash
+obligations, P4LP backing, or Boardroom-owned liquidity.
 
-Before a Boardroom locker funds an empty pool, `LockedLiquidityFactory` reserves that pair's initial mint in
-`AmmFactory`. Direct Boardroom creation reserves in the same transaction immediately before funding; curve migrations
-reserve when the migration is authorized. The reservation binds the expected initializer and LP recipient to the
-predicted locker. Only the canonical `AmmRouter` may consume a reservation, and consumption occurs inside the pool's
-first mint so any later failure restores it atomically. The locker factory grants this authority only when the caller is
-registered by its immutable `BoardroomFactory` and the claimed share token points back to that exact Boardroom.
+## Hook
 
-For an unreserved public pool, `MINIMUM_LIQUIDITY` remains permanently minted to `address(1)`. A reserved Boardroom
-pool instead mints the entire geometric-mean initial LP supply to its locked-liquidity recipient. Because that recipient
-cannot release LP before wind-down, the same anti-withdrawal property holds during the active lifecycle. If nobody adds
-liquidity later, terminal exit owns and burns the complete supply, drains both reserves, and leaves no irredeemable
-Boardroom shares in the pool. Later public LP positions remain independently owned and are not confiscated by wind-down.
+`PledgeV4Hook` enables only `beforeInitialize`. It accepts initialization only from the canonical pledge.cash liquidity
+factory and only for the exact PoolKey currently authorized by that factory. This prevents an unrelated caller from
+initializing a reserved pledge.cash PoolId with a conflicting starting price.
 
-### Locked Liquidity
+The hook does not implement swap math, dynamic fees, access-controlled trading, fee siphoning, or lifecycle governance.
+Those concerns remain respectively in Uniswap v4, the fixed PoolKey, and the Boardroom/vault state machines.
 
-1. Uninitialized clone.
-2. Initialized for one Boardroom, router, and token pair.
-3. Seeded once through the factory. LP tokens are held by the locker.
-4. Active fee-claiming phase. Principal remains locked.
-5. Boardroom wind-down exit. The locker claims fees, removes all LP it owns, and sends underlying tokens to the Boardroom.
-6. The empty locker closes explicitly. Its permanent locker, Boardroom, quote-asset, and pool identity remain intact;
-   the singleton cannot be replaced.
+The hook address encodes its permission bitmap, so deployment mines a CREATE2 salt only after the factory address is
+known. The supported bitmap is `beforeInitialize` only.
 
-### Boardroom
+## P4LP claims
 
-The Boardroom records lockers created while active. During wind-down, it may call `claimFees` through the locker policy or call `exitLockedLiquidity` directly. Redemptions cannot open while any recorded locker still reports locked LP principal.
+The vault owns one full-range v4 liquidity position and issues ERC20 P4LP claims. One P4LP unit represents one unit of
+position liquidity, so these invariants hold after every successful mutation:
 
-## Public Flows
+```text
+totalSupply(P4LP) == positionLiquidity
+vault-held P4LP == protocol-owned portion
+externally held P4LP == user claim portion
+```
 
-### Create Pool
+P4LP is not a Uniswap PositionManager NFT and is not a claim on third-party v4 positions. It is a lifecycle-bound claim
+on one pledge.cash vault position.
 
-Preconditions:
+## State machine
 
-- token addresses are nonzero and distinct,
-- no pool exists for the sorted pair.
+```text
+Uninitialized -> Active -> Claims -> Closed
+```
 
-Effects:
+- `Uninitialized`: clone has no identity or position.
+- `Active`: the canonical position exists; external deposits may add proportional liquidity and receive P4LP. Boardroom
+  governance may remove only vault-held protocol claims and may collect fees.
+- `Claims`: Boardroom wind-down can now finalize and prune the active-obligation gate. P4LP holders may burn claims for
+  their proportional underlying assets. No new deposits are accepted.
+- `Closed`: supply and position liquidity are zero. Identity remains permanent and cannot be replaced.
 
-- factory deploys a deterministic pool clone,
-- pool initializes token ordering, fee vault, reserves, and first observation,
-- factory records both token order mappings and pool validation state.
+The Boardroom records the vault as its single liquidity obligation while it is Active and pre-registers the vault token
+as a dependency. It also registers both the vault and the shared PoolManager as encumbered accounts in that Boardroom's
+project-token contract. Project tokens held as v4 principal are therefore excluded from governance-eligible circulating
+supply even though the PoolManager is a singleton. Redemptions cannot advance past the liquidity obligation. During
+wind-down, exact exit or the no-underlying-call Claims transition makes the vault terminal for lifecycle purposes; a
+separate close/finalize call synchronizes factory and Boardroom status and prunes the obligation.
 
-### Add Liquidity
+## Create protocol liquidity
 
-Preconditions:
+Boardroom governance executes approvals and `createProtocolLiquidity` through the liquidity-factory policy. The factory:
 
-- caller approved the router,
-- desired amounts satisfy min amount checks,
-- for Boardroom-owned locked liquidity, each minimum is at least `95%` of its corresponding desired amount,
-- token transfers arrive exactly.
+1. authenticates the calling Boardroom through `BoardroomFactory`;
+2. verifies the share/quote pair and permanent singleton reservation;
+3. sorts the ERC20 currencies and constructs the fixed 0.30% fee, tick-spacing-60 PoolKey;
+4. authorizes and initializes the PoolId through the hook if needed;
+5. deploys the deterministic vault;
+6. transfers both assets exactly into the vault;
+7. mints a full-range v4 position at the caller-bound initial `sqrtPriceX96`;
+8. records the vault and PoolId in both the factory and Boardroom.
 
-Effects:
+Desired amounts, per-token minimums, deadline, salt, and initial price are transaction-bound. Supported assets must have
+exact sender and recipient balance deltas. Fee-on-transfer, rebasing, no-op, and mutable-transfer tokens are unsupported.
 
-- router creates the pool if needed,
-- tokens move into the pool,
-- pool mints LP tokens to the recipient,
-- an unreserved first mint permanently locks `MINIMUM_LIQUIDITY` to `address(1)`, while a reserved Boardroom first mint
-  sends the complete initial LP supply to the authenticated locker.
+Curve migration supplies its terminal price explicitly. The realized position price must remain within 50 basis points
+of that price; unused shares and quote return to the Boardroom.
 
-If an initial-liquidity reservation exists, the router also proves the real token payer to the pool. Direct pool mints,
-router calls funded by another account, and mints to another recipient all revert. Unreserved pools retain the public
-first-liquidity flow.
+## External deposits
 
-Fee-on-transfer seed tokens are rejected by exact balance-delta checks.
+While Active, anyone may deposit both currencies into the canonical vault. The vault uses current v4 state and its fixed
+full-range ticks to calculate the proportional position increase, refunds unused desired amounts, and mints exactly the
+added liquidity as P4LP to the chosen recipient.
 
-The locked-liquidity factory reserves an empty pool before pulling seed assets and enforces the two-sided `5%` maximum
-seed slippage in contract, including migrations from a bonding curve. A permissionless caller may pre-create the
-canonical pair, but cannot take the first mint after reservation. If a pool is already initialized, a hostile reserve
-ratio cannot reduce either Boardroom contribution below the configured bounds; the transaction reverts atomically
-instead. During a reserved first mint, supported exact-transfer token donations are swept atomically to the reservation
-owner before the seed balances are verified. A hostile or inexact token can still make that initialization revert, so
-the reservation protects first-mint ownership without making arbitrary token behavior safe.
+Deposits cannot choose another PoolKey, tick range, hook, salt, or position owner. Both minimum amounts and a deadline
+bound execution. An external deposit cannot mint or transfer the vault's protocol-owned claims.
 
-### Swap
+## Swaps
 
-Preconditions:
+Swaps use the deployed Universal Router's v4 command and Permit2:
 
-- output amount is nonzero,
-- output amount is less than reserves,
-- exact input has arrived before the pool invariant check.
+1. approve the input ERC20 to Permit2;
+2. approve the Universal Router in Permit2 with a bounded amount and expiration;
+3. obtain an exact-input-single quote from the v4 Quoter for the canonical PoolKey;
+4. submit the Universal Router v4 action sequence: exact-input-single, settle-all input, take-all output;
+5. bind minimum output, recipient, and deadline.
 
-Effects:
+The pledge.cash hook adds no swap callback. Execution price, tick crossing, protocol fees configured in Uniswap, and
+third-party liquidity are therefore Uniswap behavior. The UI reads slot0 and active liquidity from StateView and never
+interprets compatibility reserve fields as real reserves.
 
-- pool optimistically transfers output,
-- optional callback runs,
-- pool measures input by balance delta,
-- the `30 bps` nominal fee, rounded up, is removed from reserves,
-- the protocol share, if configured, is transferred to the protocol fee recipient,
-- the LP share is moved to `PoolFees`,
-- LP fee index for the input token advances by the actual amount received by `PoolFees`,
-- adjusted reserves must preserve or increase `x*y`,
-- reserve and cumulative price state update.
+Uniswap v4 does not provide the old pledge.cash cumulative-price oracle. Current product surfaces show v4 spot and Quoter
+output. Any future feature requiring manipulation-resistant historical pricing needs a separately reviewed oracle or
+oracle hook; it must not infer a TWAP from spot.
 
-Multi-pool cyclic paths are supported, including routes whose final token equals their input token. The router measures
-the recipient's final-token balance only after the initial input transfer, so reported output is the gross cycle output
-rather than the recipient's net balance change. Each pool may appear at most once in a route, because quoting a reused
-pool against its pre-swap reserves would be ambiguous.
+## Fee policy
 
-### Transfer Or Burn LP Tokens
+The PoolKey LP fee is fixed at 0.30%. When the vault collects fees from its own position:
 
-Unclaimed LP fee entitlement travels pro rata with ordinary LP-token transfers. A temporary LP holder therefore cannot
-hold borrowed LP during its own swap, return the same LP, and retain the fees generated during the loan. A transfer of
-LP into its own pool for removal is treated differently: accrued entitlement remains claimable by the liquidity owner
-after the LP is burned. Incoming entitlement and fee accrual after a same-block LP receipt remain pending until a later
-block. Existing mature entitlement stays claimable, so transferring one dust LP unit cannot freeze a holder's earlier
-fees; a flash borrower also cannot claim the lender's historical entitlement before returning the LP.
-If LP received in the current block is burned, its proportional pending entitlement is forfeited and re-indexed across
-the post-burn LP supply. This prevents a just-in-time provider from minting, generating its own swap fee, removing the
-liquidity, and claiming that pending fee later; mature fees on older liquidity remain claimable after a burn.
+- 5% goes to the deployment's protocol-fee recipient;
+- 95% goes to the Boardroom while Active;
+- after Claims begins, the non-protocol portion remains in the vault as P4LP backing.
 
-Fee-vault payouts require both the vault's exact spend and the recipient's exact receipt. If a token later mutates into a
-taxed, partial, or success-without-transfer mode, the claim reverts atomically instead of clearing the LP holder's fee
-entitlement. The same revert protects a locker exit, allowing its delayed LP fallback to preserve principal and fees.
+This split applies only to fees earned by the vault's position. It is not 5% of every swap in the shared PoolId: fees
+earned by third-party positions belong to those positions. Uniswap protocol fees, if enabled externally, are separate
+and outside pledge.cash governance.
 
-### Recover Or Synchronize Excess Balances
+## Active removal
 
-Only the factory's current fee manager can call the explicit positive-balance reconciliation functions:
+Boardroom governance may remove only liquidity represented by P4LP already held by the vault. User-owned P4LP cannot be
+burned or diluted. Removed currency goes to the Boardroom, minimums and deadline are enforced, and the corresponding
+vault-held claims are burned.
 
-- `recoverExcess(recipient)` transfers exactly the two excess amounts without changing reserves;
-- `syncExcess()` incorporates the current positive excess into reserves, subject to the `uint112` reserve cap.
+## Wind-down
 
-Neither function permits a balance below its recorded reserve, recovery rejects inexact token transfers, and
-`syncExcess` is unavailable before the first LP supply exists. These functions are best-effort operational tools, not
-custody for accidental transfers. Because mint and swap infer input from raw pool balance deltas, any untracked balance
-can be consumed permissionlessly before the fee manager recovers it. Never transfer assets to a pool outside an atomic
-router or pool interaction with the expectation that they remain recoverable.
+During `WindingDown`, anyone may ask the Boardroom to resolve its canonical vault.
 
-### Create Boardroom Locked Liquidity
+The normal path removes all position liquidity, sends both underlying currencies to the Boardroom, registers non-share
+assets for redemption, burns returned treasury shares where required, and closes the empty vault.
 
-Boardroom governance executes a batch, directly by the owner before launch or through a proposer-scheduled controller
-operation after launch:
+The liveness fallback calls `releaseClaimsToBoardroom`. It performs no underlying-token transfer and does not collect
+fees. Instead it:
 
-1. approve `LockedLiquidityFactory` for the Boardroom share token,
-2. approve `LockedLiquidityFactory` for the quote token,
-3. call `createLockedLiquidity`.
+- changes the vault to Claims;
+- transfers the vault-held protocol P4LP to the Boardroom;
+- leaves the already registered P4LP dependency available as a redeemable asset.
 
-The factory policy permits creation only when exactly one side is the creating Boardroom's canonical share token. The
-Boardroom can configure exactly one permanent quote asset, locker, and pool. Canonical share/share pairs are rejected.
-The factory precommits the singleton, verifies the pool is unseeded, pulls exact seed amounts to the predicted locker,
-and activates the Boardroom position atomically. Repeated additions must use that same locker and pool.
+Anyone then calls the Boardroom close/finalize route. It marks the factory and Boardroom singleton Closed and prunes the
+liquidity obligation even while external claims remain. Those external claims keep their independent vault redemption
+route and do not block the Boardroom snapshot.
 
-### Claim Locked LP Fees
+This means a reverting, gas-burning, taxed, or otherwise hostile underlying token cannot block the Boardroom snapshot.
+P4LP holders can attempt proportional underlying redemption independently after Claims begins, while Boardroom holders
+can receive the P4LP claim through the normal redemption ledger.
 
-The Boardroom may call `LockedLiquidity.claimFees` through policy while active or winding down. Before launch its owner
-can request the call directly; after launch active-state calls use the external controller. The locker claims its LP
-fees from the pool and forwards token balances to the Boardroom.
+## External calls and reentrancy
 
-### Exit Locked LP
-
-During `WindingDown`, anyone may call `exitLockedLiquidity`. The Boardroom:
-
-1. verifies the locker was recorded,
-2. asks the locker to claim fees and remove all LP it owns,
-3. requires the Pool's exact pro-rata spend and the Boardroom's exact receipt for both assets, in addition to any stricter
-   caller minima,
-4. registers non-share token sides as redeemable assets,
-5. burns Boardroom-held share tokens,
-6. unpins and removes the now-empty LP fallback asset, then emits the direct-exit event.
-
-The LP token is admitted and pinned as a fallback redemption asset when the locker is recorded, so it cannot be removed
-while principal remains open. Before the terminal delay, an inexact, taxed, no-op, reverting, or gas-burning underlying
-transfer reverts atomically and preserves the locker LP. Once the greater of one day or the launched Boardroom's
-governance delay has elapsed, the Boardroom retries with protocol-fixed minima under bounded gas. If that exact exit
-still fails, the locker transfers its LP token itself to the Boardroom, the LP remains admitted, unreadable underlying
-assets are quarantined, and the locker is pruned. This fallback preserves the Pool claim without letting a hostile token
-block unrelated redemptions. Redemption supply remains total economic share supply; pool-held shares are not generically
-excluded because later public LP positions may own them.
-
-Redemptions can open only after all recorded lockers report zero locked LP. Unreserved pools retain permanently locked
-first-liquidity dust; a reserved pool has none unless later public liquidity changes the ownership set.
-
-### Close The Singleton
-
-LP balance zero does not mean closed. Closure is a separate empty-only, reservation-free transition. It is irreversible
-and never clears the permanent quote asset, locker, or pool identity. During wind-down anyone may perform full exit and
-explicit closure; hostile-token fallback returns the LP claim to the Boardroom rather than blocking snapshotting.
+The factory and vault call ERC20 contracts and the shared PoolManager. Exact balance-delta checks reject non-standard
+asset movement. Mutating entry points are non-reentrant. PoolManager callbacks accept calls only from the configured
+manager and only when a hash of the pending operation matches; unsolicited unlock callbacks fail closed.
 
 ## Bounds
 
-- `AmmRouter.MAX_SWAP_PATH_LENGTH` bounds swap path loops.
-- `AmmPool.MAX_SAMPLE_POINTS` bounds TWAP sample output size.
-- One explicit-state protocol-liquidity position exists per Boardroom; it is not an array capacity.
-- Boardroom batch execution remains bounded by `Boardroom.MAX_BATCH_CALLS`.
+- one canonical vault and PoolId per Boardroom;
+- fixed full-range ticks derived from tick spacing;
+- the initial square-root price must lie strictly inside those usable full-range ticks;
+- positive position liquidity must fit `uint128`;
+- public amount, price, minimum, and deadline inputs are checked before external effects;
+- no public transition iterates over lifetime liquidity history;
+- Boardroom batch execution remains bounded by its release policy;
+- UI discovery and RPC hydration use explicit page and concurrency limits.
 
-`AmmPool.sample` locates observations with binary search, so lookup cost grows logarithmically with history. It rejects
-windows older than the first recorded observation rather than fabricating a partial-history average. Observation order
-uses full `uint64` timestamps across the year-2106 `uint32` rollover; the legacy timestamp returned by `getReserves`
-and each `observations` entry deliberately remains the low 32 bits for API compatibility. Full ordered timestamps are
-available through `observationTimestampAt`. Inputs are also bounded so `points * window` fits `uint64`.
+## Core invariants
 
-When reserves change more than once at one timestamp, the pool overwrites that timestamp's latest observation instead
-of leaving the earlier reserve snapshot in place. This includes the initial mint, which replaces the initializer's
-zero-reserve checkpoint and prevents a later sample from treating seeded history as zero-priced.
+- Boardroom policy controls protocol liquidity; the hook never becomes a second governance plane.
+- Canonical PoolKey, PoolId, vault, Boardroom, factory, manager, and hook identities agree.
+- Project tokens held by the vault or PoolManager remain excluded from governance-eligible supply.
+- P4LP total supply always equals the vault position's liquidity.
+- Active removal cannot consume externally held claims.
+- Claims mode cannot be reopened and accepts no deposits.
+- A hostile underlying cannot prevent the no-transfer wind-down fallback.
+- Exact-transfer checks prevent silent accounting drift.
+- v4 singleton balances or compatibility reserve fields are never treated as pair reserves.
+- third-party v4 positions are not protocol-owned and receive no pledge.cash lifecycle guarantee.
 
-Each reserve is capped at `type(uint112).max` raw token units. Quote, liquidity, burn, fee, and sample arithmetic uses
-full-precision multiply/divide where user-controlled multiplication could otherwise overflow before the cap is checked.
-
-## Invariants
-
-- one pool exists per sorted token pair,
-- for supported tokens, recorded reserves equal pool balances minus any positive untracked excess after fees are moved
-  to `PoolFees` and the protocol recipient,
-- LP fee claims cannot exceed `PoolFees` balances,
-- protocol fee routing and the operational fee manager can be rotated only by factory governance,
-- reserved initial liquidity can be minted only through the canonical router by the expected payer to the expected LP
-  recipient, and reservation consumption is atomic with the mint,
-- ordinary LP transfers move unclaimed fee entitlement pro rata with the LP balance,
-- same-block incoming and newly accrued entitlement is pending while existing mature fees remain claimable,
-- LP sent into the pool for burning leaves already accrued fees claimable by its former owner,
-- nominal swap fees round up and division remainders carry forward,
-- pending fees forfeited by a same-block LP burn are redistributed across the remaining supply,
-- locked Boardroom LP principal remains in the locker while the Boardroom is active,
-- pruning restores active locker capacity without erasing permanent locker identity,
-- Boardroom redemptions cannot open while any recorded locker still holds LP,
-- token inputs must arrive exactly, rejecting fee-on-transfer behavior,
-- native flows unwrap only the router's immutable wrapped-native token.
-- native-output flows reject the zero address as recipient.
-- untracked pool balances are public swap or mint inputs until the fee manager recovers or synchronizes them.
-- an uninitialized pool cannot synchronize donations into one-sided or otherwise unusable reserves.
-
-## Local Proof
+## Local proof
 
 ```sh
-bun --cwd packages/contracts test --match-contract 'AmmTest|AmmInvariantTest|LockedLiquidityTest'
+bun --cwd packages/contracts test
+bun --cwd packages/sdk test
+bun --cwd apps/web test
 ```
+
+The focused contract suite is `packages/contracts/test/uniswap/PledgeV4Liquidity.t.sol`.

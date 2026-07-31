@@ -44,7 +44,7 @@ const deploymentDir = "../../packages/contracts/deployments";
 const deploymentFiles = (await readdir(deploymentDir)).filter((file) => file.endsWith(".json"));
 if (deploymentFiles.length === 0) {
   await writeFile(
-    join(deploymentOutDir, "998.json"),
+    join(deploymentOutDir, "10143.json"),
     `${JSON.stringify({ status: "pending", reason: "Broadcast artifact not published yet" })}\n`,
   );
 } else {

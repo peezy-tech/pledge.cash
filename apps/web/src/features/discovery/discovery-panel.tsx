@@ -3,8 +3,7 @@ import type {
   DiscoveredBoardroom,
   DiscoveredDistribution,
   DiscoveredGrant,
-  DiscoveredLockedLiquidity,
-  DiscoveredPool,
+  DiscoveredProtocolLiquidity as DiscoveredLockedLiquidity,
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import { AlertTriangle, CheckCircle2, Database, FolderSearch, KeyRound, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2 } from "lucide-react";
@@ -61,7 +60,6 @@ type DiscoveryView = {
   loadedForCurrentAccount: boolean;
   lockers: DiscoveredLockedLiquidity[];
   originalHolderGrants: DiscoveredGrant[];
-  pools: DiscoveredPool[];
   status: {
     description: string;
     label: string;
@@ -151,19 +149,12 @@ export function WalletAccessPanel({
           />
           <ObligationDiscoveryList
             distributions={view.distributions}
-            lockerActionLabel="Open locker"
+            lockerActionLabel="Open vault"
             lockers={view.lockers}
             title="Treasury actions you can manage"
             useDistribution={useDistribution}
             useLockedLiquidity={useLockedLiquidity}
             distributionActionLabel="Open distribution"
-          />
-          <PoolDiscoveryList
-            actionLabel="Open locker"
-            lockers={view.lockers}
-            pools={view.pools}
-            title="Liquidity linked to your Boardrooms"
-            useLockedLiquidity={useLockedLiquidity}
           />
         </>
       ) : null}
@@ -351,7 +342,6 @@ function DiscoveryDiagnosticsResults({
         originalHolderGrants={view.originalHolderGrants}
       />
       <ObligationDiscoveryList distributions={view.distributions} lockers={view.lockers} useDistribution={useDistribution} useLockedLiquidity={useLockedLiquidity} />
-      <PoolDiscoveryList lockers={view.lockers} pools={view.pools} useLockedLiquidity={useLockedLiquidity} />
     </>
   );
 }
@@ -480,7 +470,7 @@ function GrantColumn({
 function ObligationDiscoveryList({
   distributions,
   distributionActionLabel = "Use Distribution",
-  lockerActionLabel = "Use Locker",
+  lockerActionLabel = "Use Vault",
   lockers,
   title = "Boardroom Obligations",
   useDistribution,
@@ -527,17 +517,18 @@ function ObligationDiscoveryList({
             </ol>
           </section>
           <section className="min-w-0 bg-zinc-950">
-            <h3 className="m-0 border-b border-zinc-800 px-4 py-3 text-sm font-semibold text-zinc-100">Locked Liquidity</h3>
-            {lockers.length === 0 ? <p className="m-0 p-4 text-sm text-zinc-500">No lockers</p> : null}
+            <h3 className="m-0 border-b border-zinc-800 px-4 py-3 text-sm font-semibold text-zinc-100">Uniswap v4 Protocol Liquidity</h3>
+            {lockers.length === 0 ? <p className="m-0 p-4 text-sm text-zinc-500">No protocol-liquidity vaults</p> : null}
             <ol className="grid gap-px bg-zinc-800">
               {lockers.map((locker) => (
-                <li className="grid gap-3 bg-zinc-950 p-4" key={locker.locker}>
-                  <AddressLink address={locker.locker} />
+                <li className="grid gap-3 bg-zinc-950 p-4" key={locker.vault}>
+                  <AddressLink address={locker.vault} />
                   <Facts
                     columns="one"
                     items={[
                       { label: "Boardroom", value: <AddressLink address={locker.boardroom} /> },
-                      { label: "Pool", value: <AddressLink address={locker.pool} /> },
+                      { label: "Pool ID", value: <span className="break-all font-mono text-xs">{locker.poolId}</span> },
+                      { label: "Quote asset", value: <AddressLink address={locker.quoteAsset} /> },
                       { label: "Liquidity", value: locker.liquidity.toString() },
                     ]}
                   />
@@ -549,64 +540,6 @@ function ObligationDiscoveryList({
               ))}
             </ol>
           </section>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-function PoolDiscoveryList({
-  actionLabel = "Use Locker",
-  lockers,
-  pools,
-  title = "Pools And Liquidity",
-  useLockedLiquidity,
-}: {
-  actionLabel?: string;
-  lockers: DiscoveredLockedLiquidity[];
-  pools: DiscoveredPool[];
-  title?: string;
-  useLockedLiquidity: (locker: DiscoveredLockedLiquidity) => void;
-}): React.JSX.Element {
-  return (
-    <Panel title={title}>
-      {pools.length === 0 && lockers.length === 0 ? (
-        <EmptyList label="No pools" />
-      ) : (
-        <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 xl:grid-cols-2">
-          {pools.map((pool) => (
-            <div className="grid gap-3 bg-zinc-950 p-4" key={pool.pool}>
-              <AddressLink address={pool.pool} />
-              <Facts
-                columns="one"
-                items={[
-                  { label: "Token 0", value: <AddressLink address={pool.token0} /> },
-                  { label: "Token 1", value: <AddressLink address={pool.token1} /> },
-                  { label: "Created block", value: pool.createdAtBlock.toString() },
-                ]}
-              />
-            </div>
-          ))}
-          {lockers.map((locker) => (
-            <div className="grid gap-3 bg-zinc-950 p-4" key={`${locker.locker}-pool`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <AddressLink address={locker.pool} />
-                <Badge variant="default">Locked LP</Badge>
-              </div>
-              <Facts
-                columns="one"
-                items={[
-                  { label: "Locker", value: <AddressLink address={locker.locker} /> },
-                  { label: "Pair", value: `${locker.tokenA} / ${locker.tokenB}` },
-                  { label: "Liquidity", value: locker.liquidity.toString() },
-                ]}
-              />
-              <Button size="sm" variant="secondary" onClick={() => useLockedLiquidity(locker)}>
-                <Database className="h-3.5 w-3.5" />
-                {actionLabel}
-              </Button>
-            </div>
-          ))}
         </div>
       )}
     </Panel>
@@ -675,7 +608,7 @@ function discoveryDiagnosticsView(
   const errors = view.loadedForCurrentAccount ? discovery.errors : [];
 
   return {
-    cachedObjectsLabel: `${view.grants.length} grants / ${view.distributions.length} distributions / ${view.lockers.length} lockers / ${view.pools.length} pools`,
+    cachedObjectsLabel: `${view.grants.length} grants / ${view.distributions.length} distributions / ${view.lockers.length} liquidity vaults`,
     canResume: Boolean(account && discovery.lastScannedBlock),
     canScan: Boolean(account && deployment),
     errors,
@@ -703,11 +636,10 @@ function discoveryView(
   const grants = loadedForCurrentAccount ? Object.values(discovery.grantsByAddress) : [];
   const distributions = loadedForCurrentAccount ? Object.values(discovery.distributionsByAddress) : [];
   const lockers = loadedForCurrentAccount ? Object.values(discovery.lockersByAddress) : [];
-  const pools = loadedForCurrentAccount ? Object.values(discovery.poolsByAddress) : [];
   const heldGrants = account ? grants.filter((grant) => grantHeldBy(grant, account, includeClosedGrants)) : [];
   const issuedGrants = account ? grants.filter((grant) => grantIssuedBy(grant, account, includeClosedGrants)) : [];
   const originalHolderGrants = account ? grants.filter((grant) => grantOriginalHolder(grant, account, includeClosedGrants)) : [];
-  const totalLinkedItems = boardrooms.length + heldGrants.length + issuedGrants.length + originalHolderGrants.length + distributions.length + lockers.length + pools.length;
+  const totalLinkedItems = boardrooms.length + heldGrants.length + issuedGrants.length + originalHolderGrants.length + distributions.length + lockers.length;
 
   return {
     boardrooms,
@@ -718,7 +650,6 @@ function discoveryView(
     loadedForCurrentAccount,
     lockers,
     originalHolderGrants,
-    pools,
     status: discoveryStatus(account, deployment, discovery, loadedForCurrentAccount, loading, totalLinkedItems),
     totalLinkedItems,
   };

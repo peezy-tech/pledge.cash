@@ -4,9 +4,7 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmPool} from "../../src/amm/AmmPool.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
 import {BoardroomFacetTypes as Boardroom} from "../../src/boardroom/diamond/BoardroomFacetTypes.sol";
@@ -17,7 +15,10 @@ import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemption
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {BondMarket} from "../../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
+import {PledgeV4LiquidityFactory} from "../../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {PledgeV4LiquidityVault} from "../../src/uniswap/PledgeV4LiquidityVault.sol";
 import {CanonicalBoardroomTestSetup} from "../helpers/CanonicalBoardroomTestSetup.sol";
+import {V4PoolManagerMock} from "../helpers/V4PoolManagerMock.sol";
 
 contract BondTestToken is ERC20 {
     string internal tokenName;
@@ -85,12 +86,14 @@ contract BondFeeToken {
     }
 }
 
+contract BondProtocolFeeRecipient {}
+
 contract BondMarketTest is CanonicalBoardroomTestSetup {
     BoardroomPolicyRegistry internal policyRegistry;
     AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
-    AmmFactory internal ammFactory;
-    AmmRouter internal ammRouter;
+    V4PoolManagerMock internal poolManager;
+    PledgeV4LiquidityFactory internal liquidityFactory;
     BondMarketFactory internal bondMarketFactory;
     IBoardroom internal boardroom;
     BoardroomToken internal shareToken;
@@ -109,15 +112,19 @@ contract BondMarketTest is CanonicalBoardroomTestSetup {
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = _deployCanonicalBoardroomFactory(policyRegistry, address(wrappedNative));
-        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
-        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
-        ammFactory.setLiquidityRouter(address(ammRouter));
-        ammFactory.setReservationManager(address(this));
-        bondMarketFactory = new BondMarketFactory(address(ammFactory), address(boardroomFactory));
+        poolManager = new V4PoolManagerMock();
+        BondProtocolFeeRecipient feeRecipient = new BondProtocolFeeRecipient();
+        liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(boardroomFactory), address(feeRecipient), address(this)
+        );
+        liquidityFactory.deployHook(_mineHookSalt());
+        bondMarketFactory = new BondMarketFactory(address(liquidityFactory), address(boardroomFactory));
         quoteToken = new BondTestToken("USD Coin", "USDC", 6);
 
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
+        policyRegistry.registerModulePolicy(address(liquidityFactory));
         policyRegistry.registerModulePolicy(address(bondMarketFactory));
+        assetPolicy.setApprovalSpenderAllowed(address(liquidityFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(bondMarketFactory), true);
 
         boardroom =
@@ -337,37 +344,62 @@ contract BondMarketTest is CanonicalBoardroomTestSetup {
 
     function testBoardroomCreatesLiquidityBondForFundedCanonicalSharePool() public {
         BondTestToken pairedToken = new BondTestToken("Paired Asset", "PAIR", 18);
-        vm.prank(owner);
-        boardroom.mint(_expectedFacetSetHash(boardroom), owner, 1_000 ether);
-        pairedToken.mint(owner, 1_000 ether);
-
-        address pool =
-            ammFactory.reserveInitialLiquidity(address(shareToken), address(pairedToken), owner, owner, owner);
+        assetPolicy.setAssetAllowed(address(pairedToken), true);
         vm.startPrank(owner);
-        shareToken.approve(address(ammRouter), 500 ether);
-        pairedToken.approve(address(ammRouter), 500 ether);
-        (,, uint256 liquidity) = ammRouter.addLiquidity(
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 500 ether);
+        pairedToken.mint(address(boardroom), 500 ether);
+        PledgeV4LiquidityFactory.CreateParams memory liquidityParams = PledgeV4LiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(pairedToken),
+            amountADesired: 500 ether,
+            amountBDesired: 500 ether,
+            amountAMin: 475 ether,
+            amountBMin: 475 ether,
+            sqrtPriceX96: 1 << 96,
+            deadline: block.timestamp,
+            salt: keccak256("lp-market-vault")
+        });
+        Boardroom.Call[] memory liquidityCalls = new Boardroom.Call[](3);
+        liquidityCalls[0] = _policyCall(
+            address(assetPolicy),
             address(shareToken),
-            address(pairedToken),
-            500 ether,
-            500 ether,
-            500 ether,
-            500 ether,
-            owner,
-            block.timestamp
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), 500 ether)
         );
-        assertTrue(AmmPool(pool).transfer(address(boardroom), liquidity));
+        liquidityCalls[1] = _policyCall(
+            address(assetPolicy),
+            address(pairedToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(liquidityFactory), 500 ether)
+        );
+        liquidityCalls[2] = _policyCall(
+            address(liquidityFactory),
+            address(liquidityFactory),
+            0,
+            abi.encodeCall(PledgeV4LiquidityFactory.createProtocolLiquidity, (liquidityParams))
+        );
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), liquidityCalls);
+        (address vaultAddress,,,,) = abi.decode(results[2], (address, bytes32, uint256, uint256, uint256));
+        PledgeV4LiquidityVault vault = PledgeV4LiquidityVault(vaultAddress);
+
+        boardroom.mint(_expectedFacetSetHash(boardroom), owner, 100 ether);
+        pairedToken.mint(owner, 100 ether);
+        shareToken.approve(vaultAddress, 100 ether);
+        pairedToken.approve(vaultAddress, 100 ether);
+        (,, uint128 liquidity) =
+            vault.depositLiquidityForClaims(100 ether, 100 ether, 95 ether, 95 ether, owner, block.timestamp);
+        assertTrue(vault.transfer(address(boardroom), liquidity));
         vm.stopPrank();
 
-        assetPolicy.setAssetAllowed(pool, true);
-        BondMarket.CreateParams memory params = _params(pool, keccak256("lp-market"));
+        assetPolicy.setAssetAllowed(vaultAddress, true);
+        BondMarket.CreateParams memory params = _params(vaultAddress, keccak256("lp-market"));
         params.kind = BondMarket.MarketKind.Liquidity;
         BondMarket market = _createMarket(params);
 
         assertEq(uint256(market.marketKind()), uint256(BondMarket.MarketKind.Liquidity));
-        assertEq(market.quoteToken(), pool);
-        assertEq(AmmPool(pool).balanceOf(address(boardroom)), liquidity);
-        assertTrue(boardroom.isRedeemableAsset(pool));
+        assertEq(market.quoteToken(), vaultAddress);
+        assertEq(vault.balanceOf(address(boardroom)), liquidity);
+        assertTrue(boardroom.isRedeemableAsset(vaultAddress));
     }
 
     function testRejectsTransferableReceiptSelectors() public {
@@ -424,6 +456,14 @@ contract BondMarketTest is CanonicalBoardroomTestSetup {
             depositInterval: 1 days,
             salt: salt
         });
+    }
+
+    function _mineHookSalt() internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(liquidityFactory.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
     }
 
     function _policyCall(address policy, address target, uint256 value, bytes memory data)

@@ -21,7 +21,8 @@ fee, and immutable-wiring verification succeeds.
 
 ## Deterministic deployment flow
 
-1. Configure deterministic deployer owner, protocol governance, treasury, AMM fee manager, wrapped native, and broadcaster.
+1. Configure deterministic deployer owner, protocol governance, treasury, wrapped native, canonical PoolManager,
+   Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and broadcaster.
 2. Run the chain-specific dry-run wrapper and confirm chain id.
 3. Broadcast through the maintained wrapper.
 4. Verify the candidate against live RPC state and runtime code hashes.
@@ -39,7 +40,7 @@ Also run `bun run scenario:boardroom:local` on a fresh Anvil state. That
 scenario activates release B, proves writes stop before migration, migrates
 three Boardrooms independently, and resumes cleanup and redemption.
 
-The seed covers standalone grant variants plus nine Boardroom projects: direct canonical AMM, active fixed price, active
+The seed covers standalone grant variants plus nine Boardroom projects: direct canonical P4LP/v4 liquidity, active fixed price, active
 Dutch auction, active curve, closed sale, live Merkle airdrop, launched generation-1 controller governance with a
 scheduled operation, winding down with an open distribution blocker, and winding down with CASH registered while the
 snapshot delay remains pending. The fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic

@@ -1,14 +1,11 @@
 import {
-  ammPoolAbi,
   bondMarketFactoryAbi,
   boardroomAbi,
   distributionFactoryAbi,
-  erc20Abi,
   isZeroAddress,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
   queryGrantsIssuedByAddress,
   type Address,
-  type LockedLiquidityState,
   type PledgeCashDeployment,
   type PledgeCashLogClient,
   readBoardroomState,
@@ -16,7 +13,7 @@ import {
   readDutchAuctionState,
   readFixedPriceSaleState,
   readGrantState,
-  readLockedLiquidityState,
+  readProtocolLiquidityVaultState,
   readMerkleAirdropState,
   readMigratingBondingCurveState,
   type PledgeCashReadClient,
@@ -26,7 +23,6 @@ import { errorMessage } from "./forms";
 import { readTokenMetadataMap, tokenMetadataFor, type TokenMetadata } from "./token-amounts";
 import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot, BoardroomSnapshot } from "./types";
 
-const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
 export const PRODUCT_CATALOG_CHILD_READ_LIMIT = 12;
 const PRODUCT_CATALOG_CHILD_READ_CONCURRENCY = 4;
 export const PRODUCT_DETAIL_CHILD_READ_LIMIT = 64;
@@ -98,7 +94,7 @@ export async function readBoardroomSnapshot(
   const [grantDiscovery, distributionDiscovery, lockedLiquidityAddresses, redeemableAssets] = await Promise.all([
     readCanonicalGrantAddresses(client, address, deployment),
     readCanonicalDistributionAddresses(client, address, deployment, PRODUCT_DETAIL_CHILD_READ_LIMIT),
-    readCanonicalLiquidityAddresses(client, address, state.liquidityLocker, deployment),
+    readCanonicalLiquidityAddresses(client, address, state.liquidityVault, deployment),
     readNewestRedeemableAssets(client, address, state.redeemableAssetCount, PRODUCT_DETAIL_CHILD_READ_LIMIT),
   ]);
   const grantAddresses = grantDiscovery.addresses;
@@ -164,7 +160,7 @@ export async function readBoardroomSnapshot(
       ...locker,
       tokenAMetadata: tokenMetadataFor(metadataByAddress, locker.state?.tokenA),
       tokenBMetadata: tokenMetadataFor(metadataByAddress, locker.state?.tokenB),
-      liquidityMetadata: tokenMetadataFor(metadataByAddress, locker.state?.pool),
+      liquidityMetadata: tokenMetadataFor(metadataByAddress, locker.address),
     })),
   };
 }
@@ -186,7 +182,7 @@ function childSummaryWarnings(
       ? "Grant provenance is unavailable in this client; canonical active-grant counts still gate lifecycle transitions."
       : childSummaryWarning("grant records", Math.max(grantRecordCount, activeGrantCount), shownGrantCount),
     childSummaryWarning("distribution records", distributionRecordCount, shownDistributionCount),
-    childSummaryWarning("locked-liquidity positions", lockedLiquidityRecordCount, shownLockerCount),
+    childSummaryWarning("protocol-liquidity vaults", lockedLiquidityRecordCount, shownLockerCount),
     childSummaryWarning("redeemable assets", redeemableAssetCount, shownRedeemableAssetCount),
   ].filter((warning): warning is string => warning !== undefined);
   return warnings.length > 0 ? { summaryWarnings: warnings } : {};
@@ -229,7 +225,7 @@ export async function readBoardroomLockedLiquiditySnapshot(
     ...summary,
     tokenAMetadata: tokenMetadataFor(metadataByAddress, summary.state?.tokenA),
     tokenBMetadata: tokenMetadataFor(metadataByAddress, summary.state?.tokenB),
-    liquidityMetadata: tokenMetadataFor(metadataByAddress, summary.state?.pool),
+    liquidityMetadata: tokenMetadataFor(metadataByAddress, summary.address),
   };
 }
 
@@ -337,39 +333,11 @@ async function readLockedLiquiditySummary(
   locker: Address,
 ): Promise<BoardroomLockedLiquiditySnapshot> {
   try {
-    const state = await readLockedLiquidityState(client, locker);
-    return { address: locker, state, ...(await readLockedLiquidityClaimable(client, state, locker)) };
+    const state = await readProtocolLiquidityVaultState(client, locker);
+    return { address: locker, state };
   } catch (error) {
     return { address: locker, error: errorMessage(error) };
   }
-}
-
-async function readLockedLiquidityClaimable(
-  client: PledgeCashReadClient,
-  state: LockedLiquidityState,
-  locker: Address,
-): Promise<Pick<BoardroomLockedLiquiditySnapshot, "claimableA" | "claimableB">> {
-  if (!state.pool) return {};
-
-  const [token0, balance, stored0, stored1, index0, index1, supplyIndex0, supplyIndex1] = await Promise.all([
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-    client.readContract({ address: state.pool, abi: erc20Abi, functionName: "balanceOf", args: [locker] }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "claimable0", args: [locker] }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "claimable1", args: [locker] }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "index0" }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "index1" }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "supplyIndex0", args: [locker] }) as Promise<bigint>,
-    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "supplyIndex1", args: [locker] }) as Promise<bigint>,
-  ]);
-  const claimable0 = stored0 + pendingFee(balance, index0, supplyIndex0);
-  const claimable1 = stored1 + pendingFee(balance, index1, supplyIndex1);
-  return sameAddress(token0, state.tokenA)
-    ? { claimableA: claimable0, claimableB: claimable1 }
-    : { claimableA: claimable1, claimableB: claimable0 };
-}
-
-function pendingFee(balance: bigint, index: bigint, supplyIndex: bigint): bigint {
-  return index > supplyIndex ? (balance * (index - supplyIndex)) / FEE_INDEX_SCALE : 0n;
 }
 
 async function readCanonicalGrantAddresses(
@@ -465,16 +433,16 @@ async function readCanonicalLiquidityAddresses(
   stateLocker: Address | undefined,
   deployment: PledgeCashDeployment | undefined,
 ): Promise<Address[]> {
-  if (!deployment?.lockedLiquidityFactory) return isZeroAddress(stateLocker) ? [] : [stateLocker!];
+  if (!deployment?.pledgeV4LiquidityFactory) return isZeroAddress(stateLocker) ? [] : [stateLocker!];
   const [factoryLocker] = await client.readContract({
-    address: deployment.lockedLiquidityFactory,
-    abi: lockedLiquidityFactoryAbi,
+    address: deployment.pledgeV4LiquidityFactory,
+    abi: pledgeV4LiquidityFactoryAbi,
     functionName: "positionOfBoardroom",
     args: [boardroom],
-  }) as unknown as readonly [Address, Address, Address, number];
+  }) as unknown as readonly [Address, `0x${string}`, Address, number];
   if (isZeroAddress(factoryLocker)) return stateLocker && !isZeroAddress(stateLocker) ? [stateLocker] : [];
   if (stateLocker && !isZeroAddress(stateLocker) && !sameAddress(factoryLocker, stateLocker)) {
-    throw new Error("Boardroom and liquidity factory disagree on the canonical locker.");
+    throw new Error("Boardroom and liquidity factory disagree on the canonical P4LP vault.");
   }
   return [factoryLocker];
 }
@@ -542,7 +510,7 @@ function distributionTokenAddresses(distribution: BoardroomDistributionSnapshot)
 }
 
 function lockedLiquidityTokenAddresses(locker: BoardroomLockedLiquiditySnapshot): (Address | undefined)[] {
-  return [locker.state?.tokenA, locker.state?.tokenB, locker.state?.pool];
+  return [locker.state?.tokenA, locker.state?.tokenB, locker.address];
 }
 
 function sameAddress(first: Address, second: Address): boolean {

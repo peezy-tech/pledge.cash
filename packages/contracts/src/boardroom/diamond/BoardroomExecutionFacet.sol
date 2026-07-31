@@ -183,11 +183,11 @@ contract BoardroomExecutionFacet is BoardroomFacetBase {
         );
     }
 
-    function recordLockedLiquidityFromDistribution(bytes32, address locker, address pool) external {
+    function recordProtocolLiquidityFromDistribution(bytes32, address vault, bytes32 poolId) external {
         _delegateGovernance(
             abi.encodeCall(
-                BoardroomGovernanceLogic.recordLockedLiquidityFromDistribution,
-                (policyRegistryStorage, shareTokenStorage, locker, pool)
+                BoardroomGovernanceLogic.recordProtocolLiquidityFromDistribution,
+                (policyRegistryStorage, shareTokenStorage, vault, poolId)
             )
         );
     }

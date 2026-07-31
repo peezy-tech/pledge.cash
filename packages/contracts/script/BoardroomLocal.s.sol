@@ -4,8 +4,6 @@ pragma solidity ^0.8.30;
 import {console2} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../src/amm/AmmFactory.sol";
-import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {BondMarket} from "../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -17,7 +15,6 @@ import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.s
 import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
-import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {BoardroomRewards} from "../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../src/rewards/BoardroomRewardsFactory.sol";
@@ -28,6 +25,8 @@ import {BoardroomController} from "../src/boardroom/BoardroomController.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomRelease} from "../src/boardroom/diamond/BoardroomRelease.sol";
 import {ProtocolFacetRegistry} from "../src/boardroom/diamond/ProtocolFacetRegistry.sol";
+import {PledgeV4LiquidityFactory} from "../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {V4PoolManagerMock} from "../test/helpers/V4PoolManagerMock.sol";
 import {BoardroomScenario} from "./BoardroomScenario.s.sol";
 
 /// @notice Four-phase broadcast harness for a real local Boardroom lifecycle.
@@ -162,7 +161,6 @@ contract BoardroomLocal is BoardroomScenario {
         vm.serializeAddress(objectKey, "holder", holder);
         vm.serializeAddress(objectKey, "protocolGovernance", protocolGovernance);
         vm.serializeAddress(objectKey, "protocolTreasury", protocolTreasury);
-        vm.serializeAddress(objectKey, "ammFeeManager", ammFeeManager);
         vm.serializeAddress(objectKey, "wrappedNative", address(wrappedNative));
         vm.serializeAddress(objectKey, "policyRegistry", address(policyRegistry));
         vm.serializeAddress(objectKey, "facetRegistry", address(registry));
@@ -176,10 +174,10 @@ contract BoardroomLocal is BoardroomScenario {
         vm.serializeAddress(objectKey, "graduatedCurveShareToken", address(graduatedCurveShares));
         vm.serializeAddress(objectKey, "assetPolicy", address(assetPolicy));
         vm.serializeAddress(objectKey, "protocolFeeRouter", address(protocolFeeRouter));
-        vm.serializeAddress(objectKey, "ammFactory", address(ammFactory));
-        vm.serializeAddress(objectKey, "ammRouter", address(ammRouter));
+        vm.serializeAddress(objectKey, "v4PoolManager", address(poolManager));
         vm.serializeAddress(objectKey, "tokenGrantFactory", address(tokenGrantFactory));
-        vm.serializeAddress(objectKey, "lockedLiquidityFactory", address(lockedLiquidityFactory));
+        vm.serializeAddress(objectKey, "pledgeV4LiquidityFactory", address(liquidityFactory));
+        vm.serializeAddress(objectKey, "pledgeV4Hook", address(liquidityFactory.hook()));
         vm.serializeAddress(objectKey, "distributionFactory", address(distributionFactory));
         vm.serializeAddress(objectKey, "boardroomRewardsFactory", address(rewardsFactory));
         vm.serializeAddress(objectKey, "bondMarketFactory", address(bondMarketFactory));
@@ -193,10 +191,10 @@ contract BoardroomLocal is BoardroomScenario {
         vm.serializeAddress(objectKey, "graduatedCurve", address(graduatedCurve));
         vm.serializeAddress(objectKey, "bondMarket", address(bondMarket));
         vm.serializeAddress(objectKey, "controller", address(controller));
-        vm.serializeAddress(objectKey, "liquidityLocker", liquidityLocker);
-        vm.serializeAddress(objectKey, "liquidityPool", liquidityPool);
-        vm.serializeAddress(objectKey, "graduatedCurveLocker", graduatedCurveLocker);
-        vm.serializeAddress(objectKey, "graduatedCurvePool", graduatedCurvePool);
+        vm.serializeAddress(objectKey, "liquidityVault", liquidityVault);
+        vm.serializeBytes32(objectKey, "liquidityPoolId", liquidityPoolId);
+        vm.serializeAddress(objectKey, "graduatedCurveVault", graduatedCurveVault);
+        vm.serializeBytes32(objectKey, "graduatedCurvePoolId", graduatedCurvePoolId);
         vm.serializeAddress(objectKey, "authorityFacet", facets.authority);
         vm.serializeAddress(objectKey, "executionFacet", facets.execution);
         vm.serializeAddress(objectKey, "marketFacet", facets.market);
@@ -221,7 +219,6 @@ contract BoardroomLocal is BoardroomScenario {
         holder = json.readAddress(".holder");
         protocolGovernance = json.readAddress(".protocolGovernance");
         protocolTreasury = json.readAddress(".protocolTreasury");
-        ammFeeManager = json.readAddress(".ammFeeManager");
         wrappedNative = WETH(payable(json.readAddress(".wrappedNative")));
         policyRegistry = BoardroomPolicyRegistry(json.readAddress(".policyRegistry"));
         registry = ProtocolFacetRegistry(json.readAddress(".facetRegistry"));
@@ -235,10 +232,9 @@ contract BoardroomLocal is BoardroomScenario {
         graduatedCurveShares = BoardroomToken(json.readAddress(".graduatedCurveShareToken"));
         assetPolicy = AssetPolicy(json.readAddress(".assetPolicy"));
         protocolFeeRouter = ProtocolFeeRouter(payable(json.readAddress(".protocolFeeRouter")));
-        ammFactory = AmmFactory(json.readAddress(".ammFactory"));
-        ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
+        poolManager = V4PoolManagerMock(json.readAddress(".v4PoolManager"));
         tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
-        lockedLiquidityFactory = LockedLiquidityFactory(json.readAddress(".lockedLiquidityFactory"));
+        liquidityFactory = PledgeV4LiquidityFactory(json.readAddress(".pledgeV4LiquidityFactory"));
         distributionFactory = DistributionFactory(json.readAddress(".distributionFactory"));
         rewardsFactory = BoardroomRewardsFactory(json.readAddress(".boardroomRewardsFactory"));
         bondMarketFactory = BondMarketFactory(json.readAddress(".bondMarketFactory"));
@@ -252,10 +248,10 @@ contract BoardroomLocal is BoardroomScenario {
         graduatedCurve = MigratingBondingCurve(json.readAddress(".graduatedCurve"));
         bondMarket = BondMarket(json.readAddress(".bondMarket"));
         controller = BoardroomController(json.readAddress(".controller"));
-        liquidityLocker = json.readAddress(".liquidityLocker");
-        liquidityPool = json.readAddress(".liquidityPool");
-        graduatedCurveLocker = json.readAddress(".graduatedCurveLocker");
-        graduatedCurvePool = json.readAddress(".graduatedCurvePool");
+        liquidityVault = json.readAddress(".liquidityVault");
+        liquidityPoolId = json.readBytes32(".liquidityPoolId");
+        graduatedCurveVault = json.readAddress(".graduatedCurveVault");
+        graduatedCurvePoolId = json.readBytes32(".graduatedCurvePoolId");
         facets = BoardroomRelease.Facets({
             authority: json.readAddress(".authorityFacet"),
             execution: json.readAddress(".executionFacet"),

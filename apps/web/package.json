@@ -13,7 +13,7 @@
     "dev:local": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && VITE_BASE_PATH=/pledge-cash/ VITE_PLEDGE_CASH_CHAIN_ID=31337 VITE_PLEDGE_CASH_CHAIN_NAME='pledge.cash local' VITE_PLEDGE_CASH_LOCAL_RPC_URL=/pledge-cash/rpc VITE_PLEDGE_CASH_EXPLORER_URL= VITE_PLEDGE_CASH_EXPLORER_NAME=Local vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
     "preview:local": "vite preview --host 127.0.0.1 --base /pledge-cash/ --outDir dist-local",
-    "smoke:amm:local": "bun scripts/amm-write-smoke.ts",
+    "smoke:v4:local": "bun scripts/v4-write-smoke.ts",
     "test": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

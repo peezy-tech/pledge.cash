@@ -10,8 +10,8 @@ import {
   dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
@@ -95,7 +95,7 @@ const ASSET_AND_OBLIGATION_ABIS = [
   dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
+  pledgeV4LiquidityVaultAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
@@ -105,7 +105,7 @@ const MODULE_FACTORY_ABIS = [
   boardroomRewardsFactoryAbi,
   bondMarketFactoryAbi,
   distributionFactoryAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
   tokenGrantFactoryAbi,
 ] as const;
 
@@ -120,7 +120,15 @@ const FUNCTION_LABELS: Record<string, string> = {
   createDutchAuction: "Create a Dutch auction",
   createFixedPriceSale: "Create a fixed-price sale",
   createGrant: "Create a token grant",
-  createLockedLiquidity: "Create a locked liquidity position",
+  createProtocolLiquidity: "Create canonical Uniswap v4 protocol liquidity",
+  depositLiquidityForClaims: "Deposit liquidity for P4LP claims",
+  closeProtocolLiquidity: "Close canonical Uniswap v4 protocol liquidity",
+  closeProtocolLiquidityAfterWindDown: "Finalize protocol liquidity wind-down",
+  exitProtocolLiquidity: "Exit protocol-owned Uniswap v4 liquidity",
+  releaseClaimsToBoardroom: "Release protocol P4LP claims to the Boardroom",
+  removeLiquidityToBoardroom: "Remove protocol-owned Uniswap v4 liquidity",
+  returnProtocolLiquidityClaims: "Return protocol P4LP claims to the Boardroom",
+  redeemClaims: "Redeem P4LP claims",
   createMerkleAirdrop: "Create an airdrop",
   createMigratingBondingCurve: "Create a bonding curve",
   createRewards: "Create a staking and rewards pool",
@@ -259,15 +267,31 @@ function extractBoardroomCallReviews(
 ): BoardroomCallReview[] | undefined {
   const args = Array.isArray(request.args) ? request.args : [];
   let calls: unknown[] | undefined;
-  if (BOARDROOM_SINGLE_CALL_FUNCTIONS.has(functionName)) {
+  if (BOARDROOM_SINGLE_CALL_FUNCTIONS.has(functionName) && hasBoardroomCallParameter(request, functionName, "tuple")) {
     calls = [args[1]];
-  } else if (BOARDROOM_BATCH_CALL_FUNCTIONS.has(functionName)) {
+  } else if (BOARDROOM_BATCH_CALL_FUNCTIONS.has(functionName) && hasBoardroomCallParameter(request, functionName, "tuple[]")) {
     calls = Array.isArray(args[1]) ? args[1] : [args[1]];
   }
   if (!calls) return undefined;
 
   const boardroomAddress = boardroom === "unknown" ? undefined : boardroom;
   return calls.map((call) => boardroomCallReview(call as BoardroomCall, boardroomAddress));
+}
+
+function hasBoardroomCallParameter(
+  request: Record<string, unknown>,
+  functionName: string,
+  expectedType: "tuple" | "tuple[]",
+): boolean {
+  if (!Array.isArray(request.abi)) return false;
+  return request.abi.some((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const item = candidate as AbiFunctionShape;
+    return item.type === "function"
+      && item.name === functionName
+      && item.inputs?.[0]?.type === "bytes32"
+      && item.inputs?.[1]?.type === expectedType;
+  });
 }
 
 function uniqueDecodedMatches(
@@ -433,8 +457,10 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
   "cancel",
   "close",
   "closeGrant",
+  "closeProtocolLiquidity",
+  "closeProtocolLiquidityAfterWindDown",
   "exit",
-  "exitLockedLiquidity",
+  "exitProtocolLiquidity",
   "exitToBoardroom",
   "finalize",
   "finalizeQuoteForfeiture",
@@ -447,7 +473,9 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
   "quarantineAndClose",
   "quarantineRedeemableAsset",
   "fallbackToUnwind",
-  "returnLpToBoardroom",
+  "releaseClaimsToBoardroom",
+  "removeLiquidityToBoardroom",
+  "returnProtocolLiquidityClaims",
   "startWindDown",
   "stopVestingAndWithdrawUnvested",
   "terminalize",
@@ -456,7 +484,6 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
 
 const IMPORTANT_FUNCTIONS = new Set([
   "addLiquidity",
-  "addLiquidityNative",
   "approve",
   "buy",
   "claim",
@@ -468,7 +495,9 @@ const IMPORTANT_FUNCTIONS = new Set([
   "createDutchAuction",
   "createFixedPriceSale",
   "createGrant",
-  "createLockedLiquidity",
+  "createProtocolLiquidity",
+  "depositLiquidityForClaims",
+  "redeemClaims",
   "createMerkleAirdrop",
   "createMigratingBondingCurve",
   "createRewards",
@@ -492,8 +521,6 @@ const IMPORTANT_FUNCTIONS = new Set([
   "registerRedeemableAsset",
   "recoverForfeitedQuote",
   "recoverQuarantinedQuote",
-  "removeLiquidity",
-  "removeLiquidityNative",
   "safeTransferFrom",
   "sell",
   "setApprovalForAll",
@@ -502,9 +529,6 @@ const IMPORTANT_FUNCTIONS = new Set([
   "vetoQuoteForfeiture",
   "setRedemptionExcessRecipient",
   "settle",
-  "swapExactNativeForTokens",
-  "swapExactTokensForNative",
-  "swapExactTokensForTokens",
   "transfer",
   "transferFrom",
   "wrapNativeBalance",

@@ -44,7 +44,7 @@ migration_selector="$(cast sig 'StorageMigrationRequired(uint64,uint64)')"
 set +e
 migration_probe="$(
   cast call "$boardroom" \
-    "returnProtocolLiquidityAsLp(bytes32)(uint256)" \
+    "returnProtocolLiquidityClaims(bytes32)(uint256)" \
     "$release_b_hash" \
     --rpc-url "$rpc_url" 2>&1
 )"

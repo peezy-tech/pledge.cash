@@ -86,8 +86,8 @@ validated ceremony or recovery plan.
    inputs.
 3. Choose the production registry governor, quorum, timelock, veto, and
    emergency process.
-4. Approve governance, treasury, AMM fee manager, deterministic deployer owner,
-   and broadcaster identities for each rehearsal and target.
+4. Approve governance, treasury, deterministic deployer owner, broadcaster, and the exact external Uniswap v4/Permit2
+   deployments for each rehearsal and target.
 5. Approve target-chain selector-count, release-activation gas, migration gas,
    and downtime limits.
 6. Define who may promote a verified candidate and which independent evidence

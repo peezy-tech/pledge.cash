@@ -17,14 +17,15 @@ import {
   buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomGrantApprovalCall,
   buildBoardroomGrantCreationCall,
-  buildBoardroomLockedLiquidityBatch,
-  buildBoardroomLockedLiquidityAddBatch,
-  buildBoardroomLockedLiquidityCloseAction,
+  buildBoardroomProtocolLiquidityBatch as buildBoardroomLockedLiquidityBatch,
+  buildBoardroomProtocolLiquidityAddBatch as buildBoardroomLockedLiquidityAddBatch,
+  buildBoardroomProtocolLiquidityCloseAction as buildBoardroomLockedLiquidityCloseAction,
   buildBoardroomCloseProtocolLiquidityTransaction,
-  buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomProtocolLiquidityExitTransaction as buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomReturnProtocolLiquidityClaimsTransaction,
   buildBoardroomLaunchTransaction,
-  buildBoardroomLockedLiquidityFeeClaimAction,
-  buildBoardroomLockedLiquidityRemoveAction,
+  buildBoardroomProtocolLiquidityFeeClaimAction as buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomProtocolLiquidityRemoveAction as buildBoardroomLockedLiquidityRemoveAction,
   buildBoardroomMerkleAirdropBatch,
   buildBoardroomMerkleAirdropCancelAction,
   buildBoardroomMerkleAirdropCloseAction,
@@ -53,12 +54,13 @@ import {
   buildDirectGrantCreationTransaction,
   buildDutchAuctionFinalizeTransaction,
   buildErc20Approval,
+  buildPermit2ApprovalTransaction,
   buildGrantIssuerBoardroomAction,
   discoverBoardroomDistributions,
-  discoverBoardroomLockedLiquidity,
+  discoverBoardroomProtocolLiquidity as discoverBoardroomLockedLiquidity,
   discoverBoardrooms,
   discoverGrantHistory,
-  discoverPools,
+  deriveUniswapV4SqrtPriceX96,
   getPledgeCashDeployment,
   isZeroAddress,
   predictBoardroomAddress as sdkPredictBoardroomAddress,
@@ -67,7 +69,7 @@ import {
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
   predictDutchAuctionAddress as sdkPredictDutchAuctionAddress,
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
-  predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
+  predictProtocolLiquidityVaultAddress as sdkPredictLockedLiquidityAddress,
   predictBoardroomControllerAddress,
   predictMerkleAirdropAddress as sdkPredictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
@@ -79,7 +81,7 @@ import {
   readFixedPriceSaleState,
   readGrantState,
   readGrantSettlementQuote,
-  readLockedLiquidityState,
+  readProtocolLiquidityVaultState as readLockedLiquidityState,
   readMerkleAirdropState,
   readMigratingBondingCurveState,
   tokenGrantAbi,
@@ -90,20 +92,19 @@ import {
   type BoardroomDutchAuctionTerms,
   type BoardroomCall,
   type BoardroomStakerPower,
-  type BoardroomLockedLiquidityTerms,
+  type BoardroomProtocolLiquidityTerms as BoardroomLockedLiquidityTerms,
   type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
   type BoardroomShareGrantTerms,
   type DiscoveredBoardroom,
   type DiscoveredDistribution,
   type DiscoveredGrant,
-  type DiscoveredLockedLiquidity,
-  type DiscoveredPool,
+  type DiscoveredProtocolLiquidity as DiscoveredLockedLiquidity,
   type DiscoveryResult,
   type DutchAuctionState,
   type FixedPriceSaleState,
   type GrantCreationTerms,
-  type LockedLiquidityState,
+  type ProtocolLiquidityVaultState as LockedLiquidityState,
   type MerkleAirdropState,
   type MigratingBondingCurveState,
   type PledgeCashDeployment,
@@ -230,7 +231,6 @@ import {
 } from "../lib/project-pools";
 import {
   buildAddLiquidityTransaction,
-  buildClaimAmmFeesTransaction,
   buildRemoveLiquidityTransaction,
   buildSwapTransaction,
   assertFutureSwapDeadline,
@@ -631,7 +631,7 @@ function shouldLoadSwapTokens({
   swapTokenListLoading: boolean;
 }): boolean {
   if (!loadScope) return false;
-  if (!deployment?.ammFactory) return false;
+  if (!deployment?.pledgeV4LiquidityFactory) return false;
   if (swapTokenList.loaded || swapTokenListLoading) return false;
   return true;
 }
@@ -678,7 +678,7 @@ export function projectSwapPoolAddresses(
   );
   const candidates = [
     ...(dashboard.histories ?? []).map((history) => history.pool),
-    ...dashboard.snapshot.lockedLiquiditySummaries.map((locker) => locker.state?.pool),
+    ...dashboard.snapshot.lockedLiquiditySummaries.map((locker) => locker.address),
     dashboard.history?.pool,
     dashboard.catalog.find((entry) => sameAddress(entry.address, dashboard.address))?.pool,
   ];
@@ -2150,7 +2150,7 @@ export function App(): React.JSX.Element {
     }, AMM_TOKEN_LOAD_DEADLINE_MS);
     setSwapTokenListLoading(true);
     try {
-      if (!deployment?.ammFactory) {
+      if (!deployment?.pledgeV4LiquidityFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
       const next = await readSwapTokenList(publicClient, deployment, activeAccountRef.current, {
@@ -2523,7 +2523,7 @@ export function App(): React.JSX.Element {
     const projectParticipationRoute = route.kind === "project" && route.section === "participate";
     const expectedPool = projectParticipationRoute ? exactProjectPoolRef.current : undefined;
     if (projectParticipationRoute && !expectedPool) {
-      const message = "Select a live project AMM route before requesting a swap quote.";
+      const message = "Select a live canonical project Uniswap v4 route before requesting a swap quote.";
       setSwapQuote({ ...next, error: message });
       pushLog(message, "error");
       return;
@@ -2536,7 +2536,7 @@ export function App(): React.JSX.Element {
     }
     setSwapQuote(next);
     if (next.error) {
-      pushLog(next.error, next.error.startsWith("No AMM pool") ? "info" : "error");
+      pushLog(next.error, next.error.includes("No canonical pledge.cash Uniswap v4 pool") ? "info" : "error");
       return;
     }
     pushLog("Loaded swap quote", "success");
@@ -2553,10 +2553,10 @@ export function App(): React.JSX.Element {
     const projectParticipationRoute = route.kind === "project" && route.section === "participate";
     const expectedPool = projectParticipationRoute ? exactProjectPoolRef.current : undefined;
     if (projectParticipationRoute && !expectedPool) {
-      throw new Error("Select a live project AMM route before submitting a swap.");
+      throw new Error("Select a live canonical project Uniswap v4 route before submitting a swap.");
     }
     if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
-      throw new Error("The current quote does not use this project’s AMM pool.");
+      throw new Error("The current quote does not use this project’s canonical Uniswap v4 PoolId.");
     }
     return next;
   };
@@ -2573,16 +2573,33 @@ export function App(): React.JSX.Element {
 
   const approveSwapInput = async (): Promise<void> => {
     activeAccount();
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const router = requireDeploymentAddress(deployment?.uniswapUniversalRouter, "Uniswap Universal Router");
+    const permit2 = requireDeploymentAddress(deployment?.permit2, "Permit2");
     const quote = await requireFreshSwapQuote();
     if (!quote.tokenIn || quote.amountIn === undefined) throw new Error("Refresh the swap quote before approving.");
-    if (swapNativeMode(deployment, swapForm) === "input") throw new Error("Native swap input does not need ERC20 approval.");
-
-    await submitContractTransaction(
-      "Swap input approval",
-      buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }),
-      ammActionGuard("swap-quote", ammSwapQuoteReadKey),
-    );
+    const guard = ammActionGuard("swap-quote", ammSwapQuoteReadKey);
+    if ((quote.tokenIn.erc20Allowance ?? 0n) < quote.amountIn) {
+      await submitContractTransaction(
+        "Approve token for Permit2",
+        buildErc20Approval({ token: quote.tokenIn.address, spender: permit2, amount: (1n << 256n) - 1n }),
+        guard,
+      );
+      if (!activeActionOriginIsCurrent()) return;
+    }
+    const permit2Expired = (quote.tokenIn.permit2Expiration ?? 0) <= Math.floor(Date.now() / 1000);
+    if ((quote.tokenIn.permit2Allowance ?? 0n) < quote.amountIn || permit2Expired) {
+      await submitContractTransaction(
+        "Approve Universal Router in Permit2",
+        buildPermit2ApprovalTransaction({
+          permit2,
+          token: quote.tokenIn.address,
+          universalRouter: router,
+          amount: (1n << 160n) - 1n,
+          expiration: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+        }),
+        guard,
+      );
+    }
   };
 
   const executeSwap = async (): Promise<void> => {
@@ -2619,7 +2636,7 @@ export function App(): React.JSX.Element {
     setLiquidityQuote(presentedQuote);
     if (presentedQuote === next) setAmmPosition(position);
     if (presentedQuote.error) {
-      pushLog(presentedQuote.error, presentedQuote.error.includes("No AMM pool") ? "info" : "error");
+      pushLog(presentedQuote.error, presentedQuote.error.includes("No canonical P4LP vault") ? "info" : "error");
       return;
     }
     pushLog("Loaded liquidity quote", "success");
@@ -2641,24 +2658,24 @@ export function App(): React.JSX.Element {
 
   const approveLiquidityTokenA = async (): Promise<void> => {
     activeAccount();
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
-    if (!quote.tokenA || quote.amountA === undefined) throw new Error("Refresh the liquidity quote before approving token A.");
+    if (!quote.tokenA || !quote.pool) throw new Error("Refresh the liquidity quote before approving token A.");
+    const amount = parseTokenAmountInput(liquidityForm.amountA, quote.tokenA, "Token A amount");
     await submitContractTransaction(
       "Liquidity token A approval",
-      buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }),
+      buildErc20Approval({ token: quote.tokenA.address, spender: quote.pool.address, amount }),
       ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
     );
   };
 
   const approveLiquidityTokenB = async (): Promise<void> => {
     activeAccount();
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
-    if (!quote.tokenB || quote.amountB === undefined) throw new Error("Refresh the liquidity quote before approving token B.");
+    if (!quote.tokenB || !quote.pool) throw new Error("Refresh the liquidity quote before approving token B.");
+    const amount = parseTokenAmountInput(liquidityForm.amountB, quote.tokenB, "Token B amount");
     await submitContractTransaction(
       "Liquidity token B approval",
-      buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }),
+      buildErc20Approval({ token: quote.tokenB.address, spender: quote.pool.address, amount }),
       ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
     );
   };
@@ -2668,10 +2685,10 @@ export function App(): React.JSX.Element {
     assertFutureSwapDeadline(liquidityForm.deadline);
     const quote = await requireFreshLiquidityQuote();
     if (!liquidityTokenUsesNative(quote.tokenA?.address)) {
-      requireFreshAllowance("Liquidity token A", quote.tokenA?.allowance, quote.amountA);
+      requireFreshAllowance("Liquidity token A", quote.tokenA?.allowance, quote.amountADesired);
     }
     if (!liquidityTokenUsesNative(quote.tokenB?.address)) {
-      requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountB);
+      requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountBDesired);
     }
     await submitContractTransaction(
       "Add liquidity",
@@ -2692,7 +2709,7 @@ export function App(): React.JSX.Element {
       pushLog(next.error, "error");
       return;
     }
-    pushLog("Loaded AMM LP position", "success");
+    pushLog("Loaded P4LP claim position", "success");
   };
 
   const refreshRemoveLiquidityQuote = async (): Promise<void> => {
@@ -2707,7 +2724,7 @@ export function App(): React.JSX.Element {
     setRemoveLiquidityQuote(presentedQuote);
     if (presentedQuote.position && presentedQuote === next) setAmmPosition(presentedQuote.position);
     if (presentedQuote.error) {
-      pushLog(presentedQuote.error, presentedQuote.error.includes("No AMM pool") ? "info" : "error");
+      pushLog(presentedQuote.error, presentedQuote.error.includes("No canonical P4LP vault") ? "info" : "error");
       return;
     }
     pushLog("Loaded remove-liquidity quote", "success");
@@ -2728,49 +2745,18 @@ export function App(): React.JSX.Element {
     return presentedQuote;
   };
 
-  const approveLpToken = async (): Promise<void> => {
-    activeAccount();
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
-    const quote = await requireFreshRemoveLiquidityQuote();
-    if (!quote.position?.pool || quote.liquidity === undefined) throw new Error("Refresh the remove-liquidity quote before approving LP.");
-    await submitContractTransaction(
-      "LP token approval",
-      buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }),
-      ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
-    );
-  };
-
   const removeLiquidity = async (): Promise<void> => {
     const account = activeAccount();
     assertFutureSwapDeadline(removeLiquidityForm.deadline);
     const quote = await requireFreshRemoveLiquidityQuote();
-    requireFreshAllowance("LP token", quote.position?.lpAllowance, quote.liquidity);
+    requireFreshAllowance("P4LP balance", quote.position?.lpBalance, quote.liquidity);
     await submitContractTransaction(
-      "Remove liquidity",
+      "Redeem P4LP",
       buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }),
       ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
     );
     if (!activeActionOriginIsCurrent()) return;
     await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
-  };
-
-  const claimAmmFees = async (): Promise<void> => {
-    activeAccount();
-    const request = beginAmmRead("position", ammPositionReadKey);
-    assertCurrentAmmRead(request);
-    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
-    assertCurrentAmmRead(request);
-    if (!position) throw new Error("Select a pool before claiming fees.");
-    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
-      assertProjectPoolAllowed(position.pool, studioProjectPoolsRef.current, "This fee claim");
-    }
-    await submitContractTransaction(
-      "AMM fee claim",
-      buildClaimAmmFeesTransaction(position),
-      { isCurrent: () => ammReadCoordinatorRef.current.isCurrent(request) },
-    );
-    if (!activeActionOriginIsCurrent()) return;
-    await refreshAmmPosition();
   };
 
   const directGrantTerms = async (): Promise<GrantCreationTerms> => {
@@ -3560,7 +3546,7 @@ export function App(): React.JSX.Element {
 
   const requireLoadedLockedLiquidity = (): LockedLiquidityState => {
     const address = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
-    return requireVerifiedChildState(displayedLockedLiquiditySnapshot, address, "locked-liquidity position");
+    return requireVerifiedChildState(displayedLockedLiquiditySnapshot, address, "protocol-liquidity vault");
   };
 
   const dutchAuctionTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomDutchAuctionTerms> => {
@@ -4102,6 +4088,15 @@ export function App(): React.JSX.Element {
       parseErc20Amount(publicClient, curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
       parseErc20Amount(publicClient, curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
     ]);
+    if (!curveState.migrationShares || !curveState.migrationQuote) {
+      throw new Error("The curve does not expose positive migration amounts.");
+    }
+    const sqrtPriceX96 = deriveUniswapV4SqrtPriceX96({
+      tokenA: curveState.shareToken,
+      tokenB: curveState.quoteToken,
+      amountA: curveState.migrationShares,
+      amountB: curveState.migrationQuote,
+    });
     await submitContractTransaction(
       "Migrating curve migration",
       buildMigratingBondingCurveMigrationTransaction({
@@ -4109,6 +4104,7 @@ export function App(): React.JSX.Element {
         expectedFacetSetHash: boardroom.facetSetHash,
         minShareLiquidity,
         minQuoteLiquidity,
+        sqrtPriceX96,
         deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
       }),
     );
@@ -4182,6 +4178,7 @@ export function App(): React.JSX.Element {
       quoteAmountDesired,
       shareAmountMin,
       quoteAmountMin,
+      sqrtPriceX96: uintInput(lockedLiquidityForm.sqrtPriceX96, "Initial sqrt price X96"),
       deadline: uintInput(lockedLiquidityForm.deadline, "Locked-liquidity deadline"),
       salt: requireBytes32(lockedLiquidityForm.salt, "Locked-liquidity salt"),
       shareTokenSide: lockedLiquidityForm.shareTokenSide,
@@ -4190,16 +4187,16 @@ export function App(): React.JSX.Element {
 
   const predictLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     const { salt } = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt });
     setPredictedLockedLiquidity(predicted);
     updateLockedLiquidityAddress(predicted);
-    pushLog(`Predicted locked-liquidity position ${predicted}`, "success");
+    pushLog(`Predicted P4LP vault ${predicted}`, "success");
   };
 
   const loadLockedLiquidityAddress = async (address?: Address): Promise<LockedLiquidityState> => {
-    const locker = address ?? requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    const locker = address ?? requireAddress(lockedLiquidityAddress, "P4LP vault address");
     const requestVersion = ++lockedLiquidityLoadVersionRef.current;
     const requestScope = activeStudioReadScopeKeyRef.current;
     const requestChainId = activeNetwork.chainId;
@@ -4234,19 +4231,19 @@ export function App(): React.JSX.Element {
   };
 
   const loadLockedLiquidity = async (): Promise<void> => {
-    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    const locker = requireAddress(lockedLiquidityAddress, "P4LP vault address");
     await loadLockedLiquidityAddress(locker);
-    pushLog(`Loaded locked-liquidity position ${locker}`, "success");
+    pushLog(`Loaded P4LP vault ${locker}`, "success");
   };
 
   const createLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     const executionKind = await submitBoardroomExecution(
-      "Locked-liquidity creation",
+      "Uniswap v4 protocol-liquidity creation",
       boardroom,
       buildBoardroomLockedLiquidityBatch({
         boardroom: boardroom.address,
@@ -4266,16 +4263,16 @@ export function App(): React.JSX.Element {
 
   const claimLockedLiquidityFees = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     const locker = requireLoadedLockedLiquidity().address;
     await submitBoardroomExecution(
-      "Locked-liquidity fee claim",
+      "Protocol-liquidity fee claim",
       boardroom,
       buildBoardroomLockedLiquidityFeeClaimAction({
         boardroom: boardroom.address,
         expectedFacetSetHash: boardroom.facetSetHash,
         policy: factory,
-        locker,
+        vault: locker,
       }),
     );
     if (!activeActionOriginIsCurrent()) return;
@@ -4286,7 +4283,7 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     if (boardroom.status !== 0) throw new Error("Canonical liquidity can be added only while the Boardroom is Active.");
     const lockerState = requireLoadedLockedLiquidity();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await lockedLiquidityTerms(boardroom);
     const tokenA = terms.shareTokenSide === "tokenA" ? boardroom.shareToken : terms.quoteToken;
@@ -4315,13 +4312,13 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     if (boardroom.status !== 0) throw new Error("Partial liquidity removal is available only while the Boardroom is Active.");
     const lockerState = requireLoadedLockedLiquidity();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     const [liquidity, amountAMin, amountBMin] = await Promise.all([
-      parseErc20Amount(publicClient, lockedLiquidityExitForm.liquidity, lockerState.pool, "LP liquidity"),
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.liquidity, lockerState.address, "P4LP liquidity"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Removal amount A minimum"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Removal amount B minimum"),
     ]);
-    if (liquidity === 0n) throw new Error("LP liquidity to remove must be greater than zero.");
+    if (liquidity === 0n) throw new Error("P4LP liquidity to remove must be greater than zero.");
     await submitBoardroomExecution(
       "Remove canonical protocol liquidity",
       boardroom,
@@ -4343,7 +4340,7 @@ export function App(): React.JSX.Element {
   const closeLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const lockerState = requireLoadedLockedLiquidity();
-    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "PledgeV4LiquidityFactory");
     if (boardroom.status === 1) {
       const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
         boardroom.address,
@@ -4386,13 +4383,34 @@ export function App(): React.JSX.Element {
       boardroom.facetSetHash,
     );
     await submitContractTransaction(
-      "Locked-liquidity exit",
+      "Protocol-liquidity exit",
       buildBoardroomLockedLiquidityExitTransaction({
         boardroom: boardroom.address,
         expectedFacetSetHash,
         amountAMin,
         amountBMin,
         deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(locker);
+  };
+
+  const releaseLockedLiquidityClaims = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    if (boardroom.status !== 1) {
+      throw new Error("P4LP claims can be released only while the Boardroom is winding down.");
+    }
+    const locker = requireLoadedLockedLiquidity().address;
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Release protocol P4LP claims to the Boardroom",
+      buildBoardroomReturnProtocolLiquidityClaimsTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
       }),
     );
     if (!activeActionOriginIsCurrent()) return;
@@ -4605,33 +4623,20 @@ export function App(): React.JSX.Element {
     const boardroomsByAddress = mergeAddressMap(discovery.boardroomsByAddress, boardroomResult.items, (item) => item.boardroom);
     const discoveredBoardrooms = discoveryItems(boardroomsByAddress);
     const boardroomKeys = new Set(discoveredBoardrooms.map((boardroom) => addressMapKey(boardroom.boardroom)));
-    const shareTokenKeys = new Set(discoveredBoardrooms.map((boardroom) => addressMapKey(boardroom.shareToken)));
-
-    const [distributionResult, lockerResult, poolResult] = await Promise.all([
+    const [distributionResult, lockerResult] = await Promise.all([
       deployment.distributionFactory
         ? discoverBoardroomDistributions(publicClient, { ...range, factory: deployment.distributionFactory })
         : emptyDiscoveryResult<DiscoveredDistribution>(),
-      deployment.lockedLiquidityFactory
-        ? discoverBoardroomLockedLiquidity(publicClient, { ...range, factory: deployment.lockedLiquidityFactory })
+      deployment.pledgeV4LiquidityFactory
+        ? discoverBoardroomLockedLiquidity(publicClient, { ...range, factory: deployment.pledgeV4LiquidityFactory })
         : emptyDiscoveryResult<DiscoveredLockedLiquidity>(),
-      deployment.ammFactory
-        ? discoverPools(publicClient, { ...range, factory: deployment.ammFactory })
-        : emptyDiscoveryResult<DiscoveredPool>(),
     ]);
 
     const relevantDistributions = distributionResult.items.filter((distribution) =>
       boardroomKeys.has(addressMapKey(distribution.boardroom)),
     );
     const relevantLockers = lockerResult.items.filter((locker) => boardroomKeys.has(addressMapKey(locker.boardroom)));
-    const lockerPoolKeys = new Set(relevantLockers.map((locker) => addressMapKey(locker.pool)));
-    const relevantPools = poolResult.items.filter(
-      (pool) =>
-        shareTokenKeys.has(addressMapKey(pool.token0))
-        || shareTokenKeys.has(addressMapKey(pool.token1))
-        || lockerPoolKeys.has(addressMapKey(pool.pool)),
-    );
-
-    const results = [boardroomResult, grantResult, distributionResult, lockerResult, poolResult] satisfies DiscoveryResult<unknown>[];
+    const results = [boardroomResult, grantResult, distributionResult, lockerResult] satisfies DiscoveryResult<unknown>[];
     const next: DiscoverySnapshot = {
       chainId: activeNetwork.chainId,
       loadedFor: wallet.account,
@@ -4643,8 +4648,7 @@ export function App(): React.JSX.Element {
       boardroomsByAddress,
       grantsByAddress: mergeAddressMap(discovery.grantsByAddress, grantResult.items, (item) => item.grantAddress),
       distributionsByAddress: mergeAddressMap(discovery.distributionsByAddress, relevantDistributions, (item) => item.distribution),
-      lockersByAddress: mergeAddressMap(discovery.lockersByAddress, relevantLockers, (item) => item.locker),
-      poolsByAddress: mergeAddressMap(discovery.poolsByAddress, relevantPools, (item) => item.pool),
+      lockersByAddress: mergeAddressMap(discovery.lockersByAddress, relevantLockers, (item) => item.vault),
     };
     const lastScannedBlock = combineDiscoveryLastScanned(results);
     if (lastScannedBlock !== undefined) {
@@ -4768,7 +4772,7 @@ export function App(): React.JSX.Element {
   const useDiscoveredLockedLiquidity = useCallback(
     (locker: DiscoveredLockedLiquidity): void => {
       updateBoardroomAddress(locker.boardroom);
-      updateLockedLiquidityAddress(locker.locker);
+      updateLockedLiquidityAddress(locker.vault);
       navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: locker.boardroom, section: "liquidity" });
     },
     [activeNetwork.chainId, navigateRoute, updateBoardroomAddress, updateLockedLiquidityAddress],
@@ -4929,9 +4933,7 @@ export function App(): React.JSX.Element {
       addLiquidity={addLiquidity}
       approveLiquidityTokenA={approveLiquidityTokenA}
       approveLiquidityTokenB={approveLiquidityTokenB}
-      approveLpToken={approveLpToken}
       approveInput={approveSwapInput}
-      claimAmmFees={claimAmmFees}
       executeSwap={executeSwap}
       refreshLiquidityQuote={refreshLiquidityQuote}
       refreshPosition={refreshAmmPosition}
@@ -5068,6 +5070,7 @@ export function App(): React.JSX.Element {
         exit: exitLockedLiquidity,
         load: loadLockedLiquidity,
         predict: predictLockedLiquidity,
+        releaseClaims: releaseLockedLiquidityClaims,
         remove: removeLockedLiquidity,
         setLockedLiquidityAddress: updateLockedLiquidityAddress,
         setLockedLiquidityExitForm,
@@ -5743,7 +5746,7 @@ export function App(): React.JSX.Element {
           <div className="grid gap-4">
             {boardroomToolsPanel}
             {exactProjectPools.length > 0 ? marketPanel : (
-              <PageNotice title="No project AMM pool is available">
+              <PageNotice title="No canonical project Uniswap v4 pool is available">
                 Create or migrate project liquidity before adding public AMM liquidity or managing an LP position.
               </PageNotice>
             )}
@@ -6076,10 +6079,10 @@ function participationCapabilityOpportunities(
       );
     }
   }
-  const hasAmm = Boolean(dashboard?.history?.pool || dashboard?.snapshot.lockedLiquiditySummaries.some((locker) => locker.state?.pool));
+  const hasAmm = Boolean(dashboard?.history?.pool || dashboard?.snapshot.lockedLiquiditySummaries.some((locker) => locker.state?.positionLiquidity));
   opportunities["participate.amm.swap"] = {
     available: hasAmm,
-    ...(!hasAmm ? { reason: "No project AMM pool has been discovered." } : {}),
+    ...(!hasAmm ? { reason: "No canonical project Uniswap v4 pool has been discovered." } : {}),
   };
   return opportunities;
 }

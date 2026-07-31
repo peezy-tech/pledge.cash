@@ -14,10 +14,8 @@ library PledgeCashBoardroomScenarioSalts {
     bytes32 internal constant ASSET_POLICY = keccak256("pledge.cash.boardroom.scenario.asset-policy");
     bytes32 internal constant PROTOCOL_FEE_ROUTER = keccak256("pledge.cash.boardroom.scenario.protocol-fee-router");
     bytes32 internal constant TOKEN_GRANT_FACTORY = keccak256("pledge.cash.boardroom.scenario.token-grant-factory");
-    bytes32 internal constant AMM_FACTORY = keccak256("pledge.cash.boardroom.scenario.amm-factory");
-    bytes32 internal constant AMM_ROUTER = keccak256("pledge.cash.boardroom.scenario.amm-router");
-    bytes32 internal constant LOCKED_LIQUIDITY_FACTORY =
-        keccak256("pledge.cash.boardroom.scenario.locked-liquidity-factory");
+    bytes32 internal constant V4_POOL_MANAGER = keccak256("pledge.cash.boardroom.scenario.v4-pool-manager");
+    bytes32 internal constant V4_LIQUIDITY_FACTORY = keccak256("pledge.cash.boardroom.scenario.v4-liquidity-factory");
     bytes32 internal constant DISTRIBUTION_FACTORY = keccak256("pledge.cash.boardroom.scenario.distribution-factory");
     bytes32 internal constant REWARDS_FACTORY = keccak256("pledge.cash.boardroom.scenario.rewards-factory");
     bytes32 internal constant BOND_MARKET_FACTORY = keccak256("pledge.cash.boardroom.scenario.bond-market-factory");

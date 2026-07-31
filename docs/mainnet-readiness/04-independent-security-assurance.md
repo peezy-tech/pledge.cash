@@ -104,7 +104,7 @@ yet release gates.
 
 - creation, issuance, launch, external controller, veto, replacement, and
   ERC-1271 control proofs;
-- rewards, grants, distributions, curves, bonds, AMM, and locked liquidity;
+- rewards, grants, distributions, curves, bonds, Uniswap v4 integration, and P4LP liquidity;
 - obligation provenance, dependencies, pruning, and module disabling;
 - primary-market exclusivity and curve price/unwind/quarantine economics;
 - singleton liquidity reservation, migration, removal, hostile fallback, and

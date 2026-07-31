@@ -50,7 +50,7 @@ export function ExploreNetworkSummary({
         value={summary.discoveredProjects.toLocaleString()}
       />
       <Metric
-        detail="AMM, fixed-sale, or bonding-curve paths discovered in the loaded directory."
+        detail="Uniswap v4, fixed-sale, or bonding-curve paths discovered in the loaded directory."
         label="Tradeable markets"
         value={summary.tradeableMarkets.toLocaleString()}
       />
@@ -78,7 +78,7 @@ export function ProjectMarketOverview({
   const now = useMarketBoundaryClock({ dashboard });
   if (!dashboard) {
     const detail = loading
-      ? "Reading current route state, token supply, and reserve depth from the selected network."
+      ? "Reading current route state, token supply, and v4 liquidity depth from the selected network."
       : "Load the canonical project contract to inspect its current market and participation truth.";
     return (
       <section aria-label="Project market overview" className="border-b border-[var(--pc-border)] py-5">
@@ -101,7 +101,7 @@ export function ProjectMarketOverview({
         <div>
           <h2 className="m-0 text-base font-semibold text-[var(--pc-text)]">Market and participation</h2>
           <p className="m-0 mt-1 max-w-3xl text-sm leading-6 text-[var(--pc-text-muted)]">
-            Current route price, valuation, reserve depth, and liveness from exact contract and catalog reads. Every amount names its quote token.
+            Current route price, valuation, liquidity depth, and liveness from exact contract and catalog reads. Every amount names its quote token.
           </p>
         </div>
         <p className="m-0 text-xs font-semibold text-[var(--pc-text-subtle)]">Source: {view.routeSource}</p>

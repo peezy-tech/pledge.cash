@@ -14,6 +14,9 @@ Release B retains the complete release-A selector table, then:
 - adds `releaseBMigrationState()`;
 - adds the release-pinned migration route.
 
+The retained release-A surface includes the canonical Uniswap v4 vault/PoolId lifecycle and has no legacy custom-AMM
+or address-shaped pool compatibility selectors.
+
 The permissionless migration accepts only the active expected facet-set hash, verifies release-A version and layout
 commitments, writes the constant marker `keccak256("pledge.cash.boardroom.diamond.release-b")`, records the migration
 timestamp and source version, and applies the release-B version and layout commitment. The kernel prevents migration

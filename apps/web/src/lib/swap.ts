@@ -1,22 +1,34 @@
 import {
-  ammFactoryAbi,
-  ammPoolAbi,
-  ammRouterAbi,
+  buildProtocolLiquidityClaimDepositTransaction,
+  buildProtocolLiquidityClaimRedemptionTransaction,
+  buildUniswapV4SwapExactInputSingleTransaction,
+  discoverBoardroomProtocolLiquidity,
   erc20Abi,
   isZeroAddress,
+  pledgeV4LiquidityFactoryAbi,
+  readPermit2Allowance,
+  readProtocolLiquidityVaultState,
+  readUniswapV4ExactInputSingleQuote,
+  readUniswapV4PoolState,
   type Address,
   type PledgeCashDeployment,
+  type PledgeCashLogClient,
   type PledgeCashReadClient,
+  type UniswapV4PoolKey,
 } from "@pledge.cash/sdk";
-import { isAddress } from "viem";
+import { isAddress, type Hex } from "viem";
 import { errorMessage } from "./forms";
 import {
-  swapExecutionMetrics as calculateSwapExecutionMetrics,
+  divideRationals,
+  exactRational,
+  exactTokenAmount,
+  knownMetric,
+  normalizedPriceFromAmounts,
+  subtractRationals,
   unavailableMetric,
   type ExactRational,
   type MetricState,
   type NormalizedPrice,
-  type SwapExecutionMetrics,
 } from "./market-data";
 import { formatTokenAmount, parseTokenAmountInput } from "./token-amounts";
 
@@ -54,7 +66,11 @@ export type SwapTokenMetadata = {
   symbol?: string;
   decimals?: number;
   balance?: bigint;
+  /** Effective Universal Router allowance after both ERC20-to-Permit2 and Permit2-to-router gates. */
   allowance?: bigint;
+  erc20Allowance?: bigint;
+  permit2Allowance?: bigint;
+  permit2Expiration?: number;
   error?: string;
 };
 
@@ -62,34 +78,32 @@ export type SwapTokenSource = "pool" | "deployment" | "custom";
 
 export type SwapTokenListOptions = {
   discoveryMode?: "global" | "pinned-only" | undefined;
+  /** Canonical pledge.cash v4 vault addresses, retained under the historical option name. */
   pinnedPools?: readonly Address[] | undefined;
   signal?: AbortSignal | undefined;
   wrappedNativeLabel?: string;
 };
 
-export type SwapTokenOption = SwapTokenMetadata & {
-  label?: string;
-  sources: SwapTokenSource[];
-  pools: Address[];
-  pairAddresses: Address[];
-};
-
+/** A canonical pledge.cash Uniswap v4 pool, identified by PoolId and represented in the UI by its P4LP vault. */
 export type SwapPoolSummary = {
   address: Address;
   token0: Address;
   token1: Address;
-  reserve0: bigint;
-  reserve1: bigint;
+  poolId?: Hex;
+  fee?: number;
+  tickSpacing?: number;
+  hooks?: Address;
+  liquidity?: bigint;
+  sqrtPriceX96?: bigint;
 };
 
-export type SwapPoolState = {
-  address: Address;
-  token0: Address;
-  token1: Address;
-  reserve0: bigint;
-  reserve1: bigint;
-  reserveIn: bigint;
-  reserveOut: bigint;
+export type SwapPoolState = SwapPoolSummary & {
+  poolId: Hex;
+  fee: number;
+  tickSpacing: number;
+  hooks: Address;
+  liquidity: bigint;
+  sqrtPriceX96: bigint;
 };
 
 export type LiquidityPoolState = {
@@ -97,11 +111,16 @@ export type LiquidityPoolState = {
   exists: boolean;
   token0: Address;
   token1: Address;
-  reserve0: bigint;
-  reserve1: bigint;
-  reserveA: bigint;
-  reserveB: bigint;
   totalSupply: bigint;
+  poolId?: Hex;
+  positionLiquidity?: bigint;
+  sqrtPriceX96?: bigint;
+  liquidityState?: number;
+  fee?: number;
+  tickSpacing?: number;
+  hooks?: Address;
+  tickLower?: number;
+  tickUpper?: number;
 };
 
 export type SwapQuoteState = {
@@ -116,6 +135,7 @@ export type SwapQuoteState = {
   feeBps?: bigint;
   feeDenominator?: bigint;
   protocolFeeShareBps?: bigint;
+  gasEstimate?: bigint;
   effectiveExecutionPrice?: MetricState<NormalizedPrice>;
   feeInclusivePriceImpact?: MetricState<ExactRational>;
   error?: string;
@@ -125,6 +145,8 @@ export type LiquidityQuoteState = {
   tokenA?: SwapTokenMetadata;
   tokenB?: SwapTokenMetadata;
   pool?: LiquidityPoolState;
+  amountADesired?: bigint;
+  amountBDesired?: bigint;
   amountA?: bigint;
   amountB?: bigint;
   amountAMin?: bigint;
@@ -134,6 +156,7 @@ export type LiquidityQuoteState = {
   error?: string;
 };
 
+/** P4LP is a fungible claim on the Boardroom's canonical full-range v4 position. */
 export type AmmPositionState = {
   tokenA: SwapTokenMetadata;
   tokenB: SwapTokenMetadata;
@@ -165,6 +188,13 @@ export type SwapTokenListState = {
   error?: string;
 };
 
+export type SwapTokenOption = SwapTokenMetadata & {
+  label?: string;
+  sources: SwapTokenSource[];
+  pools: Address[];
+  pairAddresses: Address[];
+};
+
 type ExecutableSwapQuote = SwapQuoteState & {
   tokenIn: SwapTokenMetadata & { decimals: number };
   tokenOut: SwapTokenMetadata & { decimals: number };
@@ -177,7 +207,9 @@ type ExecutableSwapQuote = SwapQuoteState & {
 type ExecutableLiquidityQuote = LiquidityQuoteState & {
   tokenA: SwapTokenMetadata & { decimals: number };
   tokenB: SwapTokenMetadata & { decimals: number };
-  pool: LiquidityPoolState;
+  pool: LiquidityPoolState & { poolId: Hex };
+  amountADesired: bigint;
+  amountBDesired: bigint;
   amountA: bigint;
   amountB: bigint;
   amountAMin: bigint;
@@ -189,7 +221,7 @@ type ExecutableRemoveLiquidityQuote = RemoveLiquidityQuoteState & {
   position: AmmPositionState & {
     tokenA: SwapTokenMetadata & { decimals: number };
     tokenB: SwapTokenMetadata & { decimals: number };
-    pool: LiquidityPoolState;
+    pool: LiquidityPoolState & { poolId: Hex };
     lpToken: SwapTokenMetadata & { decimals: number };
     lpBalance: bigint;
   };
@@ -200,17 +232,25 @@ type ExecutableRemoveLiquidityQuote = RemoveLiquidityQuoteState & {
   amountBMin: bigint;
 };
 
-type AmmFeeConfig = {
-  feeBps: bigint;
-  feeDenominator: bigint;
-  protocolFeeShareBps: bigint;
+type TokenAccumulator = {
+  address: Address;
+  label?: string;
+  rank: number;
+  sources: Set<SwapTokenSource>;
+  pools: Set<Address>;
+  pairAddresses: Set<Address>;
 };
 
-const AMM_MINIMUM_LIQUIDITY = 1_000n;
-const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
+type SwapReadClient = PledgeCashReadClient & Partial<PledgeCashLogClient>;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
 const DEFAULT_SLIPPAGE_BPS = 50;
 const FULL_BPS = 10_000;
 const FULL_BPS_BIGINT = 10_000n;
+const V4_FEE_DENOMINATOR = 1_000_000n;
+const P4LP_PROTOCOL_FEE_SHARE_BPS = 500n;
+const Q96 = 1n << 96n;
+const Q192 = 1n << 192n;
 const MAX_DISCOVERED_POOLS = 500;
 const MAX_PINNED_POOLS = 64;
 const SWAP_DISCOVERY_CONCURRENCY = 8;
@@ -264,129 +304,107 @@ export function defaultRemoveLiquidityForm(): RemoveLiquidityForm {
 export function withSwapTokenListDefaults(
   form: SwapForm,
   tokenList: SwapTokenListState,
-  deployment?: PledgeCashDeployment | undefined,
+  deployment?: PledgeCashDeployment,
 ): SwapForm {
   const defaults = preferredPoolPair(tokenList, deployment);
   if (!defaults) return form;
-
   const tokenIn = form.tokenIn || defaults.tokenIn;
-  const tokenOut = defaultTokenOut(form.tokenOut, tokenIn, defaults.tokenOut);
-
   return {
     ...form,
     tokenIn,
-    tokenOut,
-    useNative: form.useNative && pairHasWrappedNative(deployment, tokenIn, tokenOut),
+    tokenOut: defaultTokenOut(form.tokenOut, tokenIn, defaults.tokenOut),
+    useNative: false,
   };
 }
 
 export function withLiquidityTokenListDefaults(
   form: LiquidityForm,
   tokenList: SwapTokenListState,
-  deployment?: PledgeCashDeployment | undefined,
+  deployment?: PledgeCashDeployment,
 ): LiquidityForm {
   const defaults = preferredPoolPair(tokenList, deployment);
   if (!defaults) return form;
-
   const tokenA = form.tokenA || defaults.tokenIn;
-  const tokenB = defaultTokenOut(form.tokenB, tokenA, defaults.tokenOut);
-
   return {
     ...form,
     tokenA,
-    tokenB,
-    useNative: form.useNative && pairHasWrappedNative(deployment, tokenA, tokenB),
+    tokenB: defaultTokenOut(form.tokenB, tokenA, defaults.tokenOut),
+    useNative: false,
   };
 }
 
-function defaultTokenOut(currentTokenOut: string, tokenIn: string, fallbackTokenOut: Address): string {
-  const tokenOut = currentTokenOut || fallbackTokenOut;
-  if (!tokenIn || !tokenOut || !sameAddress(tokenIn, tokenOut)) return tokenOut;
-  return !sameAddress(tokenIn, fallbackTokenOut) ? fallbackTokenOut : "";
-}
-
 export async function readSwapTokenList(
-  client: PledgeCashReadClient,
+  client: SwapReadClient,
   deployment: PledgeCashDeployment | undefined,
-  account?: Address | undefined,
-  listOptions: SwapTokenListOptions = {},
+  account?: Address,
+  options: SwapTokenListOptions = {},
 ): Promise<SwapTokenListState> {
-  throwIfSwapReadAborted(listOptions.signal);
-  const read = readSwapTokenListState(client, deployment, account, listOptions);
-  return listOptions.signal ? await raceWithSwapReadAbort(read, listOptions.signal) : await read;
-}
-
-async function readSwapTokenListState(
-  client: PledgeCashReadClient,
-  deployment: PledgeCashDeployment | undefined,
-  account: Address | undefined,
-  listOptions: SwapTokenListOptions,
-): Promise<SwapTokenListState> {
+  throwIfSwapReadAborted(options.signal);
   const tokens = new Map<string, TokenAccumulator>();
-  const wrappedNativeLabel = listOptions.wrappedNativeLabel || "Wrapped native";
-  addTokenAccumulator(tokens, deployment?.wrappedNative, { label: wrappedNativeLabel, source: "deployment", rank: 0 });
+  addTokenAccumulator(tokens, deployment?.wrappedNative, {
+    label: options.wrappedNativeLabel || "Wrapped native",
+    source: "deployment",
+    rank: 0,
+  });
 
+  const errors: string[] = [];
   let pools: SwapPoolSummary[] = [];
-  let listError: string | undefined;
-
-  if ((listOptions.discoveryMode ?? "global") === "global") {
-    try {
-      const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-      const discovered = await readPoolSummaries(client, factory, listOptions.signal);
-      pools = discovered.pools;
-      listError = discovered.error;
-    } catch (error) {
-      listError = errorMessage(error);
+  if ((options.discoveryMode ?? "global") === "global") {
+    if (!deployment?.pledgeV4LiquidityFactory) {
+      errors.push("The pledge.cash v4 liquidity factory is not configured.");
+    } else if (typeof client.getLogs !== "function") {
+      errors.push("This client cannot discover canonical v4 liquidity events.");
+    } else {
+      const discovery = await discoverBoardroomProtocolLiquidity(client as PledgeCashLogClient, {
+        factory: deployment.pledgeV4LiquidityFactory,
+        fromBlock: deployment.deploymentBlock ?? 0n,
+        chunkSize: 100_000n,
+      });
+      // Discovery is newest-first, so keep the head of the bounded catalog.
+      const discovered = discovery.items.slice(0, MAX_DISCOVERED_POOLS);
+      const hydrated = await mapInBatches(
+        discovered,
+        SWAP_DISCOVERY_CONCURRENCY,
+        async (item) => await readPoolSummary(client, deployment, item.vault),
+        options.signal,
+      );
+      pools.push(...hydrated.fulfilled);
+      errors.push(...discovery.errors.map((entry) => entry.message), ...hydrated.errors);
+      if (discovery.items.length > discovered.length) {
+        errors.push(`Only the newest ${MAX_DISCOVERED_POOLS.toString()} canonical v4 pools are shown.`);
+      }
     }
   }
-  throwIfSwapReadAborted(listOptions.signal);
 
-  const pinnedPools = uniquePoolAddresses(listOptions.pinnedPools ?? []);
-  const boundedPinnedPools = pinnedPools.slice(-MAX_PINNED_POOLS);
-  const missingPinnedPools = boundedPinnedPools.filter((address) =>
-    !pools.some((pool) => sameAddress(pool.address, address)));
-  const pinnedResults = await mapInBatches(
-    missingPinnedPools,
+  const pinned = uniqueAddresses(options.pinnedPools ?? []);
+  const boundedPinned = pinned.slice(-MAX_PINNED_POOLS);
+  const missing = boundedPinned.filter((vault) => !pools.some((pool) => sameAddress(pool.address, vault)));
+  const hydratedPinned = await mapInBatches(
+    missing,
     SWAP_DISCOVERY_CONCURRENCY,
-    async (address): Promise<{ error?: string | undefined; pool?: SwapPoolSummary | undefined }> => {
-      try {
-        return { pool: await readPoolSummary(client, address) };
-      } catch (error) {
-        return { error: errorMessage(error) };
-      }
-    },
-    listOptions.signal,
+    async (vault) => await readPoolSummary(client, deployment, vault),
+    options.signal,
   );
-  throwIfSwapReadAborted(listOptions.signal);
-  pools = uniquePoolSummaries([
-    ...pools,
-    ...pinnedResults.flatMap((result) => result.pool ? [result.pool] : []),
-  ]);
-  const pinnedFailures = pinnedResults.filter((result) => result.error).length;
-  const listErrors = [
-    listError,
-    pinnedPools.length > boundedPinnedPools.length
-      ? `Only the newest ${MAX_PINNED_POOLS.toString()} project pools can be pinned at once.`
-      : undefined,
-    pinnedFailures > 0
-      ? `${pinnedFailures.toString()} ${pinnedFailures === 1 ? "project pool could" : "project pools could"} not be read.`
-      : undefined,
-  ].filter((message): message is string => Boolean(message));
-  listError = listErrors.length > 0 ? listErrors.join(" ") : undefined;
+  pools = uniquePoolSummaries([...pools, ...hydratedPinned.fulfilled]);
+  errors.push(...hydratedPinned.errors);
+  if (pinned.length > boundedPinned.length) {
+    errors.push(`Only the newest ${MAX_PINNED_POOLS.toString()} project pools can be pinned at once.`);
+  }
 
   addPoolTokens(tokens, pools);
-
-  const rankedTokens = Array.from(tokens.values()).sort((left, right) => left.rank - right.rank);
-  const options = await mapInBatches(
-    rankedTokens,
+  const tokenResults = await mapInBatches(
+    [...tokens.values()].sort((left, right) => left.rank - right.rank),
     SWAP_DISCOVERY_CONCURRENCY,
-    async (token) => await tokenOptionFromAccumulator(client, token, account),
-    listOptions.signal,
+    async (entry) => await tokenOptionFromAccumulator(client, entry, account),
+    options.signal,
   );
-  options.sort(compareTokenOptions);
-
-  const result: SwapTokenListState = { tokens: options, pools, loaded: true };
-  if (listError) result.error = listError;
+  errors.push(...tokenResults.errors);
+  const result: SwapTokenListState = {
+    tokens: tokenResults.fulfilled.sort(compareTokenOptions),
+    pools,
+    loaded: true,
+  };
+  if (errors.length > 0) result.error = uniqueStrings(errors).join(" ");
   return result;
 }
 
@@ -394,107 +412,47 @@ export async function readSwapQuote(
   client: PledgeCashReadClient,
   deployment: PledgeCashDeployment | undefined,
   form: SwapForm,
-  account?: Address | undefined,
+  account?: Address,
 ): Promise<SwapQuoteState> {
   const requestIdentity = swapQuoteRequestIdentity(form);
   let slippageBps = DEFAULT_SLIPPAGE_BPS;
-
   try {
     slippageBps = parseSlippageBps(form.slippageBps);
-    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    if (form.useNative) throw new Error("Uniswap v4 swaps currently require wrapped ERC20 input; wrap native currency first.");
+    const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "pledge.cash v4 liquidity factory");
+    const router = requireDeploymentAddress(deployment?.uniswapUniversalRouter, "Uniswap Universal Router");
+    const quoter = requireDeploymentAddress(deployment?.uniswapV4Quoter, "Uniswap v4 Quoter");
+    const permit2 = requireDeploymentAddress(deployment?.permit2, "Permit2");
     const tokenIn = requireTokenAddress(form.tokenIn, "From token");
     const tokenOut = requireTokenAddress(form.tokenOut, "To token");
-    if (tokenIn.toLowerCase() === tokenOut.toLowerCase()) {
-      throw new Error("Choose two different tokens.");
-    }
+    if (sameAddress(tokenIn, tokenOut)) throw new Error("Choose two different tokens.");
 
-    const [inputToken, outputToken, poolAddress, fees] = await Promise.all([
-      readTokenMetadata(client, tokenIn, account, router),
+    const pool = await readCanonicalSwapPool(client, deployment, factory, tokenIn, tokenOut);
+    const [inputToken, outputToken] = await Promise.all([
+      readTokenMetadata(client, tokenIn, account, { permit2, router }),
       readTokenMetadata(client, tokenOut, account),
-      client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "getPool", args: [tokenIn, tokenOut] }) as Promise<Address>,
-      readAmmFeeConfig(client, factory),
     ]);
-
-    if (inputToken.decimals === undefined) {
-      return baseQuote({ requestIdentity, inputToken, outputToken, slippageBps, ...fees, error: "From token decimals could not be read." });
-    }
-    if (outputToken.decimals === undefined) {
-      return baseQuote({ requestIdentity, inputToken, outputToken, slippageBps, ...fees, error: "To token decimals could not be read." });
-    }
-
+    if (inputToken.decimals === undefined) return baseQuote(requestIdentity, inputToken, outputToken, slippageBps, "From token decimals could not be read.");
+    if (outputToken.decimals === undefined) return baseQuote(requestIdentity, inputToken, outputToken, slippageBps, "To token decimals could not be read.");
     const amountIn = parseTokenAmountInput(form.amountIn, inputToken, "Input amount");
-    if (amountIn === 0n) {
-      return baseQuote({ requestIdentity, inputToken, outputToken, amountIn, slippageBps, ...fees, error: "Enter a positive input amount." });
-    }
-
-    if (isZeroAddress(poolAddress)) {
-      return baseQuote({
-        requestIdentity,
-        inputToken,
-        outputToken,
-        amountIn,
-        slippageBps,
-        ...fees,
-        error: "No AMM pool exists for this pair yet.",
-      });
-    }
-
-    const path = [tokenIn, tokenOut] as const;
-    const amountsRead = (client.readContract({
-      address: router,
-      abi: ammRouterAbi,
-      functionName: "getAmountsOut",
-      args: [amountIn, path],
-    }) as Promise<readonly bigint[]>).then(
-      (amounts) => ({ status: "fulfilled" as const, amounts }),
-      (error: unknown) => ({ status: "rejected" as const, error }),
-    );
-    const pool = await readSwapPoolState(client, poolAddress, tokenIn, tokenOut);
-    if (pool.reserveIn === 0n || pool.reserveOut === 0n) {
-      const executionMetrics = unavailableSwapExecutionMetrics("The AMM pool has no two-sided liquidity.");
+    if (amountIn === 0n) return baseQuote(requestIdentity, inputToken, outputToken, slippageBps, "Enter a positive input amount.", amountIn);
+    if (pool.liquidity === 0n) {
       return {
-        requestIdentity,
-        tokenIn: inputToken,
-        tokenOut: outputToken,
+        ...baseQuote(requestIdentity, inputToken, outputToken, slippageBps, "The Uniswap v4 pool has no active liquidity.", amountIn),
         pool,
-        amountIn,
-        slippageBps,
-        ...fees,
-        ...executionMetrics,
-        error: "The AMM pool has no two-sided liquidity.",
+        ...unavailableSwapExecutionMetrics("The Uniswap v4 pool has no active liquidity."),
       };
     }
 
-    const amountsResult = await amountsRead;
-    if (amountsResult.status === "rejected") throw amountsResult.error;
-    const amounts = amountsResult.amounts;
-    const amountOut = amounts[1] ?? 0n;
-    const amountOutMin = applySlippage(amountOut, slippageBps);
-    const executionMetrics = swapQuoteExecutionMetrics({
-      tokenIn: inputToken,
-      tokenOut: outputToken,
-      pool,
+    const quoted = await readUniswapV4ExactInputSingleQuote(client, {
+      quoter,
+      poolKey: poolKeyFromPool(pool),
+      currencyIn: tokenIn,
       amountIn,
-      amountOut,
     });
-
-    if (amountOut === 0n) {
-      return {
-        requestIdentity,
-        tokenIn: inputToken,
-        tokenOut: outputToken,
-        pool,
-        amountIn,
-        amountOut,
-        amountOutMin,
-        slippageBps,
-        ...fees,
-        ...executionMetrics,
-        error: "Swap output would be zero.",
-      };
-    }
-
+    const amountOut = quoted.amountOut;
+    const amountOutMin = applySlippage(amountOut, slippageBps);
+    const metrics = swapQuoteExecutionMetrics({ tokenIn: inputToken, tokenOut: outputToken, pool, amountIn, amountOut });
     return {
       requestIdentity,
       tokenIn: inputToken,
@@ -504,8 +462,12 @@ export async function readSwapQuote(
       amountOut,
       amountOutMin,
       slippageBps,
-      ...fees,
-      ...executionMetrics,
+      feeBps: BigInt(pool.fee),
+      feeDenominator: V4_FEE_DENOMINATOR,
+      protocolFeeShareBps: P4LP_PROTOCOL_FEE_SHARE_BPS,
+      gasEstimate: quoted.gasEstimate,
+      ...metrics,
+      ...(amountOut === 0n ? { error: "Swap output would be zero." } : {}),
     };
   } catch (error) {
     return { requestIdentity, slippageBps, error: errorMessage(error) };
@@ -522,67 +484,65 @@ export function swapQuoteExecutionMetrics(input: {
   if (input.tokenIn.decimals === undefined || input.tokenOut.decimals === undefined) {
     return unavailableSwapExecutionMetrics("Execution metrics require verified token decimals.");
   }
-  const metrics = calculateSwapExecutionMetrics({
-    tokenIn: input.tokenIn.address,
-    tokenInDecimals: input.tokenIn.decimals,
-    tokenOut: input.tokenOut.address,
-    tokenOutDecimals: input.tokenOut.decimals,
-    amountIn: input.amountIn,
-    amountOut: input.amountOut,
-    reserveIn: input.pool.reserveIn,
-    reserveOut: input.pool.reserveOut,
-  });
-  return executionMetricFields(metrics);
+  if (input.amountIn === 0n || input.pool.sqrtPriceX96 === 0n) {
+    return unavailableSwapExecutionMetrics("The v4 pool does not expose a usable price.");
+  }
+  const effectiveRaw = exactRational(input.amountOut, input.amountIn);
+  const tokenInIsCurrency0 = sameAddress(input.tokenIn.address, input.pool.token0);
+  const spotRaw = tokenInIsCurrency0
+    ? exactRational(input.pool.sqrtPriceX96 * input.pool.sqrtPriceX96, Q192)
+    : exactRational(Q192, input.pool.sqrtPriceX96 * input.pool.sqrtPriceX96);
+  return {
+    effectiveExecutionPrice: knownMetric(normalizedPriceFromAmounts(
+      exactTokenAmount(input.tokenIn.address, input.amountIn, input.tokenIn.decimals),
+      exactTokenAmount(input.tokenOut.address, input.amountOut, input.tokenOut.decimals),
+    )),
+    feeInclusivePriceImpact: knownMetric(divideRationals(subtractRationals(spotRaw, effectiveRaw), spotRaw)),
+  };
 }
 
 export async function readLiquidityQuote(
   client: PledgeCashReadClient,
   deployment: PledgeCashDeployment | undefined,
   form: LiquidityForm,
-  account?: Address | undefined,
+  account?: Address,
 ): Promise<LiquidityQuoteState> {
   let slippageBps = DEFAULT_SLIPPAGE_BPS;
-
   try {
     slippageBps = parseSlippageBps(form.slippageBps);
-    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    if (form.useNative) throw new Error("P4LP deposits require wrapped ERC20 tokens; wrap native currency first.");
     const tokenA = requireTokenAddress(form.tokenA, "Token A");
     const tokenB = requireTokenAddress(form.tokenB, "Token B");
     if (sameAddress(tokenA, tokenB)) throw new Error("Choose two different tokens.");
-
-    const [tokenAMetadata, tokenBMetadata, pool] = await Promise.all([
-      readTokenMetadata(client, tokenA, account, router),
-      readTokenMetadata(client, tokenB, account, router),
-      readLiquidityPool(client, factory, tokenA, tokenB),
+    const pool = await readLiquidityPool(client, deployment, tokenA, tokenB);
+    if (!pool.exists) throw new Error("No canonical pledge.cash v4 vault exists for this pair.");
+    if (pool.liquidityState !== 1) throw new Error("This P4LP vault is not accepting deposits.");
+    const [tokenAMetadata, tokenBMetadata] = await Promise.all([
+      readTokenMetadata(client, tokenA, account, { spender: pool.address }),
+      readTokenMetadata(client, tokenB, account, { spender: pool.address }),
     ]);
-
-    if (tokenAMetadata.decimals === undefined) return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Token A decimals could not be read." });
-    if (tokenBMetadata.decimals === undefined) return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Token B decimals could not be read." });
-
+    if (tokenAMetadata.decimals === undefined) return baseLiquidityQuote(tokenAMetadata, tokenBMetadata, pool, slippageBps, "Token A decimals could not be read.");
+    if (tokenBMetadata.decimals === undefined) return baseLiquidityQuote(tokenAMetadata, tokenBMetadata, pool, slippageBps, "Token B decimals could not be read.");
     const amountADesired = parseTokenAmountInput(form.amountA, tokenAMetadata, "Token A amount");
     const amountBDesired = parseTokenAmountInput(form.amountB, tokenBMetadata, "Token B amount");
     if (amountADesired === 0n || amountBDesired === 0n) {
-      return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Enter positive amounts for both tokens." });
+      return baseLiquidityQuote(tokenAMetadata, tokenBMetadata, pool, slippageBps, "Enter positive amounts for both tokens.");
     }
-
-    const [amountA, amountB] = optimalLiquidityAmounts(pool, amountADesired, amountBDesired);
-    const amountAMin = applySlippage(amountA, slippageBps);
-    const amountBMin = applySlippage(amountB, slippageBps);
-    const liquidityOut = estimateLiquidityOut(pool, amountA, amountB);
-    if (liquidityOut === 0n) {
-      return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, amountA, amountB, amountAMin, amountBMin, slippageBps, error: "Liquidity output would be zero." });
+    const estimated = estimateP4LpDeposit(pool, tokenA, amountADesired, amountBDesired);
+    if (estimated.liquidity === 0n) {
+      return baseLiquidityQuote(tokenAMetadata, tokenBMetadata, pool, slippageBps, "P4LP output would be zero.");
     }
-
     return {
       tokenA: tokenAMetadata,
       tokenB: tokenBMetadata,
       pool,
-      amountA,
-      amountB,
-      amountAMin,
-      amountBMin,
-      liquidityOut,
+      amountADesired,
+      amountBDesired,
+      amountA: estimated.amountA,
+      amountB: estimated.amountB,
+      amountAMin: applySlippage(estimated.amountA, slippageBps),
+      amountBMin: applySlippage(estimated.amountB, slippageBps),
+      liquidityOut: estimated.liquidity,
       slippageBps,
     };
   } catch (error) {
@@ -595,45 +555,36 @@ export async function readAmmPosition(
   deployment: PledgeCashDeployment | undefined,
   tokenAInput: string,
   tokenBInput: string,
-  account?: Address | undefined,
+  account?: Address,
 ): Promise<AmmPositionState | undefined> {
   try {
-    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const tokenA = requireTokenAddress(tokenAInput, "Token A");
     const tokenB = requireTokenAddress(tokenBInput, "Token B");
     if (sameAddress(tokenA, tokenB)) throw new Error("Choose two different tokens.");
-
-    const [tokenAMetadata, tokenBMetadata, pool] = await Promise.all([
+    const pool = await readLiquidityPool(client, deployment, tokenA, tokenB);
+    const [tokenAMetadata, tokenBMetadata] = await Promise.all([
       readTokenMetadata(client, tokenA, account),
       readTokenMetadata(client, tokenB, account),
-      readLiquidityPool(client, factory, tokenA, tokenB),
     ]);
     const base: AmmPositionState = { tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool };
     if (!pool.exists) return base;
-
-    const lpToken = await readTokenMetadata(client, pool.address, account, router);
+    const lpToken = await readTokenMetadata(client, pool.address, account);
     const lpBalance = lpToken.balance ?? 0n;
-    const result: AmmPositionState = {
+    return {
       ...base,
       lpToken,
       lpBalance,
-      lpAllowance: lpToken.allowance ?? 0n,
+      // P4LP redemption burns the caller's claims directly and never requires allowance.
+      lpAllowance: lpBalance,
       poolShareBps: pool.totalSupply === 0n ? 0n : (lpBalance * FULL_BPS_BIGINT) / pool.totalSupply,
     };
-
-    if (account) {
-      const claimable = await readEffectiveClaimable(client, pool, tokenA, account);
-      result.claimableA = claimable.claimableA;
-      result.claimableB = claimable.claimableB;
-    }
-
-    return result;
   } catch (error) {
     if (!isAddress(tokenAInput) || !isAddress(tokenBInput)) return undefined;
-    const tokenA = { address: tokenAInput } as SwapTokenMetadata;
-    const tokenB = { address: tokenBInput } as SwapTokenMetadata;
-    return { tokenA, tokenB, error: errorMessage(error) };
+    return {
+      tokenA: { address: tokenAInput },
+      tokenB: { address: tokenBInput },
+      error: errorMessage(error),
+    };
   }
 }
 
@@ -642,39 +593,61 @@ export async function readRemoveLiquidityQuote(
   deployment: PledgeCashDeployment | undefined,
   pairForm: LiquidityForm,
   removeForm: RemoveLiquidityForm,
-  account?: Address | undefined,
+  account?: Address,
 ): Promise<RemoveLiquidityQuoteState> {
   let slippageBps = DEFAULT_SLIPPAGE_BPS;
-
   try {
     slippageBps = parseSlippageBps(removeForm.slippageBps);
+    if (removeForm.useNative) throw new Error("P4LP redemption returns ERC20 tokens; unwrap wrapped native separately.");
     const position = await readAmmPosition(client, deployment, pairForm.tokenA, pairForm.tokenB, account);
-    if (!position) return { slippageBps, error: "No AMM pool exists for this pair yet." };
-    if (!position.pool || !position.pool.exists || !position.lpToken) return { position, slippageBps, error: "No AMM pool exists for this pair yet." };
-    if (position.lpToken.decimals === undefined) return { position, slippageBps, error: "LP token decimals could not be read." };
-
-    const liquidity = parseTokenAmountInput(removeForm.liquidity, position.lpToken, "LP amount");
-    if (liquidity === 0n) return { position, liquidity, slippageBps, error: "Enter a positive LP amount." };
-    if (position.lpBalance !== undefined && liquidity > position.lpBalance) return { position, liquidity, slippageBps, error: "LP amount exceeds your balance." };
-    if (position.pool.totalSupply === 0n) return { position, liquidity, slippageBps, error: "Pool supply is zero." };
-
-    const [amountA, amountB] = removeLiquidityAmounts(position.pool, liquidity);
-    const amountAMin = applySlippage(amountA, slippageBps);
-    const amountBMin = applySlippage(amountB, slippageBps);
-    if (amountA === 0n || amountB === 0n) {
-      return {
-        position,
-        liquidity,
-        amountA,
-        amountB,
-        amountAMin,
-        amountBMin,
-        slippageBps,
-        error: "LP amount is too small for this pool.",
-      };
+    if (!position?.pool?.exists || !position.lpToken) {
+      return { ...(position ? { position } : {}), slippageBps, error: "No canonical P4LP vault exists for this pair." };
     }
-
-    return { position, liquidity, amountA, amountB, amountAMin, amountBMin, slippageBps };
+    if (position.pool.liquidityState !== 2) {
+      return { position, slippageBps, error: "P4LP claims become redeemable only after the Boardroom enters wind-down claims mode." };
+    }
+    if (position.lpToken.decimals === undefined) return { position, slippageBps, error: "P4LP decimals could not be read." };
+    const claims = parseTokenAmountInput(removeForm.liquidity, position.lpToken, "P4LP amount");
+    if (claims === 0n) return { position, liquidity: claims, slippageBps, error: "Enter a positive P4LP amount." };
+    if (claims > (position.lpBalance ?? 0n)) return { position, liquidity: claims, slippageBps, error: "P4LP amount exceeds your balance." };
+    const supply = position.pool.totalSupply;
+    const positionLiquidity = position.pool.positionLiquidity ?? 0n;
+    if (supply === 0n || positionLiquidity === 0n) return { position, liquidity: claims, slippageBps, error: "The P4LP vault has no redeemable position." };
+    const liquidity = claims === supply ? positionLiquidity : (positionLiquidity * claims) / supply;
+    const [amount0, amount1] = positionAmounts(position.pool, liquidity, false);
+    const tokenAIs0 = sameAddress(position.tokenA.address, position.pool.token0);
+    const principalA = tokenAIs0 ? amount0 : amount1;
+    const principalB = tokenAIs0 ? amount1 : amount0;
+    const [vaultBalanceA, vaultBalanceB] = await Promise.all([
+      client.readContract({
+        address: position.tokenA.address,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [position.pool.address],
+      }) as Promise<bigint>,
+      client.readContract({
+        address: position.tokenB.address,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [position.pool.address],
+      }) as Promise<bigint>,
+    ]);
+    const backingA = claims === supply ? vaultBalanceA : (vaultBalanceA * claims) / supply;
+    const backingB = claims === supply ? vaultBalanceB : (vaultBalanceB * claims) / supply;
+    const amountA = principalA + backingA;
+    const amountB = principalB + backingB;
+    if (liquidity === 0n || (amountA === 0n && amountB === 0n)) {
+      return { position, liquidity: claims, amountA, amountB, slippageBps, error: "P4LP amount is too small for this position." };
+    }
+    return {
+      position,
+      liquidity: claims,
+      amountA,
+      amountB,
+      amountAMin: applySlippage(amountA, slippageBps),
+      amountBMin: applySlippage(amountB, slippageBps),
+      slippageBps,
+    };
   } catch (error) {
     return { slippageBps, error: errorMessage(error) };
   }
@@ -686,38 +659,17 @@ export function buildSwapTransaction(input: {
   quote: SwapQuoteState;
   account: Address;
 }) {
-  const router = requireDeploymentAddress(input.deployment?.ammRouter, "AMM router");
+  if (input.form.useNative) throw new Error("Wrap native currency before using the v4 swap route.");
   const quote = requireExecutableQuote(input.quote);
-  const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
-  const deadline = parseSwapDeadline(input.form.deadline);
-  const path = [quote.tokenIn.address, quote.tokenOut.address] as const;
-  const nativeMode = input.form.useNative ? requireSwapNativeMode(input.deployment, quote.tokenIn.address, quote.tokenOut.address) : undefined;
-
-  if (nativeMode === "input") {
-    return {
-      address: router,
-      abi: ammRouterAbi,
-      functionName: "swapExactNativeForTokens",
-      value: quote.amountIn,
-      args: [quote.amountOutMin, path, recipient, deadline] as const,
-    };
-  }
-
-  if (nativeMode === "output") {
-    return {
-      address: router,
-      abi: ammRouterAbi,
-      functionName: "swapExactTokensForNative",
-      args: [quote.amountIn, quote.amountOutMin, path, recipient, deadline] as const,
-    };
-  }
-
-  return {
-    address: router,
-    abi: ammRouterAbi,
-    functionName: "swapExactTokensForTokens",
-    args: [quote.amountIn, quote.amountOutMin, path, recipient, deadline] as const,
-  };
+  return buildUniswapV4SwapExactInputSingleTransaction({
+    universalRouter: requireDeploymentAddress(input.deployment?.uniswapUniversalRouter, "Uniswap Universal Router"),
+    poolKey: poolKeyFromPool(quote.pool),
+    currencyIn: quote.tokenIn.address,
+    amountIn: quote.amountIn,
+    amountOutMin: quote.amountOutMin,
+    recipient: input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account,
+    deadline: parseSwapDeadline(input.form.deadline),
+  });
 }
 
 export function buildAddLiquidityTransaction(input: {
@@ -726,34 +678,17 @@ export function buildAddLiquidityTransaction(input: {
   quote: LiquidityQuoteState;
   account: Address;
 }) {
-  const router = requireDeploymentAddress(input.deployment?.ammRouter, "AMM router");
+  if (input.form.useNative) throw new Error("Wrap native currency before depositing P4LP liquidity.");
   const quote = requireExecutableLiquidityQuote(input.quote);
-  const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
-  const deadline = parseSwapDeadline(input.form.deadline);
-  const nativeSide = input.form.useNative ? requireWrappedNativeSide(input.deployment, quote.tokenA.address, quote.tokenB.address) : undefined;
-
-  if (nativeSide) {
-    const token = nativeSide === "tokenA" ? quote.tokenB : quote.tokenA;
-    const amountToken = nativeSide === "tokenA" ? quote.amountB : quote.amountA;
-    const amountTokenMin = nativeSide === "tokenA" ? quote.amountBMin : quote.amountAMin;
-    const amountNative = nativeSide === "tokenA" ? quote.amountA : quote.amountB;
-    const amountNativeMin = nativeSide === "tokenA" ? quote.amountAMin : quote.amountBMin;
-
-    return {
-      address: router,
-      abi: ammRouterAbi,
-      functionName: "addLiquidityNative",
-      value: amountNative,
-      args: [token.address, amountToken, amountTokenMin, amountNativeMin, recipient, deadline] as const,
-    };
-  }
-
-  return {
-    address: router,
-    abi: ammRouterAbi,
-    functionName: "addLiquidity",
-    args: [quote.tokenA.address, quote.tokenB.address, quote.amountA, quote.amountB, quote.amountAMin, quote.amountBMin, recipient, deadline] as const,
-  };
+  return buildProtocolLiquidityClaimDepositTransaction({
+    vault: quote.pool.address,
+    amountADesired: quote.amountADesired,
+    amountBDesired: quote.amountBDesired,
+    amountAMin: quote.amountAMin,
+    amountBMin: quote.amountBMin,
+    recipient: input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account,
+    deadline: parseSwapDeadline(input.form.deadline),
+  });
 }
 
 export function buildRemoveLiquidityTransaction(input: {
@@ -762,42 +697,20 @@ export function buildRemoveLiquidityTransaction(input: {
   quote: RemoveLiquidityQuoteState;
   account: Address;
 }) {
-  const router = requireDeploymentAddress(input.deployment?.ammRouter, "AMM router");
+  if (input.form.useNative) throw new Error("P4LP redemption returns wrapped ERC20 tokens.");
   const quote = requireExecutableRemoveLiquidityQuote(input.quote);
-  const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
-  const deadline = parseSwapDeadline(input.form.deadline);
-  const nativeSide = input.form.useNative
-    ? requireWrappedNativeSide(input.deployment, quote.position.tokenA.address, quote.position.tokenB.address)
-    : undefined;
-
-  if (nativeSide) {
-    const token = nativeSide === "tokenA" ? quote.position.tokenB : quote.position.tokenA;
-    const amountTokenMin = nativeSide === "tokenA" ? quote.amountBMin : quote.amountAMin;
-    const amountNativeMin = nativeSide === "tokenA" ? quote.amountAMin : quote.amountBMin;
-
-    return {
-      address: router,
-      abi: ammRouterAbi,
-      functionName: "removeLiquidityNative",
-      args: [token.address, quote.liquidity, amountTokenMin, amountNativeMin, recipient, deadline] as const,
-    };
-  }
-
-  return {
-    address: router,
-    abi: ammRouterAbi,
-    functionName: "removeLiquidity",
-    args: [quote.position.tokenA.address, quote.position.tokenB.address, quote.liquidity, quote.amountAMin, quote.amountBMin, recipient, deadline] as const,
-  };
+  return buildProtocolLiquidityClaimRedemptionTransaction({
+    vault: quote.position.pool.address,
+    claims: quote.liquidity,
+    amountAMin: quote.amountAMin,
+    amountBMin: quote.amountBMin,
+    recipient: input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account,
+    deadline: parseSwapDeadline(input.form.deadline),
+  });
 }
 
-export function buildClaimAmmFeesTransaction(position: AmmPositionState) {
-  if (!position.pool?.exists) throw new Error("No AMM pool exists for this pair yet.");
-  return {
-    address: position.pool.address,
-    abi: ammPoolAbi,
-    functionName: "claimFees",
-  };
+export function buildClaimAmmFeesTransaction(_position: AmmPositionState): never {
+  throw new Error("P4LP fees remain in claim backing and are realized when claims are redeemed after wind-down.");
 }
 
 export function formatSwapAmount(amount: bigint | undefined, token: SwapTokenMetadata | undefined): string {
@@ -807,27 +720,7 @@ export function formatSwapAmount(amount: bigint | undefined, token: SwapTokenMet
 export function formatPoolShareBps(poolShareBps: bigint | undefined): string {
   if (poolShareBps === undefined) return "Unknown";
   if (poolShareBps === 0n) return "0%";
-  const whole = poolShareBps / 100n;
-  const fraction = poolShareBps % 100n;
-  return `${whole.toString()}.${fraction.toString().padStart(2, "0")}%`;
-}
-
-function preferredPoolPair(
-  tokenList: SwapTokenListState,
-  deployment: PledgeCashDeployment | undefined,
-): { tokenIn: Address; tokenOut: Address } | undefined {
-  const pools = tokenList.pools;
-  const wrappedNative = deployment?.wrappedNative;
-  const preferred =
-    wrappedNative && !isZeroAddress(wrappedNative)
-      ? pools.find((pool) => sameAddress(pool.token0, wrappedNative) || sameAddress(pool.token1, wrappedNative)) ?? pools[0]
-      : pools[0];
-  if (!preferred) return undefined;
-  if (wrappedNative && !isZeroAddress(wrappedNative)) {
-    if (sameAddress(preferred.token0, wrappedNative)) return { tokenIn: preferred.token0, tokenOut: preferred.token1 };
-    if (sameAddress(preferred.token1, wrappedNative)) return { tokenIn: preferred.token1, tokenOut: preferred.token0 };
-  }
-  return { tokenIn: preferred.token0, tokenOut: preferred.token1 };
+  return `${(poolShareBps / 100n).toString()}.${(poolShareBps % 100n).toString().padStart(2, "0")}%`;
 }
 
 export function pairHasWrappedNative(deployment: PledgeCashDeployment | undefined, tokenA: string, tokenB: string): boolean {
@@ -843,29 +736,25 @@ export function wrappedNativeSide(deployment: PledgeCashDeployment | undefined, 
   return undefined;
 }
 
-export function swapNativeMode(deployment: PledgeCashDeployment | undefined, form: SwapForm): "input" | "output" | undefined {
-  if (!form.useNative) return undefined;
-  const wrappedNative = deployment?.wrappedNative;
-  if (!wrappedNative || isZeroAddress(wrappedNative)) return undefined;
-  if (sameAddress(form.tokenIn, wrappedNative)) return "input";
-  if (sameAddress(form.tokenOut, wrappedNative)) return "output";
+/** Native routing is intentionally disabled until the Universal Router action plan includes explicit wrap/unwrap actions. */
+export function swapNativeMode(_deployment: PledgeCashDeployment | undefined, _form: SwapForm): undefined {
   return undefined;
 }
 
 export function swapPairLabel(quote: SwapQuoteState | undefined, form: SwapForm): string {
-  const input = quote?.tokenIn?.symbol ?? shortToken(form.tokenIn);
-  const output = quote?.tokenOut?.symbol ?? shortToken(form.tokenOut);
-  return `${input} / ${output}`;
+  return `${quote?.tokenIn?.symbol ?? shortToken(form.tokenIn)} / ${quote?.tokenOut?.symbol ?? shortToken(form.tokenOut)}`;
 }
 
 export function swapQuoteReady(quote: SwapQuoteState | undefined): quote is ExecutableSwapQuote {
-  return Boolean(
-    quote &&
-      !quote.error &&
-      swapQuoteTokensReady(quote) &&
-      quote.pool &&
-      swapQuoteAmountsReady(quote),
-  );
+  return Boolean(quote && !quote.error && quote.tokenIn?.decimals !== undefined && quote.tokenOut?.decimals !== undefined && quote.pool && quote.amountIn !== undefined && quote.amountOut !== undefined && quote.amountOutMin !== undefined);
+}
+
+export function liquidityQuoteReady(quote: LiquidityQuoteState | undefined): quote is ExecutableLiquidityQuote {
+  return Boolean(quote && !quote.error && quote.tokenA?.decimals !== undefined && quote.tokenB?.decimals !== undefined && quote.pool?.poolId && quote.amountADesired !== undefined && quote.amountBDesired !== undefined && quote.amountA !== undefined && quote.amountB !== undefined && quote.amountAMin !== undefined && quote.amountBMin !== undefined && quote.liquidityOut !== undefined);
+}
+
+export function removeLiquidityQuoteReady(quote: RemoveLiquidityQuoteState | undefined): quote is ExecutableRemoveLiquidityQuote {
+  return Boolean(quote && !quote.error && quote.position?.tokenA.decimals !== undefined && quote.position.tokenB.decimals !== undefined && quote.position.pool?.poolId && quote.position.lpToken?.decimals !== undefined && quote.position.lpBalance !== undefined && quote.liquidity !== undefined && quote.amountA !== undefined && quote.amountB !== undefined && quote.amountAMin !== undefined && quote.amountBMin !== undefined);
 }
 
 export function defaultSwapDeadline(): string {
@@ -873,630 +762,447 @@ export function defaultSwapDeadline(): string {
 }
 
 export function assertFutureSwapDeadline(value: string, currentUnixTime = Math.floor(Date.now() / 1000)): void {
-  const deadline = parseSwapDeadline(value);
-  if (deadline <= BigInt(currentUnixTime)) {
+  if (parseSwapDeadline(value) <= BigInt(currentUnixTime)) {
     throw new Error("The transaction window expired. Choose a fresh quote expiry before submitting.");
   }
 }
 
-function requireExecutableQuote(quote: SwapQuoteState): ExecutableSwapQuote {
-  if (!swapQuoteReady(quote)) {
-    throw new Error(quote.error ?? "Refresh the swap quote before submitting.");
+async function readCanonicalSwapPool(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  factory: Address,
+  tokenIn: Address,
+  tokenOut: Address,
+): Promise<SwapPoolState> {
+  const poolId = await client.readContract({
+    address: factory,
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "poolIdFor",
+    args: [tokenIn, tokenOut],
+  }) as Hex;
+  const vault = await client.readContract({
+    address: factory,
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "vaultForPoolId",
+    args: [poolId],
+  }) as Address;
+  if (isZeroAddress(vault)) throw new Error("No canonical pledge.cash Uniswap v4 pool exists for this pair.");
+  const summary = await readPoolSummary(client, deployment, vault);
+  if (!samePair(summary.token0, summary.token1, tokenIn, tokenOut)) {
+    throw new Error("The canonical v4 vault does not match the requested token pair.");
   }
-  return quote;
-}
-
-function requireExecutableLiquidityQuote(quote: LiquidityQuoteState): ExecutableLiquidityQuote {
-  if (!liquidityQuoteReady(quote)) {
-    throw new Error(quote.error ?? "Refresh the liquidity quote before submitting.");
-  }
-  return quote;
-}
-
-function requireExecutableRemoveLiquidityQuote(quote: RemoveLiquidityQuoteState): ExecutableRemoveLiquidityQuote {
-  if (!removeLiquidityQuoteReady(quote)) {
-    throw new Error(quote.error ?? "Refresh the remove-liquidity quote before submitting.");
-  }
-  return quote;
-}
-
-export function liquidityQuoteReady(quote: LiquidityQuoteState | undefined): quote is ExecutableLiquidityQuote {
-  return Boolean(
-    quote &&
-      !quote.error &&
-      liquidityQuoteTokensReady(quote) &&
-      quote.pool &&
-      liquidityQuoteAmountsReady(quote),
-  );
-}
-
-export function removeLiquidityQuoteReady(quote: RemoveLiquidityQuoteState | undefined): quote is ExecutableRemoveLiquidityQuote {
-  return Boolean(
-    quote &&
-      !quote.error &&
-      removeLiquidityPositionReady(quote) &&
-      removeLiquidityAmountsReady(quote),
-  );
-}
-
-function swapQuoteTokensReady(quote: SwapQuoteState): boolean {
-  return quote.tokenIn?.decimals !== undefined && quote.tokenOut?.decimals !== undefined;
-}
-
-function swapQuoteAmountsReady(quote: SwapQuoteState): boolean {
-  return (
-    quote.amountIn !== undefined &&
-    quote.amountOut !== undefined &&
-    quote.amountOutMin !== undefined
-  );
-}
-
-function liquidityQuoteTokensReady(quote: LiquidityQuoteState): boolean {
-  return quote.tokenA?.decimals !== undefined && quote.tokenB?.decimals !== undefined;
-}
-
-function liquidityQuoteAmountsReady(quote: LiquidityQuoteState): boolean {
-  return (
-    quote.amountA !== undefined &&
-    quote.amountB !== undefined &&
-    quote.amountAMin !== undefined &&
-    quote.amountBMin !== undefined &&
-    quote.liquidityOut !== undefined
-  );
-}
-
-function removeLiquidityPositionReady(quote: RemoveLiquidityQuoteState): boolean {
-  return Boolean(
-    quote.position?.tokenA.decimals !== undefined &&
-      quote.position.tokenB.decimals !== undefined &&
-      quote.position.pool &&
-      quote.position.lpToken?.decimals !== undefined &&
-      quote.position.lpBalance !== undefined,
-  );
-}
-
-function removeLiquidityAmountsReady(quote: RemoveLiquidityQuoteState): boolean {
-  return (
-    quote.liquidity !== undefined &&
-    quote.amountA !== undefined &&
-    quote.amountB !== undefined &&
-    quote.amountAMin !== undefined &&
-    quote.amountBMin !== undefined
-  );
-}
-
-function executionMetricFields(
-  metrics: SwapExecutionMetrics,
-): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
   return {
-    effectiveExecutionPrice: metrics.effectiveExecutionPrice,
-    feeInclusivePriceImpact: metrics.feeInclusivePriceImpact,
+    ...summary,
+    poolId: requireHex(summary.poolId, "PoolId"),
+    fee: requireNumber(summary.fee, "Pool fee"),
+    tickSpacing: requireNumber(summary.tickSpacing, "Tick spacing"),
+    hooks: requireAddress(summary.hooks, "Pool hook"),
+    liquidity: summary.liquidity ?? 0n,
+    sqrtPriceX96: summary.sqrtPriceX96 ?? 0n,
   };
 }
 
-function unavailableSwapExecutionMetrics(
-  reason: string,
-): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
+async function readLiquidityPool(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  tokenA: Address,
+  tokenB: Address,
+): Promise<LiquidityPoolState> {
+  const factory = requireDeploymentAddress(deployment?.pledgeV4LiquidityFactory, "pledge.cash v4 liquidity factory");
+  const poolId = await client.readContract({ address: factory, abi: pledgeV4LiquidityFactoryAbi, functionName: "poolIdFor", args: [tokenA, tokenB] }) as Hex;
+  const vault = await client.readContract({ address: factory, abi: pledgeV4LiquidityFactoryAbi, functionName: "vaultForPoolId", args: [poolId] }) as Address;
+  const [token0, token1] = sortAddresses(tokenA, tokenB);
+  if (isZeroAddress(vault)) {
+    return { address: ZERO_ADDRESS, exists: false, token0, token1, totalSupply: 0n, poolId };
+  }
+  const [vaultState, v4State] = await Promise.all([
+    readProtocolLiquidityVaultState(client, vault),
+    readUniswapV4PoolState(client, { stateView: requireDeploymentAddress(deployment?.uniswapV4StateView, "Uniswap v4 StateView"), poolId }),
+  ]);
+  if (!samePair(vaultState.currency0, vaultState.currency1, tokenA, tokenB) || vaultState.poolId.toLowerCase() !== poolId.toLowerCase()) {
+    throw new Error("The v4 factory and vault disagree on canonical pool identity.");
+  }
   return {
-    effectiveExecutionPrice: unavailableMetric(reason),
-    feeInclusivePriceImpact: unavailableMetric(reason),
+    address: vault,
+    exists: true,
+    token0: vaultState.currency0,
+    token1: vaultState.currency1,
+    totalSupply: vaultState.totalSupply,
+    poolId,
+    positionLiquidity: vaultState.positionLiquidity,
+    sqrtPriceX96: v4State.sqrtPriceX96,
+    liquidityState: vaultState.liquidityState,
+    fee: vaultState.poolFee,
+    tickSpacing: vaultState.tickSpacing,
+    hooks: vaultState.hook,
+    tickLower: vaultState.tickLower,
+    tickUpper: vaultState.tickUpper,
   };
 }
 
-function baseQuote(input: {
-  requestIdentity: string;
-  inputToken: SwapTokenMetadata;
-  outputToken: SwapTokenMetadata;
-  slippageBps: number;
-  amountIn?: bigint;
-  feeBps?: bigint;
-  feeDenominator?: bigint;
-  protocolFeeShareBps?: bigint;
-  error: string;
-}): SwapQuoteState {
-  const quote: SwapQuoteState = {
-    requestIdentity: input.requestIdentity,
-    tokenIn: input.inputToken,
-    tokenOut: input.outputToken,
-    slippageBps: input.slippageBps,
-    error: input.error,
+async function readPoolSummary(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  vault: Address,
+): Promise<SwapPoolSummary> {
+  const stateView = requireDeploymentAddress(deployment?.uniswapV4StateView, "Uniswap v4 StateView");
+  const vaultState = await readProtocolLiquidityVaultState(client, vault);
+  const poolState = await readUniswapV4PoolState(client, { stateView, poolId: vaultState.poolId });
+  return {
+    address: vault,
+    token0: vaultState.currency0,
+    token1: vaultState.currency1,
+    poolId: vaultState.poolId,
+    fee: vaultState.poolFee,
+    tickSpacing: vaultState.tickSpacing,
+    hooks: vaultState.hook,
+    liquidity: poolState.liquidity,
+    sqrtPriceX96: poolState.sqrtPriceX96,
   };
-  if (input.amountIn !== undefined) quote.amountIn = input.amountIn;
-  if (input.feeBps !== undefined) quote.feeBps = input.feeBps;
-  if (input.feeDenominator !== undefined) quote.feeDenominator = input.feeDenominator;
-  if (input.protocolFeeShareBps !== undefined) quote.protocolFeeShareBps = input.protocolFeeShareBps;
-  return quote;
-}
-
-function baseLiquidityQuote(input: {
-  tokenA: SwapTokenMetadata;
-  tokenB: SwapTokenMetadata;
-  pool?: LiquidityPoolState | undefined;
-  slippageBps: number;
-  amountA?: bigint;
-  amountB?: bigint;
-  amountAMin?: bigint;
-  amountBMin?: bigint;
-  error: string;
-}): LiquidityQuoteState {
-  const quote: LiquidityQuoteState = {
-    tokenA: input.tokenA,
-    tokenB: input.tokenB,
-    slippageBps: input.slippageBps,
-    error: input.error,
-  };
-  if (input.pool) quote.pool = input.pool;
-  if (input.amountA !== undefined) quote.amountA = input.amountA;
-  if (input.amountB !== undefined) quote.amountB = input.amountB;
-  if (input.amountAMin !== undefined) quote.amountAMin = input.amountAMin;
-  if (input.amountBMin !== undefined) quote.amountBMin = input.amountBMin;
-  return quote;
 }
 
 async function readTokenMetadata(
   client: PledgeCashReadClient,
   address: Address,
-  account?: Address | undefined,
-  spender?: Address | undefined,
+  account?: Address,
+  approval?: { spender: Address } | { permit2: Address; router: Address },
 ): Promise<SwapTokenMetadata> {
   const token: SwapTokenMetadata = { address };
+  const reads = await Promise.allSettled([
+    client.readContract({ address, abi: erc20Abi, functionName: "symbol" }),
+    client.readContract({ address, abi: erc20Abi, functionName: "decimals" }),
+    account ? client.readContract({ address, abi: erc20Abi, functionName: "balanceOf", args: [account] }) : Promise.resolve(undefined),
+  ]);
+  if (reads[0].status === "fulfilled") token.symbol = reads[0].value as string;
+  if (reads[1].status === "fulfilled") token.decimals = Number(reads[1].value);
+  if (reads[2].status === "fulfilled" && reads[2].value !== undefined) token.balance = reads[2].value as bigint;
+  const firstFailure = reads.find((result) => result.status === "rejected");
+  if (firstFailure?.status === "rejected") token.error = errorMessage(firstFailure.reason);
 
-  try {
-    token.symbol = (await client.readContract({ address, abi: erc20Abi, functionName: "symbol" })) as string;
-  } catch (error) {
-    token.error = errorMessage(error);
-  }
-
-  try {
-    token.decimals = Number(await client.readContract({ address, abi: erc20Abi, functionName: "decimals" }));
-  } catch (error) {
-    token.error = token.error ?? errorMessage(error);
-  }
-
-  if (account) {
+  if (account && approval && "spender" in approval) {
     try {
-      token.balance = (await client.readContract({ address, abi: erc20Abi, functionName: "balanceOf", args: [account] })) as bigint;
+      token.allowance = await client.readContract({ address, abi: erc20Abi, functionName: "allowance", args: [account, approval.spender] }) as bigint;
     } catch (error) {
-      token.error = token.error ?? errorMessage(error);
+      token.error ??= errorMessage(error);
     }
   }
-
-  if (account && spender) {
+  if (account && approval && "permit2" in approval) {
     try {
-      token.allowance = (await client.readContract({ address, abi: erc20Abi, functionName: "allowance", args: [account, spender] })) as bigint;
+      const [erc20Allowance, permit2Allowance] = await Promise.all([
+        client.readContract({ address, abi: erc20Abi, functionName: "allowance", args: [account, approval.permit2] }) as Promise<bigint>,
+        readPermit2Allowance(client, { permit2: approval.permit2, owner: account, token: address, spender: approval.router }),
+      ]);
+      token.erc20Allowance = erc20Allowance;
+      token.permit2Allowance = permit2Allowance.amount;
+      token.permit2Expiration = permit2Allowance.expiration;
+      const permit2Active = permit2Allowance.expiration > Math.floor(Date.now() / 1000);
+      token.allowance = permit2Active ? minBigInt(erc20Allowance, permit2Allowance.amount) : 0n;
     } catch (error) {
-      token.error = token.error ?? errorMessage(error);
+      token.error ??= errorMessage(error);
     }
   }
-
   return token;
 }
 
-async function readAmmFeeConfig(client: PledgeCashReadClient, factory: Address): Promise<AmmFeeConfig> {
-  const [feeBps, feeDenominator, protocolFeeShareBps] = await Promise.all([
-    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "SWAP_FEE_BPS" }) as Promise<bigint>,
-    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "FEE_DENOMINATOR" }) as Promise<bigint>,
-    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "PROTOCOL_FEE_SHARE_BPS" }) as Promise<bigint>,
-  ]);
-
-  return { feeBps, feeDenominator, protocolFeeShareBps };
-}
-
-async function readSwapPoolState(
-  client: PledgeCashReadClient,
-  poolAddress: Address,
-  tokenIn: Address,
-  tokenOut: Address,
-): Promise<SwapPoolState> {
-  const [token0, token1, reserves] = await Promise.all([
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
-  ]);
-  const [reserve0, reserve1] = reserves;
-  const tokenInIsToken0 = sameAddress(token0, tokenIn);
-  const tokenInIsToken1 = sameAddress(token1, tokenIn);
-  const tokenOutIsToken0 = sameAddress(token0, tokenOut);
-  const tokenOutIsToken1 = sameAddress(token1, tokenOut);
-  if (!(tokenInIsToken0 && tokenOutIsToken1) && !(tokenInIsToken1 && tokenOutIsToken0)) {
-    throw new Error("The AMM pool token pair does not match the requested swap route.");
-  }
-
-  return {
-    address: poolAddress,
-    token0,
-    token1,
-    reserve0,
-    reserve1,
-    reserveIn: tokenInIsToken0 ? reserve0 : reserve1,
-    reserveOut: tokenInIsToken0 ? reserve1 : reserve0,
-  };
-}
-
-async function readLiquidityPool(client: PledgeCashReadClient, factory: Address, tokenA: Address, tokenB: Address): Promise<LiquidityPoolState> {
-  const poolAddress = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "getPool", args: [tokenA, tokenB] }) as Address;
-  if (isZeroAddress(poolAddress)) {
-    return await readPredictedLiquidityPool(client, factory, tokenA, tokenB);
-  }
-
-  return await readExistingLiquidityPool(client, poolAddress, tokenA);
-}
-
-async function readPredictedLiquidityPool(
-  client: PledgeCashReadClient,
-  factory: Address,
-  tokenA: Address,
-  tokenB: Address,
-): Promise<LiquidityPoolState> {
-  const predicted = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "predictPoolAddress", args: [tokenA, tokenB] }) as Address;
-  const [token0, token1] = sortTokenAddresses(tokenA, tokenB);
-  return {
-    address: predicted,
-    exists: false,
-    token0,
-    token1,
-    reserve0: 0n,
-    reserve1: 0n,
-    reserveA: 0n,
-    reserveB: 0n,
-    totalSupply: 0n,
-  };
-}
-
-async function readExistingLiquidityPool(
-  client: PledgeCashReadClient,
-  poolAddress: Address,
-  tokenA: Address,
-): Promise<LiquidityPoolState> {
-  const [token0, token1, reserves, totalSupply] = await Promise.all([
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
-    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "totalSupply" }) as Promise<bigint>,
-  ]);
-  const [reserve0, reserve1] = reserves;
-  const tokenAIsToken0 = sameAddress(tokenA, token0);
-
-  return {
-    address: poolAddress,
-    exists: true,
-    token0,
-    token1,
-    reserve0,
-    reserve1,
-    reserveA: tokenAIsToken0 ? reserve0 : reserve1,
-    reserveB: tokenAIsToken0 ? reserve1 : reserve0,
-    totalSupply,
-  };
-}
-
-async function readEffectiveClaimable(
-  client: PledgeCashReadClient,
+function estimateP4LpDeposit(
   pool: LiquidityPoolState,
   tokenA: Address,
-  account: Address,
-): Promise<{ claimableA: bigint; claimableB: bigint }> {
-  const [balance, stored0, stored1, index0, index1, supplyIndex0, supplyIndex1] = await Promise.all([
-    client.readContract({ address: pool.address, abi: erc20Abi, functionName: "balanceOf", args: [account] }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "claimable0", args: [account] }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "claimable1", args: [account] }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "index0" }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "index1" }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "supplyIndex0", args: [account] }) as Promise<bigint>,
-    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "supplyIndex1", args: [account] }) as Promise<bigint>,
-  ]);
-
-  const claimable0 = stored0 + pendingFee(balance, index0, supplyIndex0);
-  const claimable1 = stored1 + pendingFee(balance, index1, supplyIndex1);
-  return sameAddress(pool.token0, tokenA)
-    ? { claimableA: claimable0, claimableB: claimable1 }
-    : { claimableA: claimable1, claimableB: claimable0 };
+  amountA: bigint,
+  amountB: bigint,
+): { amountA: bigint; amountB: bigint; liquidity: bigint } {
+  const sqrtPrice = requireBigInt(pool.sqrtPriceX96, "v4 sqrt price");
+  const sqrtLower = sqrtPriceAtTick(requireNumber(pool.tickLower, "vault lower tick"));
+  const sqrtUpper = sqrtPriceAtTick(requireNumber(pool.tickUpper, "vault upper tick"));
+  const tokenAIs0 = sameAddress(tokenA, pool.token0);
+  const amount0 = tokenAIs0 ? amountA : amountB;
+  const amount1 = tokenAIs0 ? amountB : amountA;
+  const liquidity = liquidityForAmounts(sqrtPrice, sqrtLower, sqrtUpper, amount0, amount1);
+  const [used0, used1] = positionAmountsAtPrice(sqrtPrice, sqrtLower, sqrtUpper, liquidity, true);
+  return { amountA: tokenAIs0 ? used0 : used1, amountB: tokenAIs0 ? used1 : used0, liquidity };
 }
 
-function requireDeploymentAddress(address: Address | undefined, label: string): Address {
-  if (!address || isZeroAddress(address)) throw new Error(`${label} is not configured for this chain.`);
-  return address;
+function positionAmounts(pool: LiquidityPoolState, liquidity: bigint, roundUp: boolean): readonly [bigint, bigint] {
+  const sqrtPrice = requireBigInt(pool.sqrtPriceX96, "v4 sqrt price");
+  return positionAmountsAtPrice(
+    sqrtPrice,
+    sqrtPriceAtTick(requireNumber(pool.tickLower, "vault lower tick")),
+    sqrtPriceAtTick(requireNumber(pool.tickUpper, "vault upper tick")),
+    liquidity,
+    roundUp,
+  );
 }
 
-function requireWrappedNativeSide(deployment: PledgeCashDeployment | undefined, tokenA: Address, tokenB: Address): "tokenA" | "tokenB" {
-  const side = wrappedNativeSide(deployment, tokenA, tokenB);
-  if (!side) throw new Error("Native mode requires one side to be the configured wrapped-native token.");
-  return side;
+function liquidityForAmounts(sqrtPrice: bigint, sqrtLower: bigint, sqrtUpper: bigint, amount0: bigint, amount1: bigint): bigint {
+  if (sqrtPrice <= sqrtLower) return (amount0 * ((sqrtLower * sqrtUpper) / Q96)) / (sqrtUpper - sqrtLower);
+  if (sqrtPrice >= sqrtUpper) return (amount1 * Q96) / (sqrtUpper - sqrtLower);
+  const liquidity0 = (amount0 * ((sqrtPrice * sqrtUpper) / Q96)) / (sqrtUpper - sqrtPrice);
+  const liquidity1 = (amount1 * Q96) / (sqrtPrice - sqrtLower);
+  return minBigInt(liquidity0, liquidity1);
 }
 
-function requireSwapNativeMode(deployment: PledgeCashDeployment | undefined, tokenIn: Address, tokenOut: Address): "input" | "output" {
-  const mode = swapNativeMode(deployment, {
-    tokenIn,
-    tokenOut,
-    amountIn: "0",
-    slippageBps: "0",
-    recipient: "",
-    deadline: "0",
-    useNative: true,
-  });
-  if (!mode) throw new Error("Native swap mode requires the input or output token to be the configured wrapped-native token.");
-  return mode;
+function positionAmountsAtPrice(
+  sqrtPrice: bigint,
+  sqrtLower: bigint,
+  sqrtUpper: bigint,
+  liquidity: bigint,
+  roundUp: boolean,
+): readonly [bigint, bigint] {
+  if (sqrtPrice <= sqrtLower) return [amount0Delta(sqrtLower, sqrtUpper, liquidity, roundUp), 0n];
+  if (sqrtPrice >= sqrtUpper) return [0n, amount1Delta(sqrtLower, sqrtUpper, liquidity, roundUp)];
+  return [amount0Delta(sqrtPrice, sqrtUpper, liquidity, roundUp), amount1Delta(sqrtLower, sqrtPrice, liquidity, roundUp)];
 }
 
-function requireTokenAddress(value: string, label: string): Address {
-  const trimmed = value.trim();
-  if (!isAddress(trimmed)) throw new Error(`${label} must be a valid address.`);
-  return trimmed;
+function amount0Delta(sqrtA: bigint, sqrtB: bigint, liquidity: bigint, roundUp: boolean): bigint {
+  const numerator = (liquidity << 96n) * (sqrtB - sqrtA);
+  const denominator = sqrtB * sqrtA;
+  return roundUp ? divRoundingUp(numerator, denominator) : numerator / denominator;
 }
 
-function parseSlippageBps(value: string): number {
-  const trimmed = value.trim() || "0";
-  if (!isUnsignedInteger(trimmed)) throw new Error("Slippage must be whole basis points.");
-  const bps = Number(trimmed);
-  if (!Number.isSafeInteger(bps) || bps < 0 || bps >= FULL_BPS) throw new Error("Slippage must be between 0 and 9999 bps.");
-  return bps;
+function amount1Delta(sqrtA: bigint, sqrtB: bigint, liquidity: bigint, roundUp: boolean): bigint {
+  const numerator = liquidity * (sqrtB - sqrtA);
+  return roundUp ? divRoundingUp(numerator, Q96) : numerator / Q96;
 }
 
-function applySlippage(amount: bigint, bps: number): bigint {
-  return (amount * BigInt(FULL_BPS - bps)) / FULL_BPS_BIGINT;
-}
-
-function optimalLiquidityAmounts(pool: LiquidityPoolState, amountADesired: bigint, amountBDesired: bigint): readonly [bigint, bigint] {
-  if (pool.reserveA === 0n && pool.reserveB === 0n) return [amountADesired, amountBDesired];
-
-  const amountBOptimal = quoteAmount(amountADesired, pool.reserveA, pool.reserveB);
-  if (amountBOptimal <= amountBDesired) return [amountADesired, amountBOptimal];
-  return [quoteAmount(amountBDesired, pool.reserveB, pool.reserveA), amountBDesired];
-}
-
-function removeLiquidityAmounts(pool: LiquidityPoolState, liquidity: bigint): readonly [bigint, bigint] {
-  return [
-    (liquidity * pool.reserveA) / pool.totalSupply,
-    (liquidity * pool.reserveB) / pool.totalSupply,
+function sqrtPriceAtTick(tick: number): bigint {
+  if (!Number.isInteger(tick) || tick < -887_272 || tick > 887_272) throw new Error("Tick is outside Uniswap v4 bounds.");
+  let absTick = BigInt(Math.abs(tick));
+  let price = (absTick & 1n) === 0n
+    ? 0x100000000000000000000000000000000n
+    : 0xfffcb933bd6fad37aa2d162d1a594001n;
+  const factors = [
+    0xfff97272373d413259a46990580e213an, 0xfff2e50f5f656932ef12357cf3c7fdccn,
+    0xffe5caca7e10e4e61c3624eaa0941cd0n, 0xffcb9843d60f6159c9db58835c926644n,
+    0xff973b41fa98c081472e6896dfb254c0n, 0xff2ea16466c96a3843ec78b326b52861n,
+    0xfe5dee046a99a2a811c461f1969c3053n, 0xfcbe86c7900a88aedcffc83b479aa3a4n,
+    0xf987a7253ac413176f2b074cf7815e54n, 0xf3392b0822b70005940c7a398e4b70f3n,
+    0xe7159475a2c29b7443b29c7fa6e889d9n, 0xd097f3bdfd2022b8845ad8f792aa5825n,
+    0xa9f746462d870fdf8a65dc1f90e061e5n, 0x70d869a156d2a1b890bb3df62baf32f7n,
+    0x31be135f97d08fd981231505542fcfa6n, 0x9aa508b5b7a84e1c677de54f3e99bc9n,
+    0x5d6af8dedb81196699c329225ee604n, 0x2216e584f5fa1ea926041bedfe98n,
+    0x48a170391f7dc42444e8fa2n,
   ];
-}
-
-function quoteAmount(amountA: bigint, reserveA: bigint, reserveB: bigint): bigint {
-  if (amountA === 0n || reserveA === 0n || reserveB === 0n) return 0n;
-  return (amountA * reserveB) / reserveA;
-}
-
-function estimateLiquidityOut(pool: LiquidityPoolState, amountA: bigint, amountB: bigint): bigint {
-  if (pool.totalSupply === 0n) {
-    const root = bigintSqrt(amountA * amountB);
-    return root > AMM_MINIMUM_LIQUIDITY ? root - AMM_MINIMUM_LIQUIDITY : 0n;
+  for (let index = 0; index < factors.length; index += 1) {
+    if ((absTick & (2n << BigInt(index))) !== 0n) price = (price * factors[index]!) >> 128n;
   }
-
-  const liquidityA = (amountA * pool.totalSupply) / pool.reserveA;
-  const liquidityB = (amountB * pool.totalSupply) / pool.reserveB;
-  return liquidityA < liquidityB ? liquidityA : liquidityB;
+  if (tick > 0) price = ((1n << 256n) - 1n) / price;
+  return (price + ((1n << 32n) - 1n)) >> 32n;
 }
 
-function pendingFee(balance: bigint, currentIndex: bigint, suppliedIndex: bigint): bigint {
-  if (balance === 0n || currentIndex <= suppliedIndex) return 0n;
-  return (balance * (currentIndex - suppliedIndex)) / FEE_INDEX_SCALE;
+function poolKeyFromPool(pool: SwapPoolState): UniswapV4PoolKey {
+  return { currency0: pool.token0, currency1: pool.token1, fee: pool.fee, tickSpacing: pool.tickSpacing, hooks: pool.hooks };
 }
 
-function bigintSqrt(value: bigint): bigint {
-  if (value < 2n) return value;
-  let left = 1n;
-  let right = value;
-  while (right - left > 1n) {
-    const mid = (left + right) / 2n;
-    if (mid * mid <= value) {
-      left = mid;
-    } else {
-      right = mid;
-    }
-  }
-  return left;
+function baseQuote(
+  requestIdentity: string,
+  tokenIn: SwapTokenMetadata,
+  tokenOut: SwapTokenMetadata,
+  slippageBps: number,
+  error: string,
+  amountIn?: bigint,
+): SwapQuoteState {
+  return { requestIdentity, tokenIn, tokenOut, slippageBps, error, ...(amountIn === undefined ? {} : { amountIn }) };
 }
 
-function parseSwapDeadline(value: string): bigint {
-  const trimmed = value.trim();
-  if (!isUnsignedInteger(trimmed)) throw new Error("Deadline must be a Unix timestamp.");
-  return BigInt(trimmed);
+function baseLiquidityQuote(
+  tokenA: SwapTokenMetadata,
+  tokenB: SwapTokenMetadata,
+  pool: LiquidityPoolState,
+  slippageBps: number,
+  error: string,
+): LiquidityQuoteState {
+  return { tokenA, tokenB, pool, slippageBps, error };
 }
 
-function shortToken(value: string): string {
-  return value && isAddress(value) ? `${value.slice(0, 6)}...${value.slice(-4)}` : "Token";
+function unavailableSwapExecutionMetrics(reason: string): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
+  return { effectiveExecutionPrice: unavailableMetric(reason), feeInclusivePriceImpact: unavailableMetric(reason) };
 }
 
-type TokenAccumulator = {
-  address: Address;
-  labels: string[];
-  sources: Set<SwapTokenSource>;
-  pools: Set<Address>;
-  pairAddresses: Set<Address>;
-  rank: number;
-};
+function requireExecutableQuote(quote: SwapQuoteState): ExecutableSwapQuote {
+  if (!swapQuoteReady(quote)) throw new Error(quote.error ?? "Refresh the v4 swap quote before submitting.");
+  return quote;
+}
+
+function requireExecutableLiquidityQuote(quote: LiquidityQuoteState): ExecutableLiquidityQuote {
+  if (!liquidityQuoteReady(quote)) throw new Error(quote.error ?? "Refresh the P4LP deposit quote before submitting.");
+  return quote;
+}
+
+function requireExecutableRemoveLiquidityQuote(quote: RemoveLiquidityQuoteState): ExecutableRemoveLiquidityQuote {
+  if (!removeLiquidityQuoteReady(quote)) throw new Error(quote.error ?? "Refresh the P4LP redemption quote before submitting.");
+  return quote;
+}
+
+function preferredPoolPair(tokenList: SwapTokenListState, deployment: PledgeCashDeployment | undefined): { tokenIn: Address; tokenOut: Address } | undefined {
+  const wrappedNative = deployment?.wrappedNative;
+  const preferred = wrappedNative
+    ? tokenList.pools.find((pool) => sameAddress(pool.token0, wrappedNative) || sameAddress(pool.token1, wrappedNative)) ?? tokenList.pools[0]
+    : tokenList.pools[0];
+  if (!preferred) return undefined;
+  if (wrappedNative && sameAddress(preferred.token1, wrappedNative)) return { tokenIn: preferred.token1, tokenOut: preferred.token0 };
+  return { tokenIn: preferred.token0, tokenOut: preferred.token1 };
+}
+
+function defaultTokenOut(current: string, tokenIn: string, fallback: Address): string {
+  const output = current || fallback;
+  return output && sameAddress(output, tokenIn) ? (sameAddress(fallback, tokenIn) ? "" : fallback) : output;
+}
 
 function addTokenAccumulator(
   tokens: Map<string, TokenAccumulator>,
   address: Address | undefined,
-  input: { source: SwapTokenSource; rank: number; label?: string | undefined; pool?: Address | undefined; pair?: Address | undefined },
+  input: { label?: string; source: SwapTokenSource; rank: number; pool?: Address; pair?: Address },
 ): void {
   if (!address || isZeroAddress(address)) return;
   const key = address.toLowerCase();
-  let token = tokens.get(key);
-  if (!token) {
-    token = {
-      address,
-      labels: [],
-      sources: new Set(),
-      pools: new Set(),
-      pairAddresses: new Set(),
-      rank: input.rank,
-    };
-    tokens.set(key, token);
-  }
-
-  if (input.label && !token.labels.includes(input.label)) token.labels.push(input.label);
-  token.sources.add(input.source);
-  if (input.pool) token.pools.add(input.pool);
-  if (input.pair) token.pairAddresses.add(input.pair);
-  token.rank = Math.min(token.rank, input.rank);
-}
-
-async function readPoolCount(client: PledgeCashReadClient, factory: Address): Promise<number> {
-  const raw = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "allPoolsLength" });
-  const count = Number(raw);
-  if (!Number.isSafeInteger(count) || count < 0) throw new Error("AMM pool count is too large to display safely.");
-  return count;
-}
-
-async function readPoolSummaries(
-  client: PledgeCashReadClient,
-  factory: Address,
-  signal?: AbortSignal | undefined,
-): Promise<{ pools: SwapPoolSummary[]; error?: string | undefined }> {
-  throwIfSwapReadAborted(signal);
-  const poolCount = await readPoolCount(client, factory);
-  const cappedPoolCount = Math.min(poolCount, MAX_DISCOVERED_POOLS);
-  const firstPoolIndex = poolCount - cappedPoolCount;
-  const poolAddresses = await readPoolAddresses(client, factory, firstPoolIndex, cappedPoolCount, signal);
-  const pools = await mapInBatches(
-    poolAddresses,
-    SWAP_DISCOVERY_CONCURRENCY,
-    async (address) => await readPoolSummary(client, address),
-    signal,
-  );
-
-  if (poolCount <= cappedPoolCount) return { pools };
-  return {
-    pools,
-    error: `Showing the newest ${cappedPoolCount.toString()} pools. Enter a token address to work with an older pool.`,
-  };
-}
-
-async function readPoolAddresses(
-  client: PledgeCashReadClient,
-  factory: Address,
-  start: number,
-  count: number,
-  signal?: AbortSignal | undefined,
-): Promise<Address[]> {
-  return await mapInBatches(
-    Array.from({ length: count }, (_, index) => index),
-    SWAP_DISCOVERY_CONCURRENCY,
-    async (index) => await client.readContract({
-        address: factory,
-        abi: ammFactoryAbi,
-        functionName: "allPools",
-        args: [BigInt(start + index)],
-      }) as Address,
-    signal,
-  );
-}
-
-async function readPoolSummary(client: PledgeCashReadClient, address: Address): Promise<SwapPoolSummary> {
-  const [token0, token1, reserves] = await Promise.all([
-    client.readContract({ address, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-    client.readContract({ address, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
-    client.readContract({ address, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
-  ]);
-  const [reserve0, reserve1] = reserves;
-  return { address, token0, token1, reserve0, reserve1 };
+  const entry = tokens.get(key) ?? { address, rank: input.rank, sources: new Set(), pools: new Set(), pairAddresses: new Set() };
+  entry.rank = Math.min(entry.rank, input.rank);
+  entry.sources.add(input.source);
+  if (input.label) entry.label = input.label;
+  if (input.pool) entry.pools.add(input.pool);
+  if (input.pair) entry.pairAddresses.add(input.pair);
+  tokens.set(key, entry);
 }
 
 function addPoolTokens(tokens: Map<string, TokenAccumulator>, pools: readonly SwapPoolSummary[]): void {
-  for (const pool of pools) {
-    addTokenAccumulator(tokens, pool.token0, { source: "pool", pool: pool.address, pair: pool.token1, rank: 20 });
-    addTokenAccumulator(tokens, pool.token1, { source: "pool", pool: pool.address, pair: pool.token0, rank: 20 });
-  }
+  pools.forEach((pool, index) => {
+    addTokenAccumulator(tokens, pool.token0, { source: "pool", rank: index + 10, pool: pool.address, pair: pool.token1 });
+    addTokenAccumulator(tokens, pool.token1, { source: "pool", rank: index + 10, pool: pool.address, pair: pool.token0 });
+  });
 }
 
-async function tokenOptionFromAccumulator(client: PledgeCashReadClient, token: TokenAccumulator, account: Address | undefined): Promise<SwapTokenOption> {
-  const metadata = await readTokenMetadata(client, token.address, account);
-  const option: SwapTokenOption = {
+async function tokenOptionFromAccumulator(
+  client: PledgeCashReadClient,
+  entry: TokenAccumulator,
+  account?: Address,
+): Promise<SwapTokenOption> {
+  const metadata = await readTokenMetadata(client, entry.address, account);
+  return {
     ...metadata,
-    sources: Array.from(token.sources),
-    pools: Array.from(token.pools),
-    pairAddresses: Array.from(token.pairAddresses),
+    ...(entry.label ? { label: entry.label } : {}),
+    sources: [...entry.sources],
+    pools: [...entry.pools],
+    pairAddresses: [...entry.pairAddresses],
   };
-  const label = token.labels[0];
-  if (label) option.label = label;
-  return option;
 }
 
 function compareTokenOptions(left: SwapTokenOption, right: SwapTokenOption): number {
-  return tokenRank(left) - tokenRank(right) || tokenName(left).localeCompare(tokenName(right)) || left.address.localeCompare(right.address);
+  const leftLabel = left.symbol ?? left.label ?? left.address;
+  const rightLabel = right.symbol ?? right.label ?? right.address;
+  return leftLabel.localeCompare(rightLabel);
 }
 
-function tokenRank(token: SwapTokenOption): number {
-  if (token.sources.includes("deployment")) return 0;
-  if (token.label === "USDC / cash") return 1;
-  return 20;
-}
-
-function tokenName(token: SwapTokenOption): string {
-  return token.symbol || token.label || token.address;
-}
-
-function sortTokenAddresses(tokenA: Address, tokenB: Address): readonly [Address, Address] {
-  return BigInt(tokenA) < BigInt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA];
-}
-
-function uniquePoolAddresses(addresses: readonly Address[]): Address[] {
-  const seen = new Set<string>();
-  return addresses.filter((address) => {
-    const key = address.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+async function mapInBatches<T, U>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<U>,
+  signal?: AbortSignal,
+): Promise<{ fulfilled: U[]; errors: string[] }> {
+  const fulfilled: Array<{ value: U } | undefined> = new Array(items.length);
+  const errors: Array<string | undefined> = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      throwIfSwapReadAborted(signal);
+      const index = cursor++;
+      try {
+        fulfilled[index] = { value: await mapper(items[index]!) };
+      } catch (error) {
+        errors[index] = errorMessage(error);
+      }
+    }
   });
+  await Promise.all(workers);
+  throwIfSwapReadAborted(signal);
+  return {
+    fulfilled: fulfilled.flatMap((entry) => entry ? [entry.value] : []),
+    errors: errors.filter((entry): entry is string => entry !== undefined),
+  };
+}
+
+function throwIfSwapReadAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException("The v4 market read was aborted.", "AbortError");
+}
+
+function parseSlippageBps(value: string): number {
+  if (!/^\d+$/.test(value.trim())) throw new Error("Slippage must be a whole number of basis points.");
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed >= FULL_BPS) throw new Error("Slippage must be between 0 and 9,999 basis points.");
+  return parsed;
+}
+
+function parseSwapDeadline(value: string): bigint {
+  if (!/^\d+$/.test(value.trim())) throw new Error("Deadline must be an unsigned Unix timestamp.");
+  return BigInt(value);
+}
+
+function applySlippage(amount: bigint, slippageBps: number): bigint {
+  return (amount * BigInt(FULL_BPS - slippageBps)) / FULL_BPS_BIGINT;
+}
+
+function requireTokenAddress(value: string, label: string): Address {
+  if (!isAddress(value.trim())) throw new Error(`${label} must be a valid address.`);
+  return value.trim() as Address;
+}
+
+function requireDeploymentAddress(value: Address | undefined, label: string): Address {
+  if (!value || isZeroAddress(value)) throw new Error(`${label} is unavailable in this deployment.`);
+  return value;
+}
+
+function requireAddress(value: Address | undefined, label: string): Address {
+  if (!value || isZeroAddress(value)) throw new Error(`${label} is invalid.`);
+  return value;
+}
+
+function requireHex(value: Hex | undefined, label: string): Hex {
+  if (!value || value.length !== 66) throw new Error(`${label} is invalid.`);
+  return value;
+}
+
+function requireNumber(value: number | undefined, label: string): number {
+  if (value === undefined || !Number.isSafeInteger(value)) throw new Error(`${label} is invalid.`);
+  return value;
+}
+
+function requireBigInt(value: bigint | undefined, label: string): bigint {
+  if (value === undefined || value <= 0n) throw new Error(`${label} is invalid.`);
+  return value;
+}
+
+function sortAddresses(first: Address, second: Address): readonly [Address, Address] {
+  return first.toLowerCase() < second.toLowerCase() ? [first, second] : [second, first];
+}
+
+function samePair(first0: Address, first1: Address, second0: Address, second1: Address): boolean {
+  return (sameAddress(first0, second0) && sameAddress(first1, second1)) || (sameAddress(first0, second1) && sameAddress(first1, second0));
+}
+
+function sameAddress(first: string | undefined, second: string | undefined): boolean {
+  return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
+}
+
+function minBigInt(first: bigint, second: bigint): bigint {
+  return first < second ? first : second;
+}
+
+function divRoundingUp(numerator: bigint, denominator: bigint): bigint {
+  return numerator === 0n ? 0n : (numerator + denominator - 1n) / denominator;
+}
+
+function uniqueAddresses(addresses: readonly Address[]): Address[] {
+  return [...new Map(addresses.map((address) => [address.toLowerCase(), address])).values()];
 }
 
 function uniquePoolSummaries(pools: readonly SwapPoolSummary[]): SwapPoolSummary[] {
-  const seen = new Set<string>();
-  return pools.filter((pool) => {
-    const key = pool.address.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return [...new Map(pools.map((pool) => [pool.address.toLowerCase(), pool])).values()];
 }
 
-async function mapInBatches<Input, Output>(
-  values: readonly Input[],
-  concurrency: number,
-  mapper: (value: Input) => Promise<Output>,
-  signal?: AbortSignal | undefined,
-): Promise<Output[]> {
-  const results: Output[] = [];
-  for (let index = 0; index < values.length; index += concurrency) {
-    throwIfSwapReadAborted(signal);
-    results.push(...await Promise.all(values.slice(index, index + concurrency).map(mapper)));
-  }
-  throwIfSwapReadAborted(signal);
-  return results;
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
-function throwIfSwapReadAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  throw signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError");
-}
-
-function raceWithSwapReadAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError"));
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      signal.removeEventListener("abort", onAbort);
-      reject(signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    void promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
-function sameAddress(left: string, right: string): boolean {
-  return left.toLowerCase() === right.toLowerCase();
-}
-
-function isUnsignedInteger(value: string): boolean {
-  return /^\d+$/.test(value);
+function shortToken(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value || "Token";
 }

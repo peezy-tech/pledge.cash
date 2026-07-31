@@ -11,9 +11,9 @@ import {
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   erc20Abi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
   migratingBondingCurveAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   tokenGrantFactoryAbi
 } from "@pledge.cash/sdk";
 
@@ -125,7 +125,7 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
       "redeem",
       "registerRedeemableAsset",
       "replaceController",
-      "returnProtocolLiquidityAsLp",
+      "returnProtocolLiquidityClaims",
       "snapshotAssets",
       "startWindDown"
     ]),
@@ -168,27 +168,34 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
       "close",
       "finalize"
     ]),
-    LockedLiquidityFactory: selectAbi(lockedLiquidityFactoryAbi, [
+    PledgeV4LiquidityFactory: selectAbi(pledgeV4LiquidityFactoryAbi, [
       "MigrationReservationReleased",
       "MigrationReserved",
+      "PledgeV4HookDeployed",
       "ProtocolLiquidityAdded",
       "ProtocolLiquidityCreated",
       "ProtocolLiquidityPositionClosed",
       "ProtocolLiquidityRemoved",
-      "addLockedLiquidity",
-      "closeLockedLiquidity",
-      "createLockedLiquidity",
-      "createLockedLiquidityForBoardroom",
-      "removeLockedLiquidity"
+      "addProtocolLiquidity",
+      "closeProtocolLiquidity",
+      "createProtocolLiquidity",
+      "createProtocolLiquidityForBoardroom",
+      "finalizeWindDownClosure",
+      "removeProtocolLiquidity"
     ]),
-    LockedLiquidity: selectAbi(lockedLiquidityAbi, [
+    PledgeV4LiquidityVault: selectAbi(pledgeV4LiquidityVaultAbi, [
       "FeesForwarded",
       "LiquidityAdded",
+      "LiquidityClaimsMinted",
       "LiquidityClosed",
       "LiquidityRemoved",
-      "LiquidityReturnedAsLp",
-      "LockedLiquidityInitialized",
-      "claimFees"
+      "PledgeV4LiquidityVaultInitialized",
+      "PositionClaimsRedeemed",
+      "PositionClaimsReleased",
+      "claimFees",
+      "exitToBoardroom",
+      "redeemClaims",
+      "releaseClaimsToBoardroom"
     ]),
     MigratingBondingCurve: selectAbi(migratingBondingCurveAbi, [
       "CurveGraduationLatched",

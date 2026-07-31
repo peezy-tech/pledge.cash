@@ -283,21 +283,23 @@ describe("product boardroom runtime discovery", () => {
     });
   });
 
-  test("derives catalog AMM metrics from direct locked liquidity without a distribution", async () => {
+  test("derives catalog Uniswap v4 metrics from direct protocol liquidity without a distribution", async () => {
     const boardroom = "0x1200000000000000000000000000000000000000" as Address;
     const shareToken = "0x2200000000000000000000000000000000000000" as Address;
     const quoteToken = "0x3200000000000000000000000000000000000000" as Address;
     const locker = "0x4200000000000000000000000000000000000000" as Address;
-    const pool = "0x5200000000000000000000000000000000000000" as Address;
     const factory = "0x6200000000000000000000000000000000000000" as Address;
-    const router = "0x7200000000000000000000000000000000000000" as Address;
+    const stateView = "0x7200000000000000000000000000000000000000" as Address;
+    const poolManager = "0x7300000000000000000000000000000000000000" as Address;
+    const hook = "0x7400000000000000000000000000000000000000" as Address;
+    const poolId = `0x${"12".repeat(32)}` as Hex;
     const client = {
       async getBlockNumber() { return 100n; },
       async getLogs() { return []; },
       async readContract(parameters: { address: Address; functionName: string }) {
         const { address, functionName } = parameters;
         if (address === factory && functionName === "positionOfBoardroom") {
-          return [locker, pool, quoteToken, 1] as const;
+          return [locker, poolId, quoteToken, 1] as const;
         }
         if (address === boardroom) {
           if (functionName === "shareToken") return shareToken;
@@ -306,19 +308,26 @@ describe("product boardroom runtime discovery", () => {
         if (address === locker) {
           if (functionName === "factory") return factory;
           if (functionName === "boardroom") return boardroom;
-          if (functionName === "router") return router;
+          if (functionName === "poolManager") return poolManager;
+          if (functionName === "protocolFeeRecipient") return factory;
           if (functionName === "tokenA") return shareToken;
           if (functionName === "tokenB") return quoteToken;
-          if (functionName === "pool") return pool;
+          if (functionName === "currency0") return shareToken;
+          if (functionName === "currency1") return quoteToken;
+          if (functionName === "hook") return hook;
+          if (functionName === "poolId") return poolId;
+          if (functionName === "positionSalt") return `0x${"13".repeat(32)}`;
+          if (functionName === "tickLower") return -887_220;
+          if (functionName === "tickUpper") return 887_220;
+          if (functionName === "poolFee") return 3_000;
+          if (functionName === "tickSpacing") return 60;
           if (functionName === "liquidityState") return 1;
-          if (functionName === "lockedLiquidity") return 1n;
+          if (functionName === "positionLiquidity") return 7n;
+          if (functionName === "totalSupply") return 7n;
         }
-        if (address === pool) {
-          if (functionName === "token0") return shareToken;
-          if (functionName === "token1") return quoteToken;
-          if (functionName === "getReserves") return [11n * 10n ** 18n, 7_000_000n, 0] as const;
-          if (functionName === "balanceOf") return 1n;
-          if (["claimable0", "claimable1", "index0", "index1", "supplyIndex0", "supplyIndex1"].includes(functionName)) return 0n;
+        if (address === stateView) {
+          if (functionName === "getSlot0") return [1n << 96n, 0, 0, 3_000] as const;
+          if (functionName === "getLiquidity") return 11n;
         }
         if (functionName === "name") return "Direct liquidity project";
         if (functionName === "symbol") return address === shareToken ? "SHARE" : address === quoteToken ? "QUOTE" : "LP";
@@ -331,17 +340,19 @@ describe("product boardroom runtime discovery", () => {
 
     const entry = await readProductBoardroomCatalogEntry(client as never, boardroom, {}, {
       chainId: 31337,
-      lockedLiquidityFactory: factory,
+      pledgeV4LiquidityFactory: factory,
+      uniswapV4StateView: stateView,
     });
 
     expect(entry).toMatchObject({
       address: boardroom,
       locker,
-      pool,
+      pool: locker,
+      poolLiquidity: 11n,
+      poolPositionLiquidity: 7n,
+      poolSqrtPriceX96: 1n << 96n,
       poolToken0: shareToken,
       poolToken1: quoteToken,
-      poolReserve0: 11n * 10n ** 18n,
-      poolReserve1: 7_000_000n,
     });
   });
 
@@ -352,8 +363,13 @@ describe("product boardroom runtime discovery", () => {
     const curve = "0x4400000000000000000000000000000000000000" as Address;
     const pool = "0x5500000000000000000000000000000000000000" as Address;
     const historicalPool = "0x5600000000000000000000000000000000000000" as Address;
-    const locker = "0x6600000000000000000000000000000000000000" as Address;
     const distributionFactory = "0x7700000000000000000000000000000000000000" as Address;
+    const liquidityFactory = "0x8800000000000000000000000000000000000000" as Address;
+    const stateView = "0x8900000000000000000000000000000000000000" as Address;
+    const poolManager = "0x8a00000000000000000000000000000000000000" as Address;
+    const hook = "0x8b00000000000000000000000000000000000000" as Address;
+    const currentPoolId = `0x${"21".repeat(32)}` as Hex;
+    const historicalPoolId = `0x${"22".repeat(32)}` as Hex;
     const client = {
       async getBlockNumber() { return 100n; },
       async getLogs(parameters: { address: Address; event?: { name?: string } }) {
@@ -364,11 +380,12 @@ describe("product boardroom runtime discovery", () => {
             return [{
               args: {
                 liquidity: 777n,
-                locker,
-                pool: historicalPool,
+                poolId: historicalPoolId,
                 quoteToBoardroom: 888n,
                 quoteToLiquidity: 999n,
                 sharesToLiquidity: 1_111n,
+                terminalPrice: 1_000_000n,
+                vault: historicalPool,
               },
               blockNumber: 2n,
             }];
@@ -391,10 +408,10 @@ describe("product boardroom runtime discovery", () => {
           if (functionName === "boardroom") return boardroom;
           if (functionName === "shareToken") return shareToken;
           if (functionName === "paymentToken") throw new Error("not a fixed-price sale");
-          if (functionName === "lockedLiquidityFactory") return "0x8800000000000000000000000000000000000000";
+          if (functionName === "liquidityFactory") return liquidityFactory;
           if (functionName === "quoteToken") return quoteToken;
-          if (functionName === "locker") return locker;
-          if (functionName === "pool") return pool;
+          if (functionName === "liquidityVault") return pool;
+          if (functionName === "liquidityPoolId") return currentPoolId;
           if (functionName === "saleSupply") return 10_000n;
           if (functionName === "migrationSupply") return 2_000n;
           if (functionName === "remainingSaleShares") return 0n;
@@ -423,9 +440,28 @@ describe("product boardroom runtime discovery", () => {
           if (functionName === "isClosed") return true;
         }
         if (address === pool) {
-          if (functionName === "token0") return quoteToken;
-          if (functionName === "token1") return shareToken;
-          if (functionName === "getReserves") return [7_000_000n, 11n * 10n ** 18n, 0] as const;
+          if (functionName === "factory") return liquidityFactory;
+          if (functionName === "boardroom") return boardroom;
+          if (functionName === "poolManager") return poolManager;
+          if (functionName === "protocolFeeRecipient") return liquidityFactory;
+          if (functionName === "tokenA") return shareToken;
+          if (functionName === "tokenB") return quoteToken;
+          if (functionName === "currency0") return shareToken;
+          if (functionName === "currency1") return quoteToken;
+          if (functionName === "hook") return hook;
+          if (functionName === "poolId") return currentPoolId;
+          if (functionName === "positionSalt") return `0x${"23".repeat(32)}`;
+          if (functionName === "tickLower") return -887_220;
+          if (functionName === "tickUpper") return 887_220;
+          if (functionName === "poolFee") return 3_000;
+          if (functionName === "tickSpacing") return 60;
+          if (functionName === "liquidityState") return 1;
+          if (functionName === "positionLiquidity") return 777n;
+          if (functionName === "totalSupply") return 777n;
+        }
+        if (address === stateView) {
+          if (functionName === "getSlot0") return [1n << 96n, 0, 0, 3_000] as const;
+          if (functionName === "getLiquidity") return 1_111n;
         }
         if (functionName === "symbol") return address === shareToken ? "SHARE" : "QUOTE";
         if (functionName === "decimals") return address === quoteToken ? 6 : 18;
@@ -439,19 +475,21 @@ describe("product boardroom runtime discovery", () => {
     const entry = await readProductBoardroomCatalogEntry(client as never, boardroom, {}, {
       chainId: 31337,
       distributionFactory,
+      uniswapV4StateView: stateView,
     });
 
     expect(entry).toMatchObject({
       pool,
-      poolToken0: quoteToken,
-      poolToken1: shareToken,
-      poolReserve0: 7_000_000n,
-      poolReserve1: 11n * 10n ** 18n,
+      poolToken0: shareToken,
+      poolToken1: quoteToken,
+      poolLiquidity: 1_111n,
+      poolPositionLiquidity: 777n,
+      poolSqrtPriceX96: 1n << 96n,
       quoteToLiquidity: 999n,
       shareTokenTotalSupply: 1_000_000n * 10n ** 18n,
     });
-    expect(entry.poolReserve0).not.toBe(entry.quoteToLiquidity);
-    expect(entry.historyError).toContain("Current pool identity takes precedence");
+    expect(entry.poolPositionLiquidity).not.toBe(entry.quoteToLiquidity);
+    expect(entry.historyError).toContain("Current vault identity takes precedence");
     expect(entry.historyError).toContain(historicalPool);
     expect(entry.historyError).toContain(pool);
   });
@@ -1236,11 +1274,14 @@ function curveHistoryFixture(pool: Address): BoardroomDistributionSnapshot {
     address: "0x6000000000000000000000000000000000000000",
     kind: "migrating-bonding-curve",
     state: {
-      pool,
+      liquidityPoolId: HISTORY_POOL_ID,
+      liquidityVault: pool,
       quoteToken: "0x4000000000000000000000000000000000000000",
     },
   } as BoardroomDistributionSnapshot;
 }
+
+const HISTORY_POOL_ID = `0x${"31".repeat(32)}` as Hex;
 
 function curveHistoryClient(pool: Address, failEvents: Set<string>, hangEvents = new Set<string>()) {
   return {
@@ -1265,27 +1306,50 @@ function curveHistoryClient(pool: Address, failEvents: Set<string>, hangEvents =
           return [{
             args: {
               liquidity: 100n,
-              locker: "0x8000000000000000000000000000000000000000",
-              pool,
+              poolId: HISTORY_POOL_ID,
               quoteToBoardroom: 7n,
               quoteToLiquidity: 8n,
               sharesToLiquidity: 9n,
+              terminalPrice: 2n,
+              vault: pool,
             },
             blockNumber: 12n,
           }];
         case "Swap":
           return [{
             args: {
-              amount0In: 1n,
-              amount0Out: 0n,
-              amount1In: 0n,
-              amount1Out: 2n,
+              amount0: 1n,
+              amount1: -2n,
+              id: HISTORY_POOL_ID,
               sender: "0xb000000000000000000000000000000000000000",
             },
             blockNumber: 13n,
           }];
         default:
           return [];
+      }
+    },
+    async readContract(parameters: { functionName: string }) {
+      switch (parameters.functionName) {
+        case "factory": return "0x8100000000000000000000000000000000000000";
+        case "boardroom": return "0x8200000000000000000000000000000000000000";
+        case "poolManager": return "0x8300000000000000000000000000000000000000";
+        case "protocolFeeRecipient": return "0x8400000000000000000000000000000000000000";
+        case "tokenA":
+        case "currency0": return "0x4000000000000000000000000000000000000000";
+        case "tokenB":
+        case "currency1": return "0x5000000000000000000000000000000000000000";
+        case "hook": return "0x8500000000000000000000000000000000000000";
+        case "poolId": return HISTORY_POOL_ID;
+        case "positionSalt": return `0x${"32".repeat(32)}`;
+        case "tickLower": return -887_220;
+        case "tickUpper": return 887_220;
+        case "poolFee": return 3_000;
+        case "tickSpacing": return 60;
+        case "liquidityState": return 1;
+        case "positionLiquidity":
+        case "totalSupply": return 100n;
+        default: throw new Error(`Unexpected vault read: ${parameters.functionName}`);
       }
     },
   } as never;
@@ -1296,7 +1360,7 @@ function productBoardroomFixture() {
     boardroomFactory: "0x0100000000000000000000000000000000000000" as Address,
     distributionFactory: "0xc000000000000000000000000000000000000000" as Address,
     bondMarketFactory: "0xd000000000000000000000000000000000000000" as Address,
-    lockedLiquidityFactory: "0xe000000000000000000000000000000000000000" as Address,
+    pledgeV4LiquidityFactory: "0xe000000000000000000000000000000000000000" as Address,
     tokenGrantFactory: "0xf000000000000000000000000000000000000000" as Address,
     boardroom: "0x1000000000000000000000000000000000000000" as Address,
     shareToken: "0x2000000000000000000000000000000000000000" as Address,
@@ -1409,8 +1473,13 @@ function fakeProductBoardroomClient(
         if (functionName === "bondMarketCountForBoardroom") return 0n;
         if (functionName === "bondMarketPageForBoardroom") return [[], 0n] as const;
       }
-      if (address.toLowerCase() === context.lockedLiquidityFactory.toLowerCase() && functionName === "positionOfBoardroom") {
-        return ["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000", 0] as const;
+      if (address.toLowerCase() === context.pledgeV4LiquidityFactory.toLowerCase() && functionName === "positionOfBoardroom") {
+        return [
+          "0x0000000000000000000000000000000000000000",
+          `0x${"00".repeat(32)}`,
+          "0x0000000000000000000000000000000000000000",
+          0,
+        ] as const;
       }
 
       if (address.toLowerCase() === context.boardroom.toLowerCase()) {
@@ -1439,7 +1508,8 @@ function fakeProductBoardroomClient(
         if (functionName === "bondingCurve") return "0x0000000000000000000000000000000000000000";
         if (functionName === "primaryMarketQuoteAsset") return context.cashToken;
         if (functionName === "liquidityStatus") return 0;
-        if (functionName === "liquidityLocker" || functionName === "liquidityPool") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "liquidityVault") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "liquidityPoolId") return `0x${"00".repeat(32)}`;
         if (functionName === "liquidityQuoteAsset") return context.cashToken;
         if (functionName === "redeemableAssetPage") return [[context.redeemableAsset], 1n] as const;
       }
@@ -1479,7 +1549,7 @@ function fixtureDeployment(context: ProductBoardroomFixture) {
     boardroomFactory: context.boardroomFactory,
     distributionFactory: context.distributionFactory,
     bondMarketFactory: context.bondMarketFactory,
-    lockedLiquidityFactory: context.lockedLiquidityFactory,
+    pledgeV4LiquidityFactory: context.pledgeV4LiquidityFactory,
     tokenGrantFactory: context.tokenGrantFactory,
   };
 }

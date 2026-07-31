@@ -31,7 +31,7 @@ A liquid token balance therefore does not imply immediate governance power.
 - policy-checked calls;
 - canonical grants, distributions, and one reward pool;
 - one lifetime bonding curve and permanent quote identity;
-- at most one canonical liquidity locker and pool;
+- at most one canonical P4LP vault and Uniswap v4 PoolId;
 - external delayed governance after launch;
 - bounded wind-down cleanup, asset snapshotting, and redemptions.
 

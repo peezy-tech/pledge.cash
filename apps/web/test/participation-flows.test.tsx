@@ -109,11 +109,11 @@ const curveDistribution: BoardroomDistributionSnapshot = {
     address: curve,
     factory: owner,
     boardroom,
-    lockedLiquidityFactory: owner,
+    liquidityFactory: owner,
     shareToken,
     quoteToken: paymentToken,
-    locker: zeroAddress,
-    pool: zeroAddress,
+    liquidityVault: zeroAddress,
+    liquidityPoolId: zeroHash,
     saleSupply: 10_000_000_000_000_000_000n,
     migrationSupply: 2_000_000_000_000_000_000n,
     remainingSaleShares: 8_000_000_000_000_000_000n,
@@ -615,7 +615,7 @@ describe("participation bounds and proof parsing", () => {
       expectedAction: "trade",
       intent: bondingCurveIntent(state),
       async readBuyQuote() {
-        return bondingCurveBuyQuote({ ...state, lockedLiquidityFactory: sale });
+        return bondingCurveBuyQuote({ ...state, liquidityFactory: sale });
       },
     })).rejects.toThrow("does not match this wallet, curve, direction, or exact trade amount");
   });
@@ -705,9 +705,7 @@ describe("participation flow composition", () => {
           addLiquidity={noop}
           approveLiquidityTokenA={noop}
           approveLiquidityTokenB={noop}
-          approveLpToken={noop}
           approveInput={noop}
-          claimAmmFees={noop}
           executeSwap={noop}
           refreshLiquidityQuote={noop}
           refreshPosition={noop}
@@ -885,7 +883,7 @@ function bondingCurveIntent(state: MigratingBondingCurveState) {
     curve: state.address,
     deadlineMinutes: "20",
     factory: state.factory,
-    lockedLiquidityFactory: state.lockedLiquidityFactory,
+    liquidityFactory: state.liquidityFactory,
     mode: "buy",
     quoteToken: state.quoteToken,
     recipient: owner,

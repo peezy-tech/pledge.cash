@@ -6,7 +6,7 @@ import type {
   DutchAuctionState,
   FixedPriceSaleState,
   GrantState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState,
   MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashDeployment,
@@ -30,9 +30,11 @@ const boardroom = "0x3000000000000000000000000000000000000000" as Address;
 const grant = "0x4000000000000000000000000000000000000000" as Address;
 const spoof = "0x5000000000000000000000000000000000000000" as Address;
 const distributionFactory = "0x6000000000000000000000000000000000000000" as Address;
-const lockedLiquidityFactory = "0x7000000000000000000000000000000000000000" as Address;
+const pledgeV4LiquidityFactory = "0x7000000000000000000000000000000000000000" as Address;
 const bondMarketFactory = "0x7100000000000000000000000000000000000000" as Address;
-const ammRouter = "0x8000000000000000000000000000000000000000" as Address;
+const poolManager = "0x8000000000000000000000000000000000000000" as Address;
+const hook = "0x8100000000000000000000000000000000000000" as Address;
+const protocolFeeRecipient = "0x8200000000000000000000000000000000000000" as Address;
 const shareToken = "0x9000000000000000000000000000000000000000" as Address;
 const paymentToken = "0xa000000000000000000000000000000000000000" as Address;
 const sale = "0xb000000000000000000000000000000000000000" as Address;
@@ -40,19 +42,23 @@ const airdrop = "0xc000000000000000000000000000000000000000" as Address;
 const curve = "0xd000000000000000000000000000000000000000" as Address;
 const locker = "0xe000000000000000000000000000000000000000" as Address;
 const bondMarket = "0xf000000000000000000000000000000000000000" as Address;
+const poolId = `0x${"11".repeat(32)}` as const;
 const deployment = {
-  ammRouter,
   boardroomFactory,
   bondMarketFactory,
   chainId: 31337,
   distributionFactory,
-  lockedLiquidityFactory,
+  pledgeV4Hook: hook,
+  pledgeV4LiquidityFactory,
+  pledgeV4ProtocolFeeRecipient: protocolFeeRecipient,
   tokenGrantFactory,
+  uniswapV4PoolManager: poolManager,
 } as PledgeCashDeployment;
 const boardroomState = {
   address: boardroom,
   issuedDistributions: [sale, airdrop, curve],
-  lockedLiquidityPositions: [locker],
+  liquidityPoolId: poolId,
+  liquidityVault: locker,
   shareToken,
 } as BoardroomState;
 const saleState = {
@@ -78,17 +84,30 @@ const curveState = {
   address: curve,
   boardroom,
   factory: distributionFactory,
-  lockedLiquidityFactory,
+  liquidityFactory: pledgeV4LiquidityFactory,
   shareToken,
 } as MigratingBondingCurveState;
 const lockerState = {
   address: locker,
   boardroom,
-  factory: lockedLiquidityFactory,
-  router: ammRouter,
+  currency0: shareToken,
+  currency1: paymentToken,
+  factory: pledgeV4LiquidityFactory,
+  hook,
+  liquidityState: 1,
+  poolFee: 3_000,
+  poolId,
+  poolManager,
+  positionLiquidity: 1n,
+  positionSalt: `0x${"22".repeat(32)}`,
+  protocolFeeRecipient,
+  tickLower: -887_220,
+  tickSpacing: 60,
+  tickUpper: 887_220,
   tokenA: shareToken,
   tokenB: paymentToken,
-} as LockedLiquidityState;
+  totalSupply: 1n,
+} as ProtocolLiquidityVaultState;
 const bondMarketState = {
   address: bondMarket,
   boardroom,
@@ -209,8 +228,8 @@ describe("canonical product provenance", () => {
       registryClient({ distributionKind: 1 }),
       deployment,
       boardroomState,
-      { ...curveState, lockedLiquidityFactory: spoof },
-    )).rejects.toThrow("configured LockedLiquidityFactory");
+      { ...curveState, liquidityFactory: spoof },
+    )).rejects.toThrow("configured PledgeV4LiquidityFactory");
     await expect(assertCanonicalMigratingBondingCurve(
       registryClient({ distributionKind: 1 }),
       deployment,
@@ -237,22 +256,22 @@ describe("canonical product provenance", () => {
   });
 
   test("accepts only factory-registered liquidity positions with canonical wiring", async () => {
-    const client = registryClient({ lockerRegistered: true });
+    const client = registryClient({ vaultRegistered: true });
     await expect(assertCanonicalLockedLiquidity(client, deployment, boardroomState, lockerState)).resolves.toBeUndefined();
     await expect(assertCanonicalLockedLiquidity(
       client,
       deployment,
       boardroomState,
       { ...lockerState, factory: spoof },
-    )).rejects.toThrow("configured LockedLiquidityFactory");
+    )).rejects.toThrow("configured PledgeV4LiquidityFactory");
     await expect(assertCanonicalLockedLiquidity(
-      registryClient({ lockerRegistered: false }),
+      registryClient({ vaultRegistered: false }),
       deployment,
       boardroomState,
       lockerState,
     )).rejects.toThrow("not registered");
     await expect(assertCanonicalLockedLiquidity(
-      registryClient({ lockerBoardroom: spoof, lockerRegistered: true }),
+      registryClient({ vaultBoardroom: spoof, vaultRegistered: true }),
       deployment,
       boardroomState,
       lockerState,
@@ -267,8 +286,8 @@ describe("canonical product provenance", () => {
       client,
       deployment,
       boardroomState,
-      { ...lockerState, router: spoof },
-    )).rejects.toThrow("configured AMM router");
+      { ...lockerState, poolManager: spoof },
+    )).rejects.toThrow("configured Uniswap v4 PoolManager");
     await expect(assertCanonicalLockedLiquidity(
       client,
       deployment,
@@ -279,9 +298,34 @@ describe("canonical product provenance", () => {
     await expect(assertCanonicalLockedLiquidity(
       client,
       deployment,
-      { ...boardroomState, lockedLiquidityPositions: [] },
+      { ...boardroomState, liquidityVault: spoof },
       lockerState,
-    )).resolves.toBeUndefined();
+    )).rejects.toThrow("Boardroom liquidity record");
+
+    await expect(assertCanonicalLockedLiquidity(
+      registryClient({ vaultForPoolId: spoof }),
+      deployment,
+      boardroomState,
+      lockerState,
+    )).rejects.toThrow("PoolId record");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, hook: spoof },
+    )).rejects.toThrow("configured PledgeV4Hook");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, protocolFeeRecipient: spoof },
+    )).rejects.toThrow("protocol fee recipient");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, currency1: spoof },
+    )).rejects.toThrow("currencies");
   });
 });
 
@@ -289,15 +333,17 @@ function registryClient(options: {
   distributionBoardroom?: Address;
   distributionKind?: number;
   distributionRegistered?: boolean;
-  lockerBoardroom?: Address;
-  lockerRegistered?: boolean;
+  vaultBoardroom?: Address;
+  vaultForPoolId?: Address;
+  vaultRegistered?: boolean;
 }): PledgeCashReadClient {
   return readClient(async (functionName) => {
     if (functionName === "isDistribution") return options.distributionRegistered ?? true;
     if (functionName === "distributionBoardroom") return options.distributionBoardroom ?? boardroom;
     if (functionName === "distributionKind") return options.distributionKind ?? 0;
-    if (functionName === "isLocker") return options.lockerRegistered ?? true;
-    if (functionName === "lockerBoardroom") return options.lockerBoardroom ?? boardroom;
+    if (functionName === "isVault") return options.vaultRegistered ?? true;
+    if (functionName === "vaultBoardroom") return options.vaultBoardroom ?? boardroom;
+    if (functionName === "vaultForPoolId") return options.vaultForPoolId ?? locker;
     return undefined;
   });
 }

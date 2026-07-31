@@ -978,12 +978,12 @@ class MemoryWatcherStore implements WatcherStore {
       bondingCurveSettlementReason: null,
       bondingCurvePhaseEndsAt: 0n,
       liquidityStatus: 0,
-      liquidityLocker: null,
-      liquidityPool: null,
+      liquidityVault: null,
+      liquidityPoolId: null,
       liquidityQuoteAsset: null,
       liquidityReservationCurve: null,
-      liquidityReservationExpectedLocker: null,
-      liquidityReservationExpectedPool: null,
+      liquidityReservationExpectedVault: null,
+      liquidityReservationExpectedPoolId: null,
       liquidityReservationPairKey: null,
       liquidityReservationSalt: null,
       liquidityReservationExpiresAt: 0n,
@@ -1319,12 +1319,12 @@ class MemoryWatcherTx implements WatcherStoreTx {
         bondingCurveSettlementReason: existing?.bondingCurveSettlementReason ?? null,
         bondingCurvePhaseEndsAt: existing?.bondingCurvePhaseEndsAt ?? 0n,
         liquidityStatus: existing?.liquidityStatus ?? 0,
-        liquidityLocker: existing?.liquidityLocker ?? null,
-        liquidityPool: existing?.liquidityPool ?? null,
+        liquidityVault: existing?.liquidityVault ?? null,
+        liquidityPoolId: existing?.liquidityPoolId ?? null,
         liquidityQuoteAsset: existing?.liquidityQuoteAsset ?? null,
         liquidityReservationCurve: existing?.liquidityReservationCurve ?? null,
-        liquidityReservationExpectedLocker: existing?.liquidityReservationExpectedLocker ?? null,
-        liquidityReservationExpectedPool: existing?.liquidityReservationExpectedPool ?? null,
+        liquidityReservationExpectedVault: existing?.liquidityReservationExpectedVault ?? null,
+        liquidityReservationExpectedPoolId: existing?.liquidityReservationExpectedPoolId ?? null,
         liquidityReservationPairKey: existing?.liquidityReservationPairKey ?? null,
         liquidityReservationSalt: existing?.liquidityReservationSalt ?? null,
         liquidityReservationExpiresAt: existing?.liquidityReservationExpiresAt ?? 0n,
@@ -1381,18 +1381,18 @@ class MemoryWatcherTx implements WatcherStoreTx {
       bondingCurvePhaseEndsAt: input.bondingCurvePhaseEndsAt ?? existing.bondingCurvePhaseEndsAt,
       bondingCurveSettlementReason:
         input.bondingCurveSettlementReason ?? existing.bondingCurveSettlementReason,
-      liquidityLocker: input.liquidityLocker ?? existing.liquidityLocker,
-      liquidityPool: input.liquidityPool ?? existing.liquidityPool,
+      liquidityVault: input.liquidityVault ?? existing.liquidityVault,
+      liquidityPoolId: input.liquidityPoolId ?? existing.liquidityPoolId,
       liquidityQuoteAsset: input.liquidityQuoteAsset ?? existing.liquidityQuoteAsset,
       liquidityReservationCurve: input.clearLiquidityReservation
         ? null
         : (input.liquidityReservationCurve ?? existing.liquidityReservationCurve),
-      liquidityReservationExpectedLocker: input.clearLiquidityReservation
+      liquidityReservationExpectedVault: input.clearLiquidityReservation
         ? null
-        : (input.liquidityReservationExpectedLocker ?? existing.liquidityReservationExpectedLocker),
-      liquidityReservationExpectedPool: input.clearLiquidityReservation
+        : (input.liquidityReservationExpectedVault ?? existing.liquidityReservationExpectedVault),
+      liquidityReservationExpectedPoolId: input.clearLiquidityReservation
         ? null
-        : (input.liquidityReservationExpectedPool ?? existing.liquidityReservationExpectedPool),
+        : (input.liquidityReservationExpectedPoolId ?? existing.liquidityReservationExpectedPoolId),
       liquidityReservationExpiresAt: input.clearLiquidityReservation
         ? 0n
         : (input.liquidityReservationExpiresAt ?? existing.liquidityReservationExpiresAt),

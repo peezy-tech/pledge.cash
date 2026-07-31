@@ -5,9 +5,9 @@ import {
   boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
   erc20Abi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
-  migratingBondingCurveAbi
+  migratingBondingCurveAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi
 } from "@pledge.cash/sdk";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 
@@ -26,9 +26,9 @@ const spender = "0x0000000000000000000000000000000000000b0b" as Address;
 const policyRegistry = "0x0000000000000000000000000000000000000c01" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a50" as Address;
 const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
-const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
+const pledgeV4LiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
 const bondingCurve = "0x000000000000000000000000000000000000c011" as Address;
-const liquidityLocker = "0x00000000000000000000000000000000000010c0" as Address;
+const liquidityVault = "0x00000000000000000000000000000000000010c0" as Address;
 const zeroAddress = "0x0000000000000000000000000000000000000000" as Address;
 const facetSetHash = `0x${"11".repeat(32)}` as Hex;
 
@@ -40,14 +40,14 @@ const ctx = {
   controller,
   decodeStatus: "decoded",
   distributionFactory,
-  liquidityLocker,
-  lockedLiquidityFactory,
+  liquidityVault,
+  pledgeV4LiquidityFactory,
   policyRegistry
 } satisfies RiskContext;
 
 describe("risk matrix", () => {
-  test("declares ruleset version 7 and canonical scheduled-market rule ids", () => {
-    expect(RULESET_VERSION).toBe(7);
+  test("declares ruleset version 8 and canonical scheduled-market rule ids", () => {
+    expect(RULESET_VERSION).toBe(8);
     expect(new Set(RISK_MATRIX.map((rule) => rule.id))).toEqual(
       new Set<RiskRuleId>([
         "controller-configuration",
@@ -62,6 +62,7 @@ describe("risk matrix", () => {
         "add-protocol-liquidity",
         "close-protocol-liquidity",
         "claim-protocol-liquidity-fees",
+        "release-protocol-liquidity-claims",
         "remove-protocol-liquidity",
         "cancel-bonding-curve",
         "register-redeemable-asset",
@@ -278,8 +279,8 @@ describe("evaluateAction", () => {
   test("classifies canonical liquidity create, add, remove, close, and fee-claim calls", () => {
     const create = evaluateAction([storedCall({
       data: encodeFunctionData({
-        abi: lockedLiquidityFactoryAbi,
-        functionName: "createLockedLiquidity",
+        abi: pledgeV4LiquidityFactoryAbi,
+        functionName: "createProtocolLiquidity",
         args: [{
           tokenA: token,
           tokenB: holder,
@@ -287,19 +288,20 @@ describe("evaluateAction", () => {
           amountBDesired: 20n,
           amountAMin: 9n,
           amountBMin: 19n,
+          sqrtPriceX96: 1n << 96n,
           deadline: 9_999n,
           salt: `0x${"01".repeat(32)}`
         }]
       }),
-      policy: lockedLiquidityFactory,
-      target: lockedLiquidityFactory
+      policy: pledgeV4LiquidityFactory,
+      target: pledgeV4LiquidityFactory
     })], ctx);
     expectFinding(create, "create-protocol-liquidity", "high", 0);
 
     const add = evaluateAction([storedCall({
       data: encodeFunctionData({
-        abi: lockedLiquidityFactoryAbi,
-        functionName: "addLockedLiquidity",
+        abi: pledgeV4LiquidityFactoryAbi,
+        functionName: "addProtocolLiquidity",
         args: [{
           tokenA: token,
           tokenB: holder,
@@ -310,46 +312,73 @@ describe("evaluateAction", () => {
           deadline: 9_999n
         }]
       }),
-      policy: lockedLiquidityFactory,
-      target: lockedLiquidityFactory
+      policy: pledgeV4LiquidityFactory,
+      target: pledgeV4LiquidityFactory
     })], ctx);
     expectFinding(add, "add-protocol-liquidity", "medium", 0);
 
     const remove = evaluateAction([storedCall({
       data: encodeFunctionData({
-        abi: lockedLiquidityFactoryAbi,
-        functionName: "removeLockedLiquidity",
+        abi: pledgeV4LiquidityFactoryAbi,
+        functionName: "removeProtocolLiquidity",
         args: [{ liquidity: 10n, amountAMin: 9n, amountBMin: 19n, deadline: 9_999n }]
       }),
-      policy: lockedLiquidityFactory,
-      target: lockedLiquidityFactory
+      policy: pledgeV4LiquidityFactory,
+      target: pledgeV4LiquidityFactory
     })], ctx);
     expectFinding(remove, "remove-protocol-liquidity", "medium", 0);
 
     const unsafeRemove = evaluateAction([storedCall({
       data: encodeFunctionData({
-        abi: lockedLiquidityFactoryAbi,
-        functionName: "removeLockedLiquidity",
+        abi: pledgeV4LiquidityFactoryAbi,
+        functionName: "removeProtocolLiquidity",
         args: [{ liquidity: 10n, amountAMin: 0n, amountBMin: 19n, deadline: 9_999n }]
       }),
-      policy: lockedLiquidityFactory,
-      target: lockedLiquidityFactory
+      policy: pledgeV4LiquidityFactory,
+      target: pledgeV4LiquidityFactory
     })], ctx);
     expectFinding(unsafeRemove, "remove-protocol-liquidity", "high", 0);
 
     const close = evaluateAction([storedCall({
-      data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
-      policy: lockedLiquidityFactory,
-      target: lockedLiquidityFactory
+      data: encodeFunctionData({ abi: pledgeV4LiquidityFactoryAbi, functionName: "closeProtocolLiquidity" }),
+      policy: pledgeV4LiquidityFactory,
+      target: pledgeV4LiquidityFactory
     })], ctx);
     expectFinding(close, "close-protocol-liquidity", "medium", 0);
 
     const claim = evaluateAction([storedCall({
-      data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
-      policy: lockedLiquidityFactory,
-      target: liquidityLocker
+      data: encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }),
+      policy: pledgeV4LiquidityFactory,
+      target: liquidityVault
     })], ctx);
     expectFinding(claim, "claim-protocol-liquidity-fees", "low", 0);
+
+    const exit = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: boardroomAbi,
+        functionName: "exitProtocolLiquidity",
+        args: [facetSetHash, 9n, 19n, 9_999n]
+      })
+    })], ctx);
+    expectFinding(exit, "remove-protocol-liquidity", "medium", 0);
+
+    const unsafeExit = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: boardroomAbi,
+        functionName: "exitProtocolLiquidity",
+        args: [facetSetHash, 0n, 19n, 9_999n]
+      })
+    })], ctx);
+    expectFinding(unsafeExit, "remove-protocol-liquidity", "high", 0);
+
+    const returnClaims = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: boardroomAbi,
+        functionName: "returnProtocolLiquidityClaims",
+        args: [facetSetHash]
+      })
+    })], ctx);
+    expectFinding(returnClaims, "release-protocol-liquidity-claims", "medium", 0);
 
     const cancel = evaluateAction([storedCall({
       data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
@@ -367,14 +396,14 @@ describe("evaluateAction", () => {
         target: token
       }),
       storedCall({
-        data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
-        policy: lockedLiquidityFactory,
+        data: encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }),
+        policy: pledgeV4LiquidityFactory,
         target: token
       }),
       storedCall({
-        data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+        data: encodeFunctionData({ abi: pledgeV4LiquidityFactoryAbi, functionName: "closeProtocolLiquidity" }),
         policy,
-        target: lockedLiquidityFactory
+        target: pledgeV4LiquidityFactory
       })
     ];
     for (const call of cases) {

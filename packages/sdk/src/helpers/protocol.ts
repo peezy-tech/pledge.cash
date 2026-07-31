@@ -58,7 +58,8 @@ export type BoardroomProtocolState = {
   activeObligationCount: bigint;
   redeemableAssetCount: bigint;
   rewardPool: Address;
-  liquidityLocker: Address;
+  liquidityVault: Address;
+  liquidityPoolId: Hex;
   facetRegistry: Address;
   requiredFacetSetHash: Hex;
   activeRelease: bigint;
@@ -251,7 +252,8 @@ export async function readBoardroomProtocolState(
     activeObligationCount,
     redeemableAssetCount,
     rewardPool,
-    liquidityLocker,
+    liquidityVault,
+    liquidityPoolId,
     facetRegistry,
     requiredFacetSetHash,
     appliedStorageVersion,
@@ -266,7 +268,8 @@ export async function readBoardroomProtocolState(
     read("activeObligationCount"),
     read("redeemableAssetCount"),
     read("rewardPool"),
-    read("liquidityLocker"),
+    read("liquidityVault"),
+    read("liquidityPoolId"),
     read("facetRegistry"),
     read("facetSetHash"),
     read("appliedStorageVersion"),
@@ -296,7 +299,8 @@ export async function readBoardroomProtocolState(
     activeObligationCount: activeObligationCount as bigint,
     redeemableAssetCount: redeemableAssetCount as bigint,
     rewardPool: rewardPool as Address,
-    liquidityLocker: liquidityLocker as Address,
+    liquidityVault: liquidityVault as Address,
+    liquidityPoolId: liquidityPoolId as Hex,
     facetRegistry: facetRegistry as Address,
     requiredFacetSetHash: requiredFacetSetHash as Hex,
     activeRelease: activeRelease as bigint,

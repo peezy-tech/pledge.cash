@@ -1,5 +1,4 @@
 import {
-  ammPoolAbi,
   boardroomAbi,
   boardroomFactoryAbi,
   dutchAuctionSaleAbi,
@@ -7,11 +6,13 @@ import {
   fixedPriceSaleAbi,
   isZeroAddress,
   migratingBondingCurveAbi,
+  readProtocolLiquidityVaultState,
+  readUniswapV4PoolState,
   type Address,
   type PledgeCashDeployment,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
-import { getAbiItem, isAddress, type AbiEvent, type Hex, type PublicClient } from "viem";
+import { getAbiItem, isAddress, parseAbi, type AbiEvent, type Hex, type PublicClient } from "viem";
 import {
   PRODUCT_DETAIL_CHILD_READ_LIMIT,
   readBoardroomCatalogSnapshot,
@@ -51,6 +52,11 @@ export type ProductBoardroomCatalogEntry = {
   poolError?: string | undefined;
   poolReserve0?: bigint | undefined;
   poolReserve1?: bigint | undefined;
+  poolLiquidity?: bigint | undefined;
+  poolPositionLiquidity?: bigint | undefined;
+  poolSqrtPriceX96?: bigint | undefined;
+  poolTickLower?: number | undefined;
+  poolTickUpper?: number | undefined;
   poolToken0?: Address | undefined;
   poolToken1?: Address | undefined;
   quoteToBoardroom?: bigint | undefined;
@@ -140,6 +146,7 @@ export type ProductBoardroomCurveMigrationHistory = {
   liquidity: bigint;
   locker: Address;
   pool: Address;
+  poolId: Hex;
   quoteToBoardroom: bigint;
   quoteToLiquidity: bigint;
   sharesToLiquidity: bigint;
@@ -202,7 +209,11 @@ type ProductBoardroomEventLog = {
   args?: Record<string, unknown>;
   blockNumber?: bigint | null | undefined;
 };
-type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof dutchAuctionSaleAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
+const uniswapV4PoolManagerEventAbi = parseAbi([
+  "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+]);
+
+type ProductBoardroomEventAbi = typeof uniswapV4PoolManagerEventAbi | typeof boardroomAbi | typeof dutchAuctionSaleAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
 type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "DutchAuctionPurchase" | "FixedPricePurchase" | "Swap";
 
 type HistoricalDistributionHydration = {
@@ -243,8 +254,13 @@ type CurveHistoryReadResult = {
 
 type CatalogPoolRead =
   | {
-      reserve0: bigint;
-      reserve1: bigint;
+      error?: string | undefined;
+      liquidity?: bigint | undefined;
+      poolId: Hex;
+      positionLiquidity: bigint;
+      sqrtPriceX96?: bigint | undefined;
+      tickLower: number;
+      tickUpper: number;
       token0: Address;
       token1: Address;
     }
@@ -294,7 +310,7 @@ export async function readProductBoardroomDashboard(
     activeCatalogEntry?.name ? Promise.resolve(activeCatalogEntry.name) : readOptionalTokenName(client, snapshot.shareToken),
   ]);
   const history = selectPrimaryHistory(histories, catalogIdentity);
-  const currentPool = await readCatalogPool(client, catalogIdentity.pool ?? history?.pool);
+  const currentPool = await readCatalogPool(client, input.deployment, catalogIdentity.pool ?? history?.pool);
   const historyErrors = uniqueMessages([
     hydration.error,
     ...(snapshot.summaryWarnings ?? []),
@@ -540,7 +556,7 @@ async function readProductBoardroomCatalogEntryWithContext(
       readOptionalTokenName(client, snapshot.shareToken),
       readOptionalTokenTotalSupply(client, snapshot.shareToken),
       readOptionalTokenBalance(client, snapshot.shareToken, address),
-      readCatalogPool(client, pool ?? history?.pool),
+      readCatalogPool(client, deployment, pool ?? history?.pool),
     ]);
     const historyErrors = uniqueMessages([hydration.error, history?.scanError]);
 
@@ -635,16 +651,37 @@ async function readCatalogTreasuryCash(
 
 async function readCatalogPool(
   client: ProductBoardroomClient,
+  deployment: PledgeCashDeployment | undefined,
   pool: Address | undefined,
 ): Promise<CatalogPoolRead | undefined> {
   if (!pool || isZeroAddress(pool)) return undefined;
   try {
-    const [token0, token1, reserves] = await Promise.all([
-      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
-      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
-    ]);
-    return { token0, token1, reserve0: reserves[0], reserve1: reserves[1] };
+    const vault = await readProtocolLiquidityVaultState(client, pool);
+    if (!deployment?.uniswapV4StateView) {
+      return {
+        error: "Uniswap v4 StateView is not configured for current price and active-liquidity reads.",
+        poolId: vault.poolId,
+        positionLiquidity: vault.positionLiquidity,
+        tickLower: vault.tickLower,
+        tickUpper: vault.tickUpper,
+        token0: vault.currency0,
+        token1: vault.currency1,
+      };
+    }
+    const state = await readUniswapV4PoolState(client, {
+      stateView: deployment.uniswapV4StateView,
+      poolId: vault.poolId,
+    });
+    return {
+      liquidity: state.liquidity,
+      poolId: vault.poolId,
+      positionLiquidity: vault.positionLiquidity,
+      sqrtPriceX96: state.sqrtPriceX96,
+      tickLower: vault.tickLower,
+      tickUpper: vault.tickUpper,
+      token0: vault.currency0,
+      token1: vault.currency1,
+    };
   } catch (error) {
     return { error: errorMessage(error) };
   }
@@ -675,10 +712,15 @@ async function readOptionalTokenBalance(
 
 function catalogPoolFields(pool: CatalogPoolRead | undefined): Partial<ProductBoardroomCatalogEntry> {
   if (!pool) return {};
-  if ("error" in pool) return { poolError: pool.error };
+  if (!("token0" in pool)) return { poolError: pool.error };
   return {
-    poolReserve0: pool.reserve0,
-    poolReserve1: pool.reserve1,
+    liquidity: pool.positionLiquidity,
+    poolError: pool.error,
+    poolLiquidity: pool.liquidity,
+    poolPositionLiquidity: pool.positionLiquidity,
+    poolSqrtPriceX96: pool.sqrtPriceX96,
+    poolTickLower: pool.tickLower,
+    poolTickUpper: pool.tickUpper,
     poolToken0: pool.token0,
     poolToken1: pool.token1,
   };
@@ -688,7 +730,7 @@ function catalogPoolAddress(
   distributionState: Partial<ProductBoardroomCatalogEntry>,
   locker: BoardroomLockedLiquiditySnapshot | undefined,
 ): Address | undefined {
-  return distributionState.pool ?? locker?.state?.pool;
+  return distributionState.pool ?? locker?.address;
 }
 
 function catalogLockerAddress(
@@ -971,9 +1013,9 @@ function deriveDistributionCatalogFields(
     cashTokenSymbol: distribution.quoteTokenMetadata?.symbol,
     distribution: distribution.address,
     distributionKind: "migrating-bonding-curve",
-    locker: nonZeroAddress(state.locker),
-    path: migrated ? "Migrated curve + AMM" : "Bonding curve",
-    pool: nonZeroAddress(state.pool),
+    locker: nonZeroAddress(state.liquidityVault),
+    path: migrated ? "Migrated curve + Uniswap v4" : "Bonding curve",
+    pool: nonZeroAddress(state.liquidityVault),
     routeBuyInventory: state.remainingSaleShares,
     routeClosed: state.closed,
     routeEndTime: state.endTime,
@@ -1044,7 +1086,7 @@ async function readDistributionHistory(
 
   const curveResult = await readCurveHistory(client, distribution.address, eventScan);
   const curve = curveResult.history;
-  const currentPool = nonZeroAddress(distribution.state.pool) ?? pool;
+  const currentPool = nonZeroAddress(distribution.state.liquidityVault) ?? pool;
   const migrationPool = curve?.migration?.pool;
   const historyPool = currentPool ?? migrationPool;
   const errors = uniqueMessages([
@@ -1198,7 +1240,15 @@ async function readAmmHistory(
   pool: Address,
   eventScan: EventScanContext,
 ): Promise<ProductBoardroomAmmHistory | undefined> {
-  const logs = await readEventLogs(client, pool, ammPoolAbi, "Swap", eventScan);
+  const vault = await readProtocolLiquidityVaultState(client, pool);
+  const logs = await readEventLogs(
+    client,
+    vault.poolManager,
+    uniswapV4PoolManagerEventAbi,
+    "Swap",
+    eventScan,
+    { id: vault.poolId },
+  );
   if (!logs) return undefined;
 
   const traders = new Set<string>();
@@ -1210,10 +1260,12 @@ async function readAmmHistory(
   for (const log of logs) {
     const sender = addressArg(log.args, "sender");
     if (sender) traders.add(sender.toLowerCase());
-    amount0In += bigintArg(log.args, "amount0In");
-    amount0Out += bigintArg(log.args, "amount0Out");
-    amount1In += bigintArg(log.args, "amount1In");
-    amount1Out += bigintArg(log.args, "amount1Out");
+    const amount0 = bigintArg(log.args, "amount0");
+    const amount1 = bigintArg(log.args, "amount1");
+    if (amount0 > 0n) amount0In += amount0;
+    else amount0Out += -amount0;
+    if (amount1 > 0n) amount1In += amount1;
+    else amount1Out += -amount1;
   }
 
   return {
@@ -1232,13 +1284,14 @@ async function readEventLogs(
   abi: ProductBoardroomEventAbi,
   name: ProductBoardroomEventName,
   eventScan: EventScanContext,
+  args?: Record<string, unknown>,
 ): Promise<ProductBoardroomEventLog[] | undefined> {
   assertEventScanActive(eventScan);
   if (!client.getBlockNumber || !client.getLogs) {
     throw new Error(`Historical ${name} activity is unavailable because this RPC cannot scan event logs.`);
   }
   const toBlock = await waitForEventScanOperation(client.getBlockNumber(), eventScan, `${name} head block`);
-  const cacheKey = `${address.toLowerCase()}:${name}`;
+  const cacheKey = `${address.toLowerCase()}:${name}:${eventArgsCacheKey(args)}`;
   const clientCache = eventLogClientCache(client);
   let cacheEntry = clientCache.get(cacheKey);
   if (!cacheEntry) {
@@ -1291,7 +1344,7 @@ async function readEventLogs(
   }
 
   const entry = cacheEntry;
-  const request = updateEventLogCacheEntry(client, address, abi, name, toBlock, entry, eventScan);
+  const request = updateEventLogCacheEntry(client, address, abi, name, toBlock, entry, eventScan, args);
   entry.pending = request;
   entry.pendingContext = eventScan;
   try {
@@ -1308,6 +1361,14 @@ async function readEventLogs(
   }
 }
 
+function eventArgsCacheKey(args: Record<string, unknown> | undefined): string {
+  if (!args) return "all";
+  return Object.entries(args)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${String(value).toLowerCase()}`)
+    .join("&");
+}
+
 function eventScanOwnsFailure(eventScan: EventScanContext, error: unknown): boolean {
   return eventScan.failure === error
     || Boolean(eventScan.signal?.aborted && eventScan.signal.reason === error);
@@ -1321,6 +1382,7 @@ async function updateEventLogCacheEntry(
   toBlock: bigint,
   entry: EventLogCacheEntry,
   eventScan: EventScanContext,
+  args?: Record<string, unknown>,
 ): Promise<void> {
   for (let attempt = 0; attempt <= MAX_EVENT_LOG_REORG_RETRIES; attempt += 1) {
     assertEventScanActive(eventScan);
@@ -1335,7 +1397,7 @@ async function updateEventLogCacheEntry(
     reserveEventLogResults(eventScan, name, retained.length);
     const scanned = fromBlock > toBlock
       ? []
-      : await readEventLogsInChunks(client, address, abi, name, fromBlock, toBlock, eventScan);
+      : await readEventLogsInChunks(client, address, abi, name, fromBlock, toBlock, eventScan, args);
     const checkpointAfter = await eventLogBlockHash(client, toBlock, eventScan);
 
     if (checkpointBefore !== checkpointAfter) {
@@ -1394,6 +1456,7 @@ async function readEventLogsInChunks(
   fromBlock: bigint,
   toBlock: bigint,
   eventScan: EventScanContext,
+  args?: Record<string, unknown>,
 ): Promise<ProductBoardroomEventLog[]> {
   if (!client.getLogs || fromBlock > toBlock) return [];
   const event = getAbiItem({ abi, name }) as AbiEvent;
@@ -1410,7 +1473,7 @@ async function readEventLogsInChunks(
       return start <= toBlock ? { start, end } : undefined;
     }).filter((range): range is { start: bigint; end: bigint } => range !== undefined);
     const pages = await Promise.all(ranges.map(async ({ start, end }) =>
-      await readLogRangeAdaptive(client, address, event, name, start, end, eventScan)));
+      await readLogRangeAdaptive(client, address, event, name, start, end, eventScan, args)));
     for (const page of pages) logs.push(...page);
     const last = ranges.at(-1);
     if (!last) break;
@@ -1428,13 +1491,14 @@ async function readLogRangeAdaptive(
   fromBlock: bigint,
   toBlock: bigint,
   eventScan: EventScanContext,
+  args?: Record<string, unknown>,
 ): Promise<ProductBoardroomEventLog[]> {
   if (!client.getLogs) return [];
   assertEventScanActive(eventScan);
   reserveEventLogRequest(eventScan, name);
   try {
     const logs = await waitForEventScanOperation(
-      client.getLogs({ address, event, fromBlock, toBlock }) as Promise<ProductBoardroomEventLog[]>,
+      client.getLogs({ address, event, args, fromBlock, toBlock } as never) as Promise<ProductBoardroomEventLog[]>,
       eventScan,
       `${name} log range`,
     );
@@ -1456,11 +1520,12 @@ async function readLogRangeAdaptive(
         toBlock,
         advertisedLimit,
         eventScan,
+        args,
       );
     }
     const middle = fromBlock + (toBlock - fromBlock) / 2n;
-    const first = await readLogRangeAdaptive(client, address, event, name, fromBlock, middle, eventScan);
-    const second = await readLogRangeAdaptive(client, address, event, name, middle + 1n, toBlock, eventScan);
+    const first = await readLogRangeAdaptive(client, address, event, name, fromBlock, middle, eventScan, args);
+    const second = await readLogRangeAdaptive(client, address, event, name, middle + 1n, toBlock, eventScan, args);
     return [...first, ...second];
   }
 }
@@ -1552,13 +1617,14 @@ async function findContractStartBlock(
 }
 
 function curveMigrationHistory(args: Record<string, unknown> | undefined): ProductBoardroomCurveMigrationHistory | undefined {
-  const locker = addressArg(args, "locker");
-  const pool = addressArg(args, "pool");
-  if (!locker || !pool) return undefined;
+  const vault = addressArg(args, "vault");
+  const poolId = hexArg(args, "poolId");
+  if (!vault || !poolId) return undefined;
   return {
     liquidity: bigintArg(args, "liquidity"),
-    locker,
-    pool,
+    locker: vault,
+    pool: vault,
+    poolId,
     quoteToBoardroom: bigintArg(args, "quoteToBoardroom"),
     quoteToLiquidity: bigintArg(args, "quoteToLiquidity"),
     sharesToLiquidity: bigintArg(args, "sharesToLiquidity"),
@@ -1589,7 +1655,7 @@ function findCatalogDistribution(
 ): BoardroomDistributionSnapshot | undefined {
   return distributions.find((distribution) => distributionIsExecutable(distribution, boardroomStatus, now))
     ?? distributions.find((distribution) => distribution.kind === "migrating-bonding-curve" && Boolean(nonZeroAddress(
-      distribution.state && "pool" in distribution.state ? distribution.state.pool : undefined,
+      distribution.state && "liquidityVault" in distribution.state ? distribution.state.liquidityVault : undefined,
     )))
     ?? distributions.find((distribution) => distributionHasActiveEnum(distribution))
     ?? distributions[0];
@@ -1682,7 +1748,7 @@ function findCatalogLocker(
 ) {
   if (pool) {
     const matching = snapshot.lockedLiquiditySummaries.find(
-      (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
+      (locker) => locker.address.toLowerCase() === pool.toLowerCase(),
     );
     if (matching) return matching;
   }
@@ -1951,6 +2017,7 @@ async function readLogRangeAtKnownLimit(
   toBlock: bigint,
   limit: bigint,
   eventScan: EventScanContext,
+  args?: Record<string, unknown>,
 ): Promise<ProductBoardroomEventLog[]> {
   const logs: ProductBoardroomEventLog[] = [];
   let nextBlock = fromBlock;
@@ -1962,7 +2029,7 @@ async function readLogRangeAtKnownLimit(
       return start <= toBlock ? { start, end } : undefined;
     }).filter((range): range is { start: bigint; end: bigint } => range !== undefined);
     const pages = await Promise.all(ranges.map(async ({ start, end }) =>
-      await readLogRangeAdaptive(client, address, event, name, start, end, eventScan)));
+      await readLogRangeAdaptive(client, address, event, name, start, end, eventScan, args)));
     for (const page of pages) logs.push(...page);
     const last = ranges.at(-1);
     if (!last) break;
@@ -2037,7 +2104,7 @@ function poolHistoryMismatchMessage(
   currentPool: Address,
   historicalPool: Address,
 ): string {
-  return `Current curve state for ${distribution} names pool ${currentPool}, but migration history names ${historicalPool}. Current pool identity takes precedence; historical AMM coverage is unknown.`;
+  return `Current curve state for ${distribution} names vault ${currentPool}, but migration history names ${historicalPool}. Current vault identity takes precedence; historical Uniswap v4 coverage is unknown.`;
 }
 
 async function mapInBatches<T, U>(
@@ -2092,6 +2159,11 @@ function addressArg(args: Record<string, unknown> | undefined, name: string): Ad
 function bigintArg(args: Record<string, unknown> | undefined, name: string): bigint {
   const value = args?.[name];
   return typeof value === "bigint" ? value : 0n;
+}
+
+function hexArg(args: Record<string, unknown> | undefined, name: string): Hex | undefined {
+  const value = args?.[name];
+  return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value) ? value as Hex : undefined;
 }
 
 function sameAddress(first: Address | undefined, second: Address | undefined): boolean {

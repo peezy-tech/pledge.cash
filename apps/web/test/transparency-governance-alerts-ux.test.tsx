@@ -108,8 +108,8 @@ const dashboard: ProductBoardroomDashboardState = {
     bondingCurve: zero,
     primaryMarketQuoteAsset: paymentToken,
     liquidityStatus: 0,
-    liquidityLocker: pool,
-    liquidityPool: pool,
+    liquidityVault: pool,
+    liquidityPoolId: `0x${"11".repeat(32)}`,
     liquidityQuoteAsset: paymentToken,
     grantSummaries: [{
       address: grant,

@@ -155,6 +155,7 @@ export function defaultLockedLiquidityForm(): LockedLiquidityForm {
     quoteAmountDesired: "1",
     shareAmountMin: "0.95",
     quoteAmountMin: "0.95",
+    sqrtPriceX96: (1n << 96n).toString(),
     deadline: defaultDeadline(),
     salt: randomSalt(),
     shareTokenSide: "tokenA",
