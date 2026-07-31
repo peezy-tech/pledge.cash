@@ -242,6 +242,7 @@ contract PledgeV4LiquidityVault is ERC20, Initializable, ReentrancyGuard, IUnloc
         if (recipient == address(0)) revert InvalidAddress();
         _pullExact(tokenA, msg.sender, amountADesired);
         _pullExact(tokenB, msg.sender, amountBDesired);
+        _requireBoardroomActive();
         (amountA, amountB, liquidity) = _addLiquidity(
             AddRequest({
                 amountADesired: amountADesired,

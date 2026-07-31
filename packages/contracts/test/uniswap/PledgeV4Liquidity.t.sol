@@ -20,6 +20,7 @@ contract V4TestToken is ERC20 {
     address public immutable boardroom;
     bool public transfersRevert;
     bool public shortTransfers;
+    bool public windDownOnTransfer;
 
     error TransfersDisabled();
 
@@ -49,12 +50,23 @@ contract V4TestToken is ERC20 {
         shortTransfers = shortTransfers_;
     }
 
+    function armWindDownOnTransfer() external {
+        windDownOnTransfer = true;
+    }
+
     function transfer(address to, uint256 amount) public override returns (bool) {
         return super.transfer(to, shortTransfers && amount != 0 ? amount - 1 : amount);
     }
 
     function _beforeTokenTransfer(address from, address to, uint256) internal view override {
         if (transfersRevert && from != address(0) && to != address(0)) revert TransfersDisabled();
+    }
+
+    function _afterTokenTransfer(address from, address to, uint256) internal override {
+        if (windDownOnTransfer && from != address(0) && to != address(0)) {
+            windDownOnTransfer = false;
+            V4BoardroomMock(boardroom).setWindingDown();
+        }
     }
 }
 
@@ -378,6 +390,31 @@ contract PledgeV4LiquidityTest is Test {
                 abi.encodeCall(BondMarketFactory.createBondMarket, (terms))
             )
         );
+    }
+
+    function testExternalDepositRollsBackIfTokenCallbackStartsWindDown() public {
+        (address vaultAddress,,,,) = boardroom.create(_createParams());
+        PledgeV4LiquidityVault vault = PledgeV4LiquidityVault(vaultAddress);
+
+        uint256 deposit = 10 ether;
+        share.mint(address(this), deposit);
+        quote.mint(address(this), deposit);
+        share.approve(vaultAddress, deposit);
+        quote.approve(vaultAddress, deposit);
+        uint256 supplyBefore = vault.totalSupply();
+        uint256 liquidityBefore = vault.positionLiquidity();
+        uint256 shareBalanceBefore = share.balanceOf(address(this));
+        uint256 quoteBalanceBefore = quote.balanceOf(address(this));
+
+        share.armWindDownOnTransfer();
+        vm.expectRevert(PledgeV4LiquidityVault.BoardroomMutationForbidden.selector);
+        vault.depositLiquidityForClaims(deposit, deposit, 9.5 ether, 9.5 ether, address(this), block.timestamp);
+
+        assertFalse(boardroom.windingDown());
+        assertEq(vault.totalSupply(), supplyBefore);
+        assertEq(vault.positionLiquidity(), liquidityBefore);
+        assertEq(share.balanceOf(address(this)), shareBalanceBefore);
+        assertEq(quote.balanceOf(address(this)), quoteBalanceBefore);
     }
 
     function _createParams() internal view returns (PledgeV4LiquidityFactory.CreateParams memory) {
