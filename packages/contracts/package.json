@@ -19,6 +19,7 @@
     "scenario:project-token:local": "forge script script/ProjectTokenLaunchScenario.s.sol:ProjectTokenLaunchScenario --rpc-url local --broadcast -vvv",
     "simulate:monad-testnet": "script/monad-testnet/deploy.sh",
     "simulate:testnets": "bun run simulate:monad-testnet",
+    "test:sepolia-fork:deployment": "script/sepolia-fork/deploy.sh",
     "test": "forge test -vvv",
     "verify:monad-testnet-artifact": "script/monad-testnet/verify-artifact.sh",
     "verify:testnet-artifacts": "bun run verify:monad-testnet-artifact"

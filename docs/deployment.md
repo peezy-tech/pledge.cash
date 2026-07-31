@@ -409,6 +409,27 @@ Re-running the same command is the idempotence check: existing roots must be
 accepted only when their init-code commitments and live configuration match.
 The ignored `deployments/31337.json` is local evidence, not a public identity.
 
+### Sepolia fork deployment proof
+
+The isolated Sepolia-fork gate deploys the complete protocol against the live
+canonical Sepolia PoolManager, Universal Router, Quoter, StateView,
+PositionManager, Permit2, wrapped-native token, and CREATE2 factory. It verifies
+that every external dependency has code, records and checks the first broadcast
+receipt-by-receipt, reconstructs every deterministic address and release hash,
+reruns the deployment, and verifies that the canonical identity and live wiring
+remain unchanged.
+
+```sh
+bun run test:sepolia-fork:deployment
+```
+
+The command requires Foundry v1.7.1 and a clean committed worktree. It defaults
+to a public Sepolia RPC; set `SEPOLIA_RPC_URL` when a private or higher-capacity
+endpoint is preferable. Set `SEPOLIA_FORK_BLOCK` to repeat an exact historical
+fork. The child Anvil chain uses id `31337`, never broadcasts to Sepolia, keeps
+all logs, candidate artifacts, and receipt evidence in a printed temporary
+directory, and does not overwrite the normal local deployment artifact.
+
 The canonical Boardroom lifecycle proof uses a separate fresh Anvil state:
 
 ```sh

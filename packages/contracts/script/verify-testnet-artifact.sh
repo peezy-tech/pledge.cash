@@ -2,7 +2,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT="${ARTIFACT:?Set ARTIFACT to the deployment JSON path}"
 RECEIPTS="${RECEIPTS:-${ARTIFACT%.json}.receipts.json}"
 RPC_URL="${RPC_URL:?Set RPC_URL to the target chain RPC URL}"

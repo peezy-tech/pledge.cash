@@ -32,6 +32,22 @@ fee, and immutable-wiring verification succeeds.
 
 Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
 
+## Sepolia fork gate
+
+Before selecting a production network, run the complete deployment against a
+local fork of Ethereum Sepolia's canonical Uniswap v4 stack:
+
+```sh
+bun run test:sepolia-fork:deployment
+```
+
+The gate checks the upstream chain and dependency bytecode, deploys and
+receipt-verifies protocol genesis, reruns the deterministic deployment, and
+then verifies that its addresses, release identity, ownership, policies, and
+live wiring remain unchanged. It uses no Sepolia funds and sends no Sepolia
+transactions. Pin `SEPOLIA_FORK_BLOCK` when the evidence must be exactly
+repeatable.
+
 ## Local Anvil scenario
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
