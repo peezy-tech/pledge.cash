@@ -28,4 +28,3 @@ sort_imports = false
 
 [rpc_endpoints]
 local = "http://127.0.0.1:8545"
-hyperevm_testnet = "${HYPEREVM_TESTNET_RPC_URL}"

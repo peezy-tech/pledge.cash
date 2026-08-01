@@ -1,4 +1,4 @@
-import { hyperEvmTestnet, monadTestnet, type Address } from "@pledge.cash/sdk";
+import { monadTestnet, type Address } from "@pledge.cash/sdk";
 import { createPublicClient, defineChain, fallback, http, type Chain, type Hex, type PublicClient } from "viem";
 
 export const LOCAL_ANVIL_CHAIN_ID = 31337;
@@ -8,7 +8,7 @@ const SELECTED_NETWORK_STORAGE_KEY = "pledge.cash.selectedNetwork";
 
 export type PledgeCashNetwork = {
   chainId: number;
-  key: "hyperevm-testnet" | "monad-testnet" | "local-anvil" | "custom";
+  key: "monad-testnet" | "local-anvil" | "custom";
   name: string;
   rpcUrl: string;
   explorerName?: string | undefined;
@@ -35,10 +35,6 @@ export type PledgeCashNetworkEnv = Partial<
     | "VITE_PLEDGE_CASH_CHAIN_NAME"
     | "VITE_PLEDGE_CASH_EXPLORER_NAME"
     | "VITE_PLEDGE_CASH_EXPLORER_URL"
-    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME"
-    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL"
-    | "VITE_PLEDGE_CASH_HYPEREVM_RPC_URL"
-    | "VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL"
     | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME"
     | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL"
     | "VITE_PLEDGE_CASH_LOCAL_RPC_URL"
@@ -68,7 +64,7 @@ const initialChainIdFromEnv = numericEnv(pledgeCashEnv.VITE_PLEDGE_CASH_CHAIN_ID
 
 export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = createPledgeCashNetworks(pledgeCashEnv);
 
-export const DEFAULT_NETWORK = networkForChainId(initialChainIdFromEnv ?? hyperEvmTestnet.id);
+export const DEFAULT_NETWORK = networkForChainId(initialChainIdFromEnv ?? monadTestnet.id);
 
 export function initialSelectedNetwork(): PledgeCashNetwork {
   return networkForChainId(queryNetworkId() ?? storedNetworkId() ?? DEFAULT_NETWORK.chainId);
@@ -94,7 +90,7 @@ export function networkEnvironmentIdentity(network: Pick<PledgeCashNetwork, "cha
     };
   }
 
-  if (network.key === "hyperevm-testnet" || network.key === "monad-testnet") {
+  if (network.key === "monad-testnet") {
     return {
       kind: "testnet",
       label: "Testnet",
@@ -166,7 +162,6 @@ export function walletRpcUrl(network: PledgeCashNetwork): string {
 export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashNetwork[] {
   const legacy = legacyNetworkProfile(env);
   const networks: PledgeCashNetwork[] = [
-    createHyperEvmNetwork(env, legacy),
     createMonadNetwork(env, legacy),
     createLocalAnvilNetwork(env, legacy),
   ];
@@ -175,31 +170,6 @@ export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashN
   if (custom) networks.push(custom);
 
   return networks;
-}
-
-function createHyperEvmNetwork(env: PledgeCashNetworkEnv, legacy: LegacyNetworkProfile): PledgeCashNetwork {
-  return createNetwork({
-    chainId: hyperEvmTestnet.id,
-    key: "hyperevm-testnet",
-    name: legacyProfileName(legacy, hyperEvmTestnet.id, hyperEvmTestnet.name),
-    nativeCurrency: hyperEvmTestnet.nativeCurrency,
-    rpcUrl:
-      env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
-      || legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.rpcUrl)
-      || hyperEvmTestnet.rpcUrls.default.http[0],
-    explorerName:
-      env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
-      ?? legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.explorerName)
-      ?? hyperEvmTestnet.blockExplorers.default.name,
-    explorerUrl:
-      env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL
-      ?? legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.explorerUrl)
-      ?? hyperEvmTestnet.blockExplorers.default.url,
-    wrappedNativeSymbol:
-      env.VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL
-      ?? legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.wrappedNativeSymbol)
-      ?? `W${hyperEvmTestnet.nativeCurrency.symbol}`,
-  });
 }
 
 function createMonadNetwork(env: PledgeCashNetworkEnv, legacy: LegacyNetworkProfile): PledgeCashNetwork {
@@ -263,7 +233,7 @@ function createCustomLegacyNetwork(
   if (legacy.initialChainId === undefined) return undefined;
   if (networks.some((network) => network.chainId === legacy.initialChainId)) return undefined;
 
-  const defaultChain = legacy.initialChainId === monadTestnet.id ? monadTestnet : hyperEvmTestnet;
+  const defaultChain = monadTestnet;
   return createNetwork({
     chainId: legacy.initialChainId,
     key: "custom",
@@ -271,8 +241,7 @@ function createCustomLegacyNetwork(
     nativeCurrency: defaultChain.nativeCurrency,
     rpcUrl:
       legacy.rpcUrl
-      ?? defaultChain.rpcUrls.default.http[0]
-      ?? hyperEvmTestnet.rpcUrls.default.http[0],
+      ?? defaultChain.rpcUrls.default.http[0],
     explorerName: legacy.explorerName ?? defaultChain.blockExplorers.default.name,
     explorerUrl: legacy.explorerUrl ?? defaultChain.blockExplorers.default.url,
     wrappedNativeSymbol: legacy.wrappedNativeSymbol ?? `W${defaultChain.nativeCurrency.symbol}`,
@@ -286,7 +255,7 @@ function legacyNetworkProfile(env: PledgeCashNetworkEnv): LegacyNetworkProfile {
     explorerName: env.VITE_PLEDGE_CASH_EXPLORER_NAME,
     explorerUrl: env.VITE_PLEDGE_CASH_EXPLORER_URL,
     initialChainId,
-    profileChainId: initialChainId ?? hyperEvmTestnet.id,
+    profileChainId: initialChainId ?? monadTestnet.id,
     rpcUrl: env.VITE_PLEDGE_CASH_RPC_URL,
     wrappedNativeSymbol: env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL,
   };

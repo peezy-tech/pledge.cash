@@ -24,7 +24,6 @@
   },
   "scripts": {
     "build": "bun --cwd packages/contracts build && bun --cwd packages/sdk build && bun --cwd apps/web build",
-    "deploy:hyperevm-testnet": "bun --cwd packages/contracts deploy:hyperevm-testnet",
     "deploy:monad-testnet": "bun --cwd packages/contracts deploy:monad-testnet",
     "deploy:testnets": "bun --cwd packages/contracts deploy:testnets",
     "docs:build": "bun --cwd docs build",
@@ -38,15 +37,12 @@
     "scenario:boardroom:local": "bun --cwd packages/contracts scenario:boardroom:local",
     "scenario:project-token:dry-run": "bun --cwd packages/contracts scenario:project-token:dry-run",
     "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
-    "router:dev": "bun run --cwd services/x402-router dev",
-    "router:integration:anvil": "bun run --cwd services/x402-router integration:anvil",
-    "router:test": "bun run --cwd services/x402-router test",
     "sentinel:dev": "bun --cwd services/sentinel dev",
     "sentinel:integration:anvil": "bun --cwd services/sentinel integration:anvil",
     "sentinel:test": "bun --cwd services/sentinel test",
-    "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
     "simulate:monad-testnet": "bun --cwd packages/contracts simulate:monad-testnet",
     "simulate:testnets": "bun --cwd packages/contracts simulate:testnets",
+    "test:sepolia-fork:deployment": "bun --cwd packages/contracts test:sepolia-fork:deployment",
     "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"
   },
   "devDependencies": {

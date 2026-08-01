@@ -9,7 +9,7 @@ import {
   scheduleParticipationRefresh,
 } from "../src/app/pages/participate-page";
 import { Web3Provider } from "../src/components/web3-provider";
-import { SwapPanel, ammHyperliquidBlocker, liquidityActionState, positionActionState, swapActionState, swapDecisionFormKey } from "../src/features/swap/swap-panel";
+import { SwapPanel, liquidityActionState, positionActionState, swapActionState, swapDecisionFormKey } from "../src/features/swap/swap-panel";
 import type { Capability } from "../src/features/capabilities/project-capabilities";
 import { exactRational, knownMetric } from "../src/lib/market-data";
 import type { ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
@@ -39,7 +39,32 @@ const locker = "0x7200000000000000000000000000000000000000" as Address;
 const wrappedNative = "0x7300000000000000000000000000000000000000" as Address;
 const router = "0x7400000000000000000000000000000000000000" as Address;
 const factory = "0x7500000000000000000000000000000000000000" as Address;
-const deployment: PledgeCashDeployment = { chainId: 31337, ammFactory: factory, ammRouter: router, wrappedNative };
+const poolId = `0x${"11".repeat(32)}` as const;
+const sqrtPriceX96 = 1n << 96n;
+const deployment: PledgeCashDeployment = {
+  chainId: 31337,
+  permit2: owner,
+  pledgeV4Hook: factory,
+  pledgeV4LiquidityFactory: factory,
+  uniswapUniversalRouter: router,
+  uniswapV4Quoter: owner,
+  uniswapV4StateView: owner,
+  wrappedNative,
+};
+
+function v4PoolSummary(address: Address, liquidity: bigint) {
+  return {
+    address,
+    token0: shareToken,
+    token1: quoteToken,
+    poolId,
+    fee: 3_000,
+    tickSpacing: 60,
+    hooks: factory,
+    liquidity,
+    sqrtPriceX96,
+  };
+}
 
 function fixedSaleSummary(startTime: bigint, endTime: bigint): BoardroomDistributionSnapshot {
   return {
@@ -103,11 +128,11 @@ function migratedCurveSummary(address: Address, poolAddress: Address): Boardroom
       address,
       factory: owner,
       boardroom,
-      lockedLiquidityFactory: owner,
+      liquidityFactory: owner,
       shareToken,
       quoteToken,
-      locker,
-      pool: poolAddress,
+      liquidityVault: locker,
+      liquidityPoolId: poolId,
       saleSupply: 10n,
       migrationSupply: 10n,
       remainingSaleShares: 0n,
@@ -172,8 +197,8 @@ const poolMarket = {
   loaded: true,
   loading: false,
   pools: [
-    { address: pool, token0: shareToken, token1: quoteToken, reserve0: 1_000_000_000_000_000_000n, reserve1: 2_000_000n },
-    { address: emptyPool, token0: shareToken, token1: quoteToken, reserve0: 0n, reserve1: 2_000_000n },
+    v4PoolSummary(pool, 1_000_000_000_000_000_000n),
+    v4PoolSummary(emptyPool, 0n),
   ],
 };
 
@@ -190,20 +215,14 @@ const readyQuote: SwapQuoteState = {
   tokenIn: { address: shareToken, symbol: "PLEDGE", decimals: 18, balance: 5_000_000_000_000_000_000n, allowance: 2_000_000_000_000_000_000n },
   tokenOut: { address: quoteToken, symbol: "USDC", decimals: 6 },
   pool: {
-    address: pool,
-    token0: shareToken,
-    token1: quoteToken,
-    reserve0: 100_000_000_000_000_000_000n,
-    reserve1: 200_000_000n,
-    reserveIn: 100_000_000_000_000_000_000n,
-    reserveOut: 200_000_000n,
+    ...v4PoolSummary(pool, 100_000_000_000_000_000_000n),
   },
   amountIn: 1_000_000_000_000_000_000n,
   amountOut: 1_810_000n,
   amountOutMin: 1_800_950n,
   slippageBps: 50,
-  feeBps: 30n,
-  feeDenominator: 10_000n,
+  feeBps: 3_000n,
+  feeDenominator: 1_000_000n,
   effectiveExecutionPrice: knownMetric({
     baseToken: shareToken,
     baseDecimals: 18,
@@ -229,14 +248,21 @@ const readyLiquidityQuote: LiquidityQuoteState = {
   pool: {
     address: pool,
     exists: true,
+    poolId,
     token0: shareToken,
     token1: quoteToken,
-    reserve0: 100_000_000_000_000_000_000n,
-    reserve1: 200_000_000n,
-    reserveA: 100_000_000_000_000_000_000n,
-    reserveB: 200_000_000n,
     totalSupply: 100_000_000_000_000_000_000n,
+    positionLiquidity: 100_000_000_000_000_000_000n,
+    sqrtPriceX96,
+    liquidityState: 1,
+    fee: 3_000,
+    tickSpacing: 60,
+    hooks: factory,
+    tickLower: -887_220,
+    tickUpper: 887_220,
   },
+  amountADesired: 2_000_000_000_000_000_000n,
+  amountBDesired: 3_000_000n,
   amountA: 2_000_000_000_000_000_000n,
   amountB: 3_000_000n,
   amountAMin: 1_990_000_000_000_000_000n,
@@ -248,10 +274,9 @@ const readyLiquidityQuote: LiquidityQuoteState = {
 const readyPosition: AmmPositionState = {
   tokenA: readyLiquidityQuote.tokenA!,
   tokenB: readyLiquidityQuote.tokenB!,
-  pool: readyLiquidityQuote.pool,
-  lpToken: { address: pool, symbol: "LP", decimals: 18, balance: 5_000_000_000_000_000_000n, allowance: 1_000_000_000_000_000_000n },
+  pool: readyLiquidityQuote.pool ? { ...readyLiquidityQuote.pool, liquidityState: 2 } : undefined,
+  lpToken: { address: pool, symbol: "P4LP", decimals: 18, balance: 5_000_000_000_000_000_000n },
   lpBalance: 5_000_000_000_000_000_000n,
-  lpAllowance: 1_000_000_000_000_000_000n,
 };
 
 const readyRemoveLiquidityQuote: RemoveLiquidityQuoteState = {
@@ -279,7 +304,6 @@ function renderSwap(input: {
   account?: Address | undefined;
   actionCapability?: Capability | undefined;
   form?: SwapForm | undefined;
-  hyperliquid?: boolean | undefined;
   pendingAction?: string | undefined;
   quote?: SwapQuoteState | undefined;
 }): string {
@@ -288,8 +312,8 @@ function renderSwap(input: {
       <SwapPanel
         account={input.account}
         actionCapability={input.actionCapability ?? { status: input.account ? "enabled" : "connect" }}
-        boardroom={input.hyperliquid ? boardroom : undefined}
-        deployment={input.hyperliquid ? { ...deployment, chainId: 998 } : undefined}
+        boardroom={undefined}
+        deployment={undefined}
         form={input.form ?? swapForm}
         liquidityForm={defaultLiquidityForm()}
         liquidityQuote={undefined}
@@ -304,25 +328,12 @@ function renderSwap(input: {
         tokenList={{ loaded: true, pools: [], tokens: [] }}
         tokenListLoading={false}
         wrappedNativeSymbol="WETH"
-        hyperliquid={input.hyperliquid ? {
-          config: {
-            application: "api.pledge.cash/x402-router/v1/execute",
-            baseUrl: "https://x402.example",
-            gateway: owner,
-            hyperevmUsdc: quoteToken,
-          },
-          walletClient: () => {
-            throw new Error("not invoked while rendering");
-          },
-        } : undefined}
         mode="swap"
-        projectShareToken={input.hyperliquid ? shareToken : undefined}
+        projectShareToken={undefined}
         addLiquidity={noop}
         approveLiquidityTokenA={noop}
         approveLiquidityTokenB={noop}
-        approveLpToken={noop}
         approveInput={noop}
-        claimAmmFees={noop}
         executeSwap={noop}
         refreshLiquidityQuote={noop}
         refreshPosition={noop}
@@ -371,9 +382,7 @@ function renderLiquidity(input: {
         addLiquidity={noop}
         approveLiquidityTokenA={noop}
         approveLiquidityTokenB={noop}
-        approveLpToken={noop}
         approveInput={noop}
-        claimAmmFees={noop}
         executeSwap={noop}
         refreshLiquidityQuote={noop}
         refreshPosition={noop}
@@ -424,10 +433,10 @@ class ParticipationFakeTimers {
 }
 
 describe("participation route liveness", () => {
-  test("does not call an address-only AMM route live", () => {
+  test("does not call an address-only Uniswap v4 route live", () => {
     const option = participationOptions(dashboard).find((candidate) => candidate.address === pool);
     expect(option).toMatchObject({ available: false, group: "unknown", status: "Unknown" });
-    expect(option?.reason).toContain("tokens and reserves have not been loaded");
+    expect(option?.reason).toContain("PoolKey, slot0, and active liquidity have not been loaded");
   });
 
   test("derives live and zero-liquidity states from the exact pool snapshot", () => {
@@ -437,16 +446,16 @@ describe("participation route liveness", () => {
       available: false,
       group: "unavailable",
       status: "No liquidity",
-      reason: "The AMM pool has no two-sided liquidity.",
+      reason: "The Uniswap v4 pool has no active liquidity at the current tick.",
     });
   });
 
-  test("groups route choices and explains a zero-reserve pool", () => {
+  test("groups route choices and explains a zero-liquidity v4 pool", () => {
     const html = renderToString(<ParticipatePage dashboard={dashboard} loading={false} poolMarket={poolMarket} />);
     expect(html).toContain("Live now");
     expect(html).toContain("Unavailable");
     expect(html).toContain("No liquidity");
-    expect(html).toContain("The AMM pool has no two-sided liquidity.");
+    expect(html).toContain("The Uniswap v4 pool has no active liquidity at the current tick.");
   });
 
   test("distinguishes checking and failed pool reads", () => {
@@ -454,7 +463,7 @@ describe("participation route liveness", () => {
     expect(participationOptions(dashboard, {}, { error: "RPC timeout", loaded: true, loading: false, pools: [] })[0]).toMatchObject({
       group: "unavailable",
       status: "Unavailable",
-      reason: "Current AMM pool state could not be read: RPC timeout",
+      reason: "Current Uniswap v4 pool state could not be read: RPC timeout",
     });
   });
 
@@ -561,8 +570,8 @@ describe("participation route liveness", () => {
       loaded: true,
       loading: false,
       pools: [
-        { address: pool, token0: shareToken, token1: quoteToken, reserve0: 0n, reserve1: 2_000_000n },
-        { address: emptyPool, token0: shareToken, token1: quoteToken, reserve0: 1_000_000_000_000_000_000n, reserve1: 2_000_000n },
+        v4PoolSummary(pool, 0n),
+        v4PoolSummary(emptyPool, 1_000_000_000_000_000_000n),
       ],
     });
     expect(liveOptions.map((option) => option.address)).toEqual([emptyPool, pool]);
@@ -591,8 +600,8 @@ describe("participation route liveness", () => {
       loaded: true,
       loading: false,
       pools: [
-        { address: pool, token0: shareToken, token1: quoteToken, reserve0: 0n, reserve1: 2_000_000n },
-        { address: emptyPool, token0: shareToken, token1: quoteToken, reserve0: 1n, reserve1: 2n },
+        v4PoolSummary(pool, 0n),
+        v4PoolSummary(emptyPool, 1n),
       ],
     });
     const missingPool = "0x8000000000000000000000000000000000000000" as Address;
@@ -696,89 +705,16 @@ describe("participation route liveness", () => {
 });
 
 describe("swap decision UX", () => {
-  test("offers the Hyperliquid action only for a current project-token buy route", () => {
-    const form: SwapForm = {
-      ...swapForm,
-      tokenIn: quoteToken,
-      tokenOut: shareToken,
-      useNative: false,
-    };
-    const quote: SwapQuoteState = {
-      ...readyQuote,
-      requestIdentity: swapQuoteRequestIdentity(form),
-      tokenIn: {
-        address: quoteToken,
-        allowance: 0n,
-        balance: 0n,
-        decimals: 6,
-        symbol: "USDC",
-      },
-      tokenOut: {
-        address: shareToken,
-        decimals: 18,
-        symbol: "PLEDGE",
-      },
-      pool: {
-        ...readyQuote.pool!,
-        reserveIn: readyQuote.pool!.reserveOut,
-        reserveOut: readyQuote.pool!.reserveIn,
-      },
-      amountIn: 1_000_000n,
-      amountOut: 400_000_000_000_000_000n,
-      amountOutMin: 398_000_000_000_000_000n,
-    };
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: quoteToken,
-      form,
-      projectShareToken: shareToken,
-      quote,
-    })).toBeUndefined();
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: owner,
-      form,
-      projectShareToken: shareToken,
-      quote,
-    })).toContain("configured HyperEVM USDC input token");
-
-    const html = renderSwap({
-      account: owner,
-      form,
-      hyperliquid: true,
-      quote,
-    });
-    expect(html).toContain("Pay from Hyperliquid");
-    expect(html).toContain("Settle USDC on HyperCore");
-
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: quoteToken,
-      form: swapForm,
-      projectShareToken: shareToken,
-      quote: readyQuote,
-    })).toContain("USDC-to-project-token direction");
-  });
-
   test("prioritizes execution metrics and keeps slippage separate", () => {
     const html = renderSwap({ account: owner, quote: readyQuote });
     expect(html).toContain('aria-label="Swap tokens"');
-    expect(html.indexOf("Expected output")).toBeLessThan(html.indexOf("Pool contract"));
+    expect(html.indexOf("Expected output")).toBeLessThan(html.indexOf("P4LP vault"));
     expect(html).toContain("Effective execution price");
     expect(html).toContain("1 PLEDGE = 1.81 USDC");
     expect(html).toContain("Price impact (including fee)");
     expect(html).toContain("9.5%");
     expect(html).toContain("Minimum received");
-    expect(html).toContain("AMM fee");
+    expect(html).toContain("Uniswap v4 fee");
     expect(html).toContain("0.3%");
     expect(html).toContain("Quote expiry");
     expect(html).toContain("Slippage tolerance");
@@ -872,6 +808,21 @@ describe("swap decision UX", () => {
 });
 
 describe("liquidity action safety and form semantics", () => {
+  test("checks the full desired deposit before the vault refunds unused currency", () => {
+    const amountADesired = readyLiquidityQuote.amountA! + 1n;
+    const state = liquidityActionState(enabledCapability, {
+      ...readyLiquidityQuote,
+      amountADesired,
+      tokenA: { ...readyLiquidityQuote.tokenA!, allowance: amountADesired - 1n, balance: amountADesired - 1n },
+    }, false, false, true);
+
+    expect(state.needsTokenAApproval).toBe(true);
+    expect(state.canApproveTokenA).toBe(true);
+    expect(state.addLiquidity.enabled).toBe(false);
+    expect(state.addLiquidity.reason).toContain("Insufficient token A balance");
+    expect(state.addLiquidity.reason).toContain("Approval needed for token A");
+  });
+
   test("blocks insufficient and unknown ERC-20 balances on token A and token B", () => {
     const insufficientA = liquidityActionState(enabledCapability, {
       ...readyLiquidityQuote,
@@ -1005,19 +956,17 @@ describe("liquidity action safety and form semantics", () => {
     expect(liquidityState.canApproveTokenA).toBe(false);
     expect(liquidityState.canApproveTokenB).toBe(false);
     expect(liquidityState.addLiquidity).toEqual({ enabled: false, reason: wrongChainCapability.reason });
-    expect(positionState.canApproveLp).toBe(false);
     expect(positionState.canRemoveLiquidity).toBe(false);
-    expect(positionState.canClaimFees).toBe(false);
-    for (const label of ["Approve A", "Approve B", "Add Liquidity", "Claim Fees", "Approve LP", "Remove Liquidity"]) {
+    for (const label of ["Approve A", "Approve B", "Add Liquidity", "Redeem P4LP"]) {
       expect(renderedButton(html, label)).toContain('disabled=""');
     }
-    for (const label of ["Quote", "Refresh", "Quote Remove", "Switch wallet network"]) {
+    for (const label of ["Quote", "Refresh", "Quote Redemption", "Switch wallet network"]) {
       expect(renderedButton(html, label)).not.toContain('disabled=""');
     }
     expect(html).toContain("Switch your wallet to chain 31337 to continue.");
   });
 
-  test("enables LP approval only for a verified allowance shortfall", () => {
+  test("redeems P4LP claims without an allowance step", () => {
     const covered = positionActionState(enabledCapability, readyPosition, readyRemoveLiquidityQuote, true);
     const shortPosition: AmmPositionState = {
       ...readyPosition,
@@ -1030,14 +979,10 @@ describe("liquidity action safety and form semantics", () => {
     }, true);
     const html = renderLiquidity();
 
-    expect(covered.needsLpApproval).toBe(false);
-    expect(covered.canApproveLp).toBe(false);
     expect(covered.canRemoveLiquidity).toBe(true);
-    expect(short.needsLpApproval).toBe(true);
-    expect(short.canApproveLp).toBe(true);
-    expect(short.canRemoveLiquidity).toBe(false);
-    expect(renderedButton(html, "Approve LP")).toContain('disabled=""');
-    expect(renderedButton(html, "Remove Liquidity")).not.toContain('disabled=""');
+    expect(short.canRemoveLiquidity).toBe(true);
+    expect(html).not.toContain("Approve LP");
+    expect(renderedButton(html, "Redeem P4LP")).not.toContain('disabled=""');
   });
 
   test("routes Enter to only the ready add or remove primary submit and guards unready submission", async () => {
@@ -1060,9 +1005,9 @@ describe("liquidity action safety and form semantics", () => {
     expect(forms).toHaveLength(2);
     expect(addForm?.match(/type="submit"/g)).toHaveLength(1);
     expect(addForm).toContain("Add Liquidity");
-    expect(addForm).not.toContain("Remove Liquidity");
+    expect(addForm).not.toContain("Redeem P4LP");
     expect(removeForm?.match(/type="submit"/g)).toHaveLength(1);
-    expect(removeForm).toContain("Remove Liquidity");
+    expect(removeForm).toContain("Redeem P4LP");
     expect(removeForm).not.toContain("Add Liquidity");
     expect(blockedAddForm).toMatch(/disabled=""[^>]*type="submit"|type="submit"[^>]*disabled=""/);
     expect(blockedRemoveForm).toMatch(/disabled=""[^>]*type="submit"|type="submit"[^>]*disabled=""/);
@@ -1083,9 +1028,9 @@ describe("liquidity action safety and form semantics", () => {
       expect(button).toContain(button.includes("Add Liquidity") ? 'type="submit"' : 'type="button"');
     }
     for (const button of removeButtons) {
-      expect(button).toContain(button.includes("Remove Liquidity") ? 'type="submit"' : 'type="button"');
+      expect(button).toContain(button.includes("Redeem P4LP") ? 'type="submit"' : 'type="button"');
     }
-    for (const label of ["Quote", "Refresh", "Approve A", "Approve B", "Claim Fees", "Quote Remove", "Approve LP"]) {
+    for (const label of ["Quote", "Refresh", "Approve A", "Approve B", "Quote Redemption"]) {
       expect(headerButtons.find((button) => button.includes(label))).toContain('type="button"');
     }
   });

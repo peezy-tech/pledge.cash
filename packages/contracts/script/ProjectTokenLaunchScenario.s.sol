@@ -3,9 +3,9 @@ pragma solidity ^0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../src/amm/AmmFactory.sol";
-import {AmmPool} from "../src/amm/AmmPool.sol";
-import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {IBoardroom as Boardroom} from "../src/boardroom/IBoardroom.sol";
 import {BoardroomFacetTypes} from "../src/boardroom/diamond/BoardroomFacetTypes.sol";
@@ -14,11 +14,13 @@ import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogi
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../src/boardroom/BoardroomRedemptionPayout.sol";
 import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
-import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
 import {CanonicalBoardroomScriptSetup} from "./CanonicalBoardroomScriptSetup.sol";
+import {PledgeV4LiquidityFactory} from "../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {PledgeV4LiquidityVault} from "../src/uniswap/PledgeV4LiquidityVault.sol";
+import {V4PoolManagerMock} from "../test/helpers/V4PoolManagerMock.sol";
 
 contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
     error ScenarioCheckFailed(string label);
@@ -29,17 +31,16 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         AssetPolicy assetPolicy;
         BoardroomFactory boardroomFactory;
         TokenGrantFactory tokenGrantFactory;
-        AmmFactory ammFactory;
-        AmmRouter ammRouter;
-        LockedLiquidityFactory lockedLiquidityFactory;
+        ProtocolFeeRouter protocolFeeRouter;
+        V4PoolManagerMock poolManager;
+        PledgeV4LiquidityFactory liquidityFactory;
         Boardroom boardroom;
         BoardroomToken projectToken;
         WETH wrappedHype;
         address grantFeeRecipient;
-        address pool;
-        address locker;
+        bytes32 poolId;
+        address vault;
         address grant;
-        uint256 expectedSwapProtocolFee;
         uint256 grantCreationFeeRevenue;
         uint256 wrappedGrantCreationFeeRevenue;
     }
@@ -52,7 +53,6 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
     uint256 internal constant PROJECT_LP_SUPPLY = 1_000_000 ether;
     uint256 internal constant PROJECT_GRANT_SUPPLY = 25_000 ether;
     uint256 internal constant HYPE_LIQUIDITY = 100 ether;
-    uint256 internal constant HYPE_TRADE = 5 ether;
     uint256 internal constant GRANT_CREATION_FEE = 0.1 ether;
 
     function run() external {
@@ -75,7 +75,6 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         _lockProjectLiquidity(state);
         vm.stopBroadcast();
 
-        _swapIntoProjectToken(state, traderKey, trader);
         _createProjectTokenGrant(state, grantIssuerKey, grantIssuer, contributor);
         _windDownAndWrapNativeRevenue(state, ownerKey);
         _log(state, owner, trader, grantIssuer, contributor);
@@ -90,14 +89,19 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         (state.boardroomFactory, releaseAHash) =
             _deployCanonicalBoardroomFactory(owner, state.policyRegistry, address(state.wrappedHype));
         state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
-        state.ammFactory = new AmmFactory(owner, address(state.boardroomFactory));
-        state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
-        state.lockedLiquidityFactory =
-            new LockedLiquidityFactory(address(state.ammRouter), address(state.boardroomFactory));
+        state.protocolFeeRouter = new ProtocolFeeRouter(owner, owner);
+        state.poolManager = new V4PoolManagerMock();
+        state.liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(state.poolManager)),
+            address(state.boardroomFactory),
+            address(state.protocolFeeRouter),
+            owner
+        );
+        state.liquidityFactory.deployHook(_mineHookSalt(state.liquidityFactory));
 
-        state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
+        state.assetPolicy.setApprovalSpenderAllowed(address(state.liquidityFactory), true);
         state.policyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
-        state.policyRegistry.registerModulePolicy(address(state.lockedLiquidityFactory));
+        state.policyRegistry.registerModulePolicy(address(state.liquidityFactory));
 
         address boardroomAddress = state.boardroomFactory
             .createBoardroom(
@@ -106,16 +110,16 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         state.boardroom = Boardroom(payable(boardroomAddress));
         state.projectToken = BoardroomToken(state.boardroom.shareToken());
         state.grantFeeRecipient = address(state.boardroom);
+        state.protocolFeeRouter.setFeeRecipient(address(state.boardroom));
         state.assetPolicy.setAssetAllowed(address(state.projectToken), true);
 
-        state.ammFactory.setProtocolFeeRecipient(address(state.boardroom));
-        state.ammFactory.setLiquidityRouter(address(state.ammRouter));
-        state.ammFactory.setReservationManager(address(state.lockedLiquidityFactory));
         state.tokenGrantFactory.setCreationFee(GRANT_CREATION_FEE);
         state.tokenGrantFactory.setFeeRecipient(address(state.boardroom));
         state.tokenGrantFactory.transferOwnership(address(state.boardroom));
 
-        _check(state.ammFactory.protocolFeeRecipient() == address(state.boardroom), "protocol-fee-recipient");
+        _check(
+            state.liquidityFactory.protocolFeeRecipient() == address(state.protocolFeeRouter), "protocol-fee-recipient"
+        );
         _check(state.tokenGrantFactory.creationFee() == GRANT_CREATION_FEE, "grant-creation-fee");
         _check(state.tokenGrantFactory.owner() == address(state.boardroom), "grant-factory-owner");
         _check(state.tokenGrantFactory.feeRecipient() == state.grantFeeRecipient, "grant-fee-recipient");
@@ -136,15 +140,17 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
 
     function _lockProjectLiquidity(ScenarioState memory state) internal {
         bytes32 salt = _salt(state.nonce, "project-locked-liquidity");
-        address predictedLocker =
-            state.lockedLiquidityFactory.predictLockedLiquidityAddress(address(state.boardroom), salt);
-        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+        address predictedVault = state.liquidityFactory.predictLiquidityVaultAddress(address(state.boardroom), salt);
+        PledgeV4LiquidityFactory.CreateParams memory params = PledgeV4LiquidityFactory.CreateParams({
             tokenA: address(state.projectToken),
             tokenB: address(state.wrappedHype),
             amountADesired: PROJECT_LP_SUPPLY,
             amountBDesired: HYPE_LIQUIDITY,
-            amountAMin: PROJECT_LP_SUPPLY,
-            amountBMin: HYPE_LIQUIDITY,
+            amountAMin: PROJECT_LP_SUPPLY * 95 / 100,
+            amountBMin: HYPE_LIQUIDITY * 95 / 100,
+            sqrtPriceX96: _sqrtPriceX96(
+                address(state.projectToken), address(state.wrappedHype), PROJECT_LP_SUPPLY, HYPE_LIQUIDITY
+            ),
             deadline: block.timestamp + 1 hours,
             salt: salt
         });
@@ -153,42 +159,21 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         calls[0] = _approvalCall(state, address(state.projectToken), PROJECT_LP_SUPPLY);
         calls[1] = _approvalCall(state, address(state.wrappedHype), HYPE_LIQUIDITY);
         calls[2] = BoardroomFacetTypes.Call({
-            policy: address(state.lockedLiquidityFactory),
-            target: address(state.lockedLiquidityFactory),
+            policy: address(state.liquidityFactory),
+            target: address(state.liquidityFactory),
             value: 0,
-            data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+            data: abi.encodeCall(PledgeV4LiquidityFactory.createProtocolLiquidity, (params))
         });
 
         bytes[] memory results = state.boardroom.executeBatch(state.boardroom.facetSetHash(), calls);
         uint256 liquidity;
-        (state.locker, state.pool,,, liquidity) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
+        (state.vault, state.poolId,,, liquidity) = abi.decode(results[2], (address, bytes32, uint256, uint256, uint256));
 
-        _check(state.locker == predictedLocker, "project-locker-predicted");
+        _check(state.vault == predictedVault, "project-vault-predicted");
         _check(liquidity > 0, "project-liquidity");
-        _check(LockedLiquidity(state.locker).lockedLiquidity() == liquidity, "project-lp-locked");
-        _check(AmmPool(state.pool).balanceOf(state.locker) == liquidity, "locker-holds-lp");
-        _check(state.boardroom.liquidityLocker() == state.locker, "boardroom-recorded-locker");
-    }
-
-    function _swapIntoProjectToken(ScenarioState memory state, uint256 traderKey, address trader) internal {
-        uint256 boardroomHypeBeforeSwap = state.wrappedHype.balanceOf(address(state.boardroom));
-        uint256 nominalFee = HYPE_TRADE * state.ammFactory.SWAP_FEE_BPS() / state.ammFactory.FEE_DENOMINATOR();
-        state.expectedSwapProtocolFee =
-            nominalFee * state.ammFactory.PROTOCOL_FEE_SHARE_BPS() / state.ammFactory.FEE_DENOMINATOR();
-
-        vm.startBroadcast(traderKey);
-        address[] memory path = new address[](2);
-        path[0] = address(state.wrappedHype);
-        path[1] = address(state.projectToken);
-        uint256[] memory amounts =
-            state.ammRouter.swapExactNativeForTokens{value: HYPE_TRADE}(1, path, trader, block.timestamp + 1 hours);
-        vm.stopBroadcast();
-
-        uint256 boardroomHypeAfterSwap = state.wrappedHype.balanceOf(address(state.boardroom));
-        _check(amounts[0] == HYPE_TRADE, "swap-input");
-        _check(amounts[1] == state.projectToken.balanceOf(trader), "trader-project-token");
-        _check(boardroomHypeAfterSwap - boardroomHypeBeforeSwap == state.expectedSwapProtocolFee, "swap-protocol-fee");
-        _check(LockedLiquidity(state.locker).lockedLiquidity() > 0, "locked-liquidity-survives-swap");
+        _check(PledgeV4LiquidityVault(state.vault).positionLiquidity() == liquidity, "project-position-locked");
+        _check(PledgeV4LiquidityVault(state.vault).balanceOf(state.vault) == liquidity, "vault-holds-claims");
+        _check(state.boardroom.liquidityVault() == state.vault, "boardroom-recorded-vault");
     }
 
     function _createProjectTokenGrant(
@@ -252,7 +237,7 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
             policy: address(state.assetPolicy),
             target: token,
             value: 0,
-            data: abi.encodeWithSignature("approve(address,uint256)", address(state.lockedLiquidityFactory), amount)
+            data: abi.encodeWithSignature("approve(address,uint256)", address(state.liquidityFactory), amount)
         });
     }
 
@@ -269,28 +254,47 @@ contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
         console2.log("assetPolicy", address(state.assetPolicy));
         console2.log("boardroomFactory", address(state.boardroomFactory));
         console2.log("tokenGrantFactory", address(state.tokenGrantFactory));
-        console2.log("ammFactory", address(state.ammFactory));
-        console2.log("ammRouter", address(state.ammRouter));
-        console2.log("lockedLiquidityFactory", address(state.lockedLiquidityFactory));
+        console2.log("v4PoolManager", address(state.poolManager));
+        console2.log("pledgeV4LiquidityFactory", address(state.liquidityFactory));
+        console2.log("pledgeV4Hook", address(state.liquidityFactory.hook()));
         console2.log("boardroom", address(state.boardroom));
         console2.log("projectToken", address(state.projectToken));
         console2.log("wrappedHype", address(state.wrappedHype));
         console2.log("grantFeeRecipient", state.grantFeeRecipient);
-        console2.log("pool", state.pool);
-        console2.log("locker", state.locker);
+        console2.logBytes32(state.poolId);
+        console2.log("vault", state.vault);
         console2.log("grant", state.grant);
         console2.log("traderProjectTokens", state.projectToken.balanceOf(trader));
         console2.log("boardroomWrappedHypeRevenueBalance", state.wrappedHype.balanceOf(address(state.boardroom)));
-        console2.log("expectedSwapProtocolFee", state.expectedSwapProtocolFee);
         console2.log("grantCreationFeeRevenue", state.grantCreationFeeRevenue);
         console2.log("wrappedGrantCreationFeeRevenue", state.wrappedGrantCreationFeeRevenue);
         console2.log("grantFeeRecipientNativeBalance", state.grantFeeRecipient.balance);
         console2.log("grantCreationFee", GRANT_CREATION_FEE);
-        console2.log("lockedLp", LockedLiquidity(state.locker).lockedLiquidity());
+        console2.log("positionLiquidity", uint256(PledgeV4LiquidityVault(state.vault).positionLiquidity()));
     }
 
     function _salt(uint256 nonce, string memory label) internal pure returns (bytes32) {
         return keccak256(abi.encode("pledge.cash.project-token-launch", nonce, label));
+    }
+
+    function _sqrtPriceX96(address tokenA, address tokenB, uint256 amountA, uint256 amountB)
+        internal
+        pure
+        returns (uint160 result)
+    {
+        (uint256 amount0, uint256 amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
+        uint256 ratioX192 = FullMath.mulDiv(amount1, uint256(1) << 192, amount0);
+        uint256 sqrtRatioX96 = FixedPointMathLib.sqrt(ratioX192);
+        if (sqrtRatioX96 > type(uint160).max) revert ScenarioCheckFailed("sqrt-price-overflow");
+        result = uint160(sqrtRatioX96);
+    }
+
+    function _mineHookSalt(PledgeV4LiquidityFactory factory_) internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(factory_.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert ScenarioCheckFailed("hook-salt");
     }
 
     function _check(bool condition, string memory label) internal pure {

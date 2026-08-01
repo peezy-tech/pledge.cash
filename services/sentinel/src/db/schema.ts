@@ -122,12 +122,13 @@ export const boardrooms = pgTable(
     bondingCurveSettlementReason: integer("bonding_curve_settlement_reason"),
     bondingCurvePhaseEndsAt: bigint("bonding_curve_phase_ends_at", { mode: "bigint" }).notNull().default(sql`0`),
     liquidityStatus: integer("liquidity_status").notNull().default(0),
-    liquidityLocker: text("liquidity_locker"),
-    liquidityPool: text("liquidity_pool"),
+    // Physical column names stay stable for in-place upgrades; runtime semantics are a P4LP vault and bytes32 PoolId.
+    liquidityVault: text("liquidity_locker"),
+    liquidityPoolId: text("liquidity_pool"),
     liquidityQuoteAsset: text("liquidity_quote_asset"),
     liquidityReservationCurve: text("liquidity_reservation_curve"),
-    liquidityReservationExpectedLocker: text("liquidity_reservation_expected_locker"),
-    liquidityReservationExpectedPool: text("liquidity_reservation_expected_pool"),
+    liquidityReservationExpectedVault: text("liquidity_reservation_expected_locker"),
+    liquidityReservationExpectedPoolId: text("liquidity_reservation_expected_pool"),
     liquidityReservationPairKey: text("liquidity_reservation_pair_key"),
     liquidityReservationSalt: text("liquidity_reservation_salt"),
     liquidityReservationExpiresAt: bigint("liquidity_reservation_expires_at", { mode: "bigint" })
@@ -140,7 +141,7 @@ export const boardrooms = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.chainId, table.address] }),
     bondingCurveIdx: index("boardrooms_bonding_curve_idx").on(table.chainId, table.bondingCurve),
-    liquidityLockerIdx: index("boardrooms_liquidity_locker_idx").on(table.chainId, table.liquidityLocker),
+    liquidityVaultIdx: index("boardrooms_liquidity_locker_idx").on(table.chainId, table.liquidityVault),
     shareTokenIdx: index("boardrooms_share_token_idx").on(table.chainId, table.shareToken),
     statusIdx: index("boardrooms_status_idx").on(table.chainId, table.status)
   })

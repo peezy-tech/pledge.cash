@@ -13,16 +13,16 @@ library BoardroomLiquidityStorage {
 
     struct MigrationReservation {
         address curve;
-        address expectedLocker;
-        bytes32 pairKey;
+        address expectedVault;
+        bytes32 expectedPoolId;
         bytes32 salt;
         uint64 expiresAt;
     }
 
     struct Layout {
         Status status;
-        address locker;
-        address pool;
+        address vault;
+        bytes32 poolId;
         address quoteAsset;
         MigrationReservation pendingMigration;
     }

@@ -272,7 +272,7 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
   const quoteRaised = history?.cashRaised ?? (curve?.state && "quoteReserve" in curve.state ? curve.state.quoteReserve : undefined);
   const curveStatus = curve ? curveStatusLabel(curve.state && "curveStatus" in curve.state ? curve.state.curveStatus : undefined) : "Unknown";
   const graduationTarget = curve?.state && "graduationQuoteTarget" in curve.state ? curve.state.graduationQuoteTarget : undefined;
-  const migrationPool = migration?.pool ?? (curve?.state && "pool" in curve.state ? curve.state.pool : undefined);
+  const migrationPool = migration?.pool ?? (curve?.state && "liquidityVault" in curve.state ? curve.state.liquidityVault : undefined);
   const migrationLocker = migration?.locker ?? locker?.address;
   const optionStrike = impliedUnitPrice(migration?.quoteToLiquidity, migration?.sharesToLiquidity, shareAsset?.decimals);
   const migrationValuation = impliedQuoteValue(shareAsset?.totalSupply, optionStrike, shareAsset?.decimals);
@@ -288,11 +288,11 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
           { label: "Curve purchases", value: formatTokenAmount(purchasedShares, shareAsset) },
           { label: "Quote raised", value: formatTokenAmount(quoteRaised, cashAsset) },
           { label: "Graduation target", value: formatTokenAmount(graduationTarget, cashAsset) },
-          { label: "Quote to LP", value: formatTokenAmount(migration?.quoteToLiquidity, cashAsset) },
+          { label: "Quote to v4 liquidity", value: formatTokenAmount(migration?.quoteToLiquidity, cashAsset) },
           { label: "Employee option strike", value: formatTokenAmount(optionStrike, cashAsset) },
           { label: "Implied FDV", value: formatTokenAmount(migrationValuation, cashAsset) },
-          { label: "Locked LP", value: formatTokenAmount(locker?.state?.lockedLiquidity ?? migration?.liquidity, locker?.liquidityMetadata) },
-          { label: "LP fees to claim", value: claimableFees },
+          { label: "Position liquidity", value: locker?.state?.positionLiquidity?.toString() ?? migration?.liquidity?.toString() ?? "Unknown" },
+          { label: "v4 fee policy", value: claimableFees },
         ]}
       />
       <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 lg:grid-cols-3">
@@ -315,19 +315,19 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
           title="Migration"
           items={[
             {
-              label: "Pool",
+              label: "P4LP vault",
               value: migrationPool ? <AddressLink address={migrationPool} /> : "Unknown",
               detail: `${formatTokenAmount(migration?.sharesToLiquidity, shareAsset)} paired`,
             },
             {
-              label: "Locker",
+              label: "Protocol liquidity",
               value: migrationLocker ? <AddressLink address={migrationLocker} /> : "Unknown",
               detail: `${formatTokenAmount(migration?.quoteToBoardroom, cashAsset)} retained`,
             },
           ]}
         />
         <LaunchSlice
-          title="AMM Activity"
+          title="Uniswap v4 Activity"
           items={[
             {
               label: "Swaps",
@@ -335,14 +335,14 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
               detail: history?.amm?.traderCount === undefined ? "Unknown pool callers" : `${history.amm.traderCount} unique pool callers`,
             },
             {
-              label: "Locker fees",
+              label: "Vault fee policy",
               value: claimableFees,
-              detail: "Claimable by the locked LP position.",
+              detail: "Active fees flow to the Boardroom and protocol; claims-mode fees remain in P4LP backing after the protocol share.",
             },
             {
               label: "Option valuation",
               value: formatTokenAmount(optionStrike, cashAsset),
-              detail: "Grant strike set from migrated LP quote/share.",
+              detail: "Grant strike set from the migrated quote/share ratio.",
             },
           ]}
         />
@@ -521,7 +521,7 @@ function ObligationPanel({
             <DashboardDistributionRow distribution={distribution} key={distribution.address} />
           ))}
         </ObligationColumn>
-        <ObligationColumn title="Locked Liquidity" emptyLabel="No lockers">
+        <ObligationColumn title="Protocol Liquidity" emptyLabel="No vaults">
           {lockers.map((locker) => (
             <DashboardLockerRow locker={locker} key={locker.address} />
           ))}
@@ -619,10 +619,10 @@ function dashboardDistributionFacts(distribution: BoardroomDistributionSnapshot)
 
 function dashboardLockerFacts(locker: BoardroomLockedLiquiditySnapshot): BoardroomFact[] {
   return [
-    { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
-    { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
-    { label: "Claimable A", value: formatTokenAmount(locker.claimableA, locker.tokenAMetadata) },
-    { label: "Claimable B", value: formatTokenAmount(locker.claimableB, locker.tokenBMetadata) },
+    { label: "Pool ID", value: <span className="break-all font-mono text-xs">{locker.state?.poolId ?? "Unknown"}</span> },
+    { label: "Position liquidity", value: locker.state?.positionLiquidity?.toString() ?? "Unknown" },
+    { label: "P4LP supply", value: formatTokenAmount(locker.state?.totalSupply, locker.liquidityMetadata) },
+    { label: "Lifecycle", value: protocolLiquidityStateLabel(locker.state?.liquidityState) },
     { label: "Pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
   ];
 }
@@ -708,7 +708,7 @@ function findLaunchLocker(
     if (selected) return selected;
   }
   if (pool) {
-    const matchingPool = lockers.find((locker) => sameAddress(locker.state?.pool, pool));
+    const matchingPool = lockers.find((locker) => sameAddress(locker.address, pool));
     if (matchingPool) return matchingPool;
   }
   return lockers[0];
@@ -716,7 +716,17 @@ function findLaunchLocker(
 
 function formatClaimableLockerFees(locker: BoardroomLockedLiquiditySnapshot | undefined): string {
   if (!locker) return "Unknown";
-  return `${formatTokenAmount(locker.claimableA, locker.tokenAMetadata)} / ${formatTokenAmount(locker.claimableB, locker.tokenBMetadata)}`;
+  return locker.state?.liquidityState === 2
+    ? "Fees accrue to P4LP backing"
+    : "95% Boardroom / 5% protocol";
+}
+
+function protocolLiquidityStateLabel(state: number | undefined): string {
+  if (state === 0) return "Unconfigured";
+  if (state === 1) return "Active";
+  if (state === 2) return "Claims";
+  if (state === 3) return "Closed";
+  return "Unknown";
 }
 
 function impliedQuoteValue(

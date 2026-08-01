@@ -9,7 +9,7 @@ import {
   buildBoardroomCreateTransaction,
   buildBoardroomExecuteBatchTransaction,
   buildControllerExecuteConfigurationOperationTransaction,
-  buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomProtocolLiquidityExitTransaction,
   buildBoardroomExecuteTransaction,
   buildControllerExecuteBoardroomOperationTransaction,
   buildBoardroomExecuteWindDownCallTransaction,
@@ -25,7 +25,7 @@ import {
   buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomReplaceControllerCall,
-  buildBoardroomReturnProtocolLiquidityAsLpTransaction,
+  buildBoardroomReturnProtocolLiquidityClaimsTransaction,
   buildControllerScheduleConfigurationOperationTransaction,
   buildControllerScheduleBoardroomOperationTransaction,
   buildBoardroomSnapshotAssetsTransaction,
@@ -194,14 +194,14 @@ describe("Boardroom protocol SDK", () => {
       boardroom,
       expectedFacetSetHash,
     }).args).toEqual([expectedFacetSetHash]);
-    expect(buildBoardroomLockedLiquidityExitTransaction({
+    expect(buildBoardroomProtocolLiquidityExitTransaction({
       boardroom,
       expectedFacetSetHash,
       amountAMin: 1n,
       amountBMin: 2n,
       deadline: 3n,
     }).args).toEqual([expectedFacetSetHash, 1n, 2n, 3n]);
-    expect(buildBoardroomReturnProtocolLiquidityAsLpTransaction({
+    expect(buildBoardroomReturnProtocolLiquidityClaimsTransaction({
       boardroom,
       expectedFacetSetHash,
     }).args).toEqual([expectedFacetSetHash]);
@@ -499,7 +499,8 @@ describe("Boardroom protocol SDK", () => {
       activeObligationCount: 3n,
       redeemableAssetCount: 2n,
       rewardPool: asset,
-      liquidityLocker: facet,
+      liquidityVault: facet,
+      liquidityPoolId: manifestHash,
       facetSetHash: expectedFacetSetHash,
       appliedStorageVersion: 1n,
       appliedStorageLayoutHash: manifestHash,
@@ -591,7 +592,8 @@ describe("Boardroom protocol SDK", () => {
       activeObligationCount: 3n,
       redeemableAssetCount: 2n,
       rewardPool: asset,
-      liquidityLocker: facet,
+      liquidityVault: facet,
+      liquidityPoolId: manifestHash,
       facetRegistry: registry,
       requiredFacetSetHash: expectedFacetSetHash,
       activeRelease: 2n,

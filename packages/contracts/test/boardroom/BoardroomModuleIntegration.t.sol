@@ -3,9 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {BondMarket} from "../../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
 import {DutchAuctionSale} from "../../src/distribution/DutchAuctionSale.sol";
@@ -15,11 +13,12 @@ import {MerkleAirdrop} from "../../src/distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../../src/distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
-import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {BoardroomCallbackLib, IBoardroomCallbackTarget} from "../../src/policy/BoardroomCallbackLib.sol";
 import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
+import {PledgeV4LiquidityFactory} from "../../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {PledgeV4LiquidityVault} from "../../src/uniswap/PledgeV4LiquidityVault.sol";
+import {V4PoolManagerMock} from "../helpers/V4PoolManagerMock.sol";
 
 contract ModuleCallbackTargetMock is IBoardroomCallbackTarget {
     bytes32 public facetSetHash;
@@ -112,12 +111,12 @@ contract ModuleCallbackTargetMock is IBoardroomCallbackTarget {
         addressArg0 = grant;
     }
 
-    function recordLockedLiquidityFromDistribution(bytes32 expectedFacetSetHash, address locker, address pool)
+    function recordProtocolLiquidityFromDistribution(bytes32 expectedFacetSetHash, address vault, bytes32 poolId)
         external
     {
-        _record(this.recordLockedLiquidityFromDistribution.selector, expectedFacetSetHash);
-        addressArg0 = locker;
-        addressArg1 = pool;
+        _record(this.recordProtocolLiquidityFromDistribution.selector, expectedFacetSetHash);
+        addressArg0 = vault;
+        bytes32Arg0 = poolId;
     }
 
     function settleBondingCurve(bytes32 expectedFacetSetHash) external {
@@ -126,37 +125,35 @@ contract ModuleCallbackTargetMock is IBoardroomCallbackTarget {
 
     function precommitProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external {
         _record(this.precommitProtocolLiquidity.selector, expectedFacetSetHash);
-        addressArg0 = expectedLocker;
+        addressArg0 = expectedVault;
         addressArg1 = quoteAsset;
         addressArg2 = curve;
-        bytes32Arg0 = pairKey;
+        bytes32Arg0 = expectedPoolId;
         bytes32Arg1 = salt;
         uint64Arg = expiresAt;
     }
 
     function activateProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external {
         _record(this.activateProtocolLiquidity.selector, expectedFacetSetHash);
-        addressArg0 = locker;
-        addressArg1 = pool;
-        addressArg2 = quoteAsset;
-        addressArg3 = curve;
-        bytes32Arg0 = pairKey;
+        addressArg0 = vault;
+        addressArg1 = quoteAsset;
+        addressArg2 = curve;
+        bytes32Arg0 = poolId;
         bytes32Arg1 = salt;
     }
 
@@ -172,9 +169,9 @@ contract ModuleCallbackTargetMock is IBoardroomCallbackTarget {
         bytes32Arg1 = salt;
     }
 
-    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address locker) external {
+    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address vault) external {
         _record(this.closeProtocolLiquidityFromFactory.selector, expectedFacetSetHash);
-        addressArg0 = locker;
+        addressArg0 = vault;
     }
 
     function _record(bytes4 selector, bytes32 expectedFacetSetHash) internal {
@@ -221,13 +218,13 @@ contract BoardroomCallbackHarness {
         BoardroomCallbackLib.recordGrantFromDistribution(boardroom, expectedFacetSetHash, grant);
     }
 
-    function recordLockedLiquidityFromDistribution(
+    function recordProtocolLiquidityFromDistribution(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool
+        address vault,
+        bytes32 poolId
     ) external {
-        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(boardroom, expectedFacetSetHash, locker, pool);
+        BoardroomCallbackLib.recordProtocolLiquidityFromDistribution(boardroom, expectedFacetSetHash, vault, poolId);
     }
 
     function settleBondingCurve(address boardroom, bytes32 expectedFacetSetHash) external {
@@ -237,30 +234,29 @@ contract BoardroomCallbackHarness {
     function precommitProtocolLiquidity(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external {
         BoardroomCallbackLib.precommitProtocolLiquidity(
-            boardroom, expectedFacetSetHash, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
+            boardroom, expectedFacetSetHash, expectedVault, expectedPoolId, quoteAsset, curve, salt, expiresAt
         );
     }
 
     function activateProtocolLiquidity(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external {
         BoardroomCallbackLib.activateProtocolLiquidity(
-            boardroom, expectedFacetSetHash, locker, pool, quoteAsset, curve, pairKey, salt
+            boardroom, expectedFacetSetHash, vault, poolId, quoteAsset, curve, salt
         );
     }
 
@@ -268,16 +264,18 @@ contract BoardroomCallbackHarness {
         address boardroom,
         bytes32 expectedFacetSetHash,
         address curve,
-        bytes32 pairKey,
+        bytes32 expectedPoolId,
         bytes32 salt
     ) external {
-        BoardroomCallbackLib.releaseProtocolLiquidityReservation(boardroom, expectedFacetSetHash, curve, pairKey, salt);
+        BoardroomCallbackLib.releaseProtocolLiquidityReservation(
+            boardroom, expectedFacetSetHash, curve, expectedPoolId, salt
+        );
     }
 
-    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address locker)
+    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address vault)
         external
     {
-        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(boardroom, expectedFacetSetHash, locker);
+        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(boardroom, expectedFacetSetHash, vault);
     }
 }
 
@@ -343,29 +341,7 @@ contract ModuleToken is ERC20 {
     }
 }
 
-contract ModuleAmmFactoryIdentityMock {
-    address public immutable boardroomFactory;
-
-    constructor(address boardroomFactory_) {
-        boardroomFactory = boardroomFactory_;
-    }
-
-    function isPool(address) external pure returns (bool) {
-        return false;
-    }
-}
-
-contract ModuleAmmRouterIdentityMock {
-    address public immutable factory;
-
-    constructor(address factory_) {
-        factory = factory_;
-    }
-
-    function poolFor(address, address) external pure returns (address) {
-        return address(0);
-    }
-}
+contract ModuleFeeRecipientMock {}
 
 contract BoardroomModuleIntegrationTest is Test {
     bytes32 internal constant RELEASE_A = keccak256("release-a");
@@ -374,10 +350,9 @@ contract BoardroomModuleIntegrationTest is Test {
     address internal constant ASSET = address(0xA55E7);
     address internal constant CURVE = address(0xC0A0E);
     address internal constant GRANT = address(0x6A4A7);
-    address internal constant LOCKER = address(0x10CC);
-    address internal constant POOL = address(0xB001);
+    address internal constant VAULT = address(0x10CC);
     address internal constant QUOTE_ASSET = address(0x9007E);
-    bytes32 internal constant PAIR_KEY = keccak256("pair");
+    bytes32 internal constant POOL_ID = keccak256("pool-id");
     bytes32 internal constant SALT = keccak256("salt");
 
     ModuleCallbackTargetMock internal target;
@@ -412,10 +387,10 @@ contract BoardroomModuleIntegrationTest is Test {
         _assertCallback(ModuleCallbackTargetMock.recordGrantFromDistribution.selector, RELEASE_B, 3);
         assertEq(target.addressArg0(), GRANT);
 
-        harness.recordLockedLiquidityFromDistribution(address(target), RELEASE_B, LOCKER, POOL);
-        _assertCallback(ModuleCallbackTargetMock.recordLockedLiquidityFromDistribution.selector, RELEASE_B, 4);
-        assertEq(target.addressArg0(), LOCKER);
-        assertEq(target.addressArg1(), POOL);
+        harness.recordProtocolLiquidityFromDistribution(address(target), RELEASE_B, VAULT, POOL_ID);
+        _assertCallback(ModuleCallbackTargetMock.recordProtocolLiquidityFromDistribution.selector, RELEASE_B, 4);
+        assertEq(target.addressArg0(), VAULT);
+        assertEq(target.bytes32Arg0(), POOL_ID);
 
         harness.settleBondingCurve(address(target), RELEASE_B);
         _assertCallback(ModuleCallbackTargetMock.settleBondingCurve.selector, RELEASE_B, 5);
@@ -426,13 +401,13 @@ contract BoardroomModuleIntegrationTest is Test {
 
     function testLiquidityCallbacksBindCallerSuppliedHashAndPreserveCaller() public {
         harness.precommitProtocolLiquidity(
-            address(target), RELEASE_A, LOCKER, QUOTE_ASSET, CURVE, PAIR_KEY, SALT, uint64(block.timestamp + 1 days)
+            address(target), RELEASE_A, VAULT, POOL_ID, QUOTE_ASSET, CURVE, SALT, uint64(block.timestamp + 1 days)
         );
         _assertCallback(ModuleCallbackTargetMock.precommitProtocolLiquidity.selector, RELEASE_A, 1);
-        assertEq(target.addressArg0(), LOCKER);
+        assertEq(target.addressArg0(), VAULT);
         assertEq(target.addressArg1(), QUOTE_ASSET);
         assertEq(target.addressArg2(), CURVE);
-        assertEq(target.bytes32Arg0(), PAIR_KEY);
+        assertEq(target.bytes32Arg0(), POOL_ID);
         assertEq(target.bytes32Arg1(), SALT);
         assertEq(target.uint64Arg(), uint64(block.timestamp + 1 days));
 
@@ -440,40 +415,39 @@ contract BoardroomModuleIntegrationTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(ModuleCallbackTargetMock.FacetSetHashMismatch.selector, RELEASE_A, RELEASE_B)
         );
-        harness.activateProtocolLiquidity(address(target), RELEASE_A, LOCKER, POOL, QUOTE_ASSET, CURVE, PAIR_KEY, SALT);
+        harness.activateProtocolLiquidity(address(target), RELEASE_A, VAULT, POOL_ID, QUOTE_ASSET, CURVE, SALT);
         assertEq(target.callbackCount(), 1);
 
-        harness.activateProtocolLiquidity(address(target), RELEASE_B, LOCKER, POOL, QUOTE_ASSET, CURVE, PAIR_KEY, SALT);
+        harness.activateProtocolLiquidity(address(target), RELEASE_B, VAULT, POOL_ID, QUOTE_ASSET, CURVE, SALT);
         _assertCallback(ModuleCallbackTargetMock.activateProtocolLiquidity.selector, RELEASE_B, 2);
-        assertEq(target.addressArg0(), LOCKER);
-        assertEq(target.addressArg1(), POOL);
-        assertEq(target.addressArg2(), QUOTE_ASSET);
-        assertEq(target.addressArg3(), CURVE);
-        assertEq(target.bytes32Arg0(), PAIR_KEY);
+        assertEq(target.addressArg0(), VAULT);
+        assertEq(target.addressArg1(), QUOTE_ASSET);
+        assertEq(target.addressArg2(), CURVE);
+        assertEq(target.bytes32Arg0(), POOL_ID);
         assertEq(target.bytes32Arg1(), SALT);
 
-        harness.releaseProtocolLiquidityReservation(address(target), RELEASE_B, CURVE, PAIR_KEY, SALT);
+        harness.releaseProtocolLiquidityReservation(address(target), RELEASE_B, CURVE, POOL_ID, SALT);
         _assertCallback(ModuleCallbackTargetMock.releaseProtocolLiquidityReservation.selector, RELEASE_B, 3);
         assertEq(target.addressArg0(), CURVE);
-        assertEq(target.bytes32Arg0(), PAIR_KEY);
+        assertEq(target.bytes32Arg0(), POOL_ID);
         assertEq(target.bytes32Arg1(), SALT);
 
-        harness.closeProtocolLiquidityFromFactory(address(target), RELEASE_B, LOCKER);
+        harness.closeProtocolLiquidityFromFactory(address(target), RELEASE_B, VAULT);
         _assertCallback(ModuleCallbackTargetMock.closeProtocolLiquidityFromFactory.selector, RELEASE_B, 4);
-        assertEq(target.addressArg0(), LOCKER);
+        assertEq(target.addressArg0(), VAULT);
     }
 
     function testFactoriesAcceptOneCoherentBoardroomIdentity() public {
         ModuleCanonicalFactoryMock canonicalFactory = new ModuleCanonicalFactoryMock();
-        ModuleAmmFactoryIdentityMock ammFactory = new ModuleAmmFactoryIdentityMock(address(canonicalFactory));
-        ModuleAmmRouterIdentityMock ammRouter = new ModuleAmmRouterIdentityMock(address(ammFactory));
-
-        LockedLiquidityFactory liquidityFactory =
-            new LockedLiquidityFactory(address(ammRouter), address(canonicalFactory));
+        V4PoolManagerMock poolManager = new V4PoolManagerMock();
+        ModuleFeeRecipientMock feeRecipient = new ModuleFeeRecipientMock();
+        PledgeV4LiquidityFactory liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(canonicalFactory), address(feeRecipient), address(this)
+        );
         TokenGrantFactory grantFactory = new TokenGrantFactory(address(this), address(canonicalFactory));
         DistributionFactory distributionFactory =
             new DistributionFactory(address(liquidityFactory), address(grantFactory));
-        BondMarketFactory bondFactory = new BondMarketFactory(address(ammFactory), address(canonicalFactory));
+        BondMarketFactory bondFactory = new BondMarketFactory(address(liquidityFactory), address(canonicalFactory));
         BoardroomRewardsFactory rewardsFactory = new BoardroomRewardsFactory(address(canonicalFactory));
 
         assertEq(liquidityFactory.boardroomFactory(), address(canonicalFactory));
@@ -481,7 +455,7 @@ contract BoardroomModuleIntegrationTest is Test {
         assertEq(distributionFactory.boardroomFactory(), address(canonicalFactory));
         assertEq(bondFactory.boardroomFactory(), address(canonicalFactory));
         assertEq(rewardsFactory.boardroomFactory(), address(canonicalFactory));
-        assertGt(liquidityFactory.lockedLiquidityLogic().code.length, 0);
+        assertGt(liquidityFactory.vaultImplementation().code.length, 0);
         assertGt(grantFactory.tokenGrantLogic().code.length, 0);
         assertGt(distributionFactory.migratingBondingCurveLogic().code.length, 0);
         assertGt(distributionFactory.merkleAirdropLogic().code.length, 0);
@@ -492,27 +466,18 @@ contract BoardroomModuleIntegrationTest is Test {
     function testFactoriesRejectMixedBoardroomIdentities() public {
         ModuleCanonicalFactoryMock canonicalFactory = new ModuleCanonicalFactoryMock();
         ModuleCanonicalFactoryMock otherFactory = new ModuleCanonicalFactoryMock();
-        ModuleAmmFactoryIdentityMock ammFactory = new ModuleAmmFactoryIdentityMock(address(canonicalFactory));
-        ModuleAmmRouterIdentityMock ammRouter = new ModuleAmmRouterIdentityMock(address(ammFactory));
+        V4PoolManagerMock poolManager = new V4PoolManagerMock();
+        ModuleFeeRecipientMock feeRecipient = new ModuleFeeRecipientMock();
+        PledgeV4LiquidityFactory liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(canonicalFactory), address(feeRecipient), address(this)
+        );
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 BondMarketFactory.IncoherentFactoryIdentity.selector, address(otherFactory), address(canonicalFactory)
             )
         );
-        new BondMarketFactory(address(ammFactory), address(otherFactory));
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                LockedLiquidityFactory.IncoherentFactoryIdentity.selector,
-                address(otherFactory),
-                address(canonicalFactory)
-            )
-        );
-        new LockedLiquidityFactory(address(ammRouter), address(otherFactory));
-
-        LockedLiquidityFactory liquidityFactory =
-            new LockedLiquidityFactory(address(ammRouter), address(canonicalFactory));
+        new BondMarketFactory(address(liquidityFactory), address(otherFactory));
         TokenGrantFactory grantFactory = new TokenGrantFactory(address(this), address(otherFactory));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -558,10 +523,9 @@ contract BoardroomRealModuleIntegrationTest is Test {
     ModulePolicyRegistryMock internal policyRegistry;
     ModuleToken internal shares;
     ModuleToken internal quote;
-    WETH internal wrappedNative;
-    AmmFactory internal ammFactory;
-    AmmRouter internal ammRouter;
-    LockedLiquidityFactory internal liquidityFactory;
+    V4PoolManagerMock internal poolManager;
+    ModuleFeeRecipientMock internal feeRecipient;
+    PledgeV4LiquidityFactory internal liquidityFactory;
     TokenGrantFactory internal grantFactory;
     DistributionFactory internal distributionFactory;
     BondMarketFactory internal bondFactory;
@@ -573,7 +537,6 @@ contract BoardroomRealModuleIntegrationTest is Test {
         policyRegistry = new ModulePolicyRegistryMock();
         shares = new ModuleToken("Boardroom Share", "SHARE", 18, address(boardroom));
         quote = new ModuleToken("Quote Asset", "QUOTE", 18, address(0));
-        wrappedNative = new WETH();
 
         boardroom.setShareToken(address(shares));
         boardroom.setPolicyRegistry(address(policyRegistry));
@@ -581,15 +544,16 @@ contract BoardroomRealModuleIntegrationTest is Test {
         canonicalFactory.setBoardroom(address(boardroom), true);
         canonicalFactory.setShareToken(address(shares), true);
 
-        ammFactory = new AmmFactory(address(this), address(canonicalFactory));
-        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
-        liquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(canonicalFactory));
-        ammFactory.setLiquidityRouter(address(ammRouter));
-        ammFactory.setReservationManager(address(liquidityFactory));
+        poolManager = new V4PoolManagerMock();
+        feeRecipient = new ModuleFeeRecipientMock();
+        liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(canonicalFactory), address(feeRecipient), address(this)
+        );
+        liquidityFactory.deployHook(_mineHookSalt());
 
         grantFactory = new TokenGrantFactory(address(this), address(canonicalFactory));
         distributionFactory = new DistributionFactory(address(liquidityFactory), address(grantFactory));
-        bondFactory = new BondMarketFactory(address(ammFactory), address(canonicalFactory));
+        bondFactory = new BondMarketFactory(address(liquidityFactory), address(canonicalFactory));
         rewardsFactory = new BoardroomRewardsFactory(address(canonicalFactory));
         policyRegistry.setModulePolicy(address(distributionFactory), true);
 
@@ -915,64 +879,65 @@ contract BoardroomRealModuleIntegrationTest is Test {
         assertEq(shares.lockedStakeBalance(recipient), 100 ether);
     }
 
-    function testRealLockedLiquidityCreatesAddsRemovesAndCloses() public {
+    function testRealV4LiquidityCreatesAddsRemovesAndCloses() public {
         uint256 seed = 100 ether;
         _approveAsBoardroom(address(shares), address(liquidityFactory), seed);
         _approveAsBoardroom(address(quote), address(liquidityFactory), seed);
-        LockedLiquidityFactory.CreateParams memory createParams = LockedLiquidityFactory.CreateParams({
+        PledgeV4LiquidityFactory.CreateParams memory createParams = PledgeV4LiquidityFactory.CreateParams({
             tokenA: address(shares),
             tokenB: address(quote),
             amountADesired: seed,
             amountBDesired: seed,
-            amountAMin: seed,
-            amountBMin: seed,
+            amountAMin: seed * 95 / 100,
+            amountBMin: seed * 95 / 100,
+            sqrtPriceX96: 1 << 96,
             deadline: block.timestamp,
             salt: keccak256("real-liquidity")
         });
 
         vm.prank(address(boardroom));
-        (address lockerAddress, address pool, uint256 amountA, uint256 amountB, uint256 liquidity) =
-            liquidityFactory.createLockedLiquidity(createParams);
-        LockedLiquidity locker = LockedLiquidity(lockerAddress);
-        assertEq(amountA, seed);
-        assertEq(amountB, seed);
-        assertEq(locker.lockedLiquidity(), liquidity);
-        assertEq(locker.pool(), pool);
+        (address vaultAddress, bytes32 poolId, uint256 amountA, uint256 amountB, uint256 liquidity) =
+            liquidityFactory.createProtocolLiquidity(createParams);
+        PledgeV4LiquidityVault vault = PledgeV4LiquidityVault(vaultAddress);
+        assertApproxEqAbs(amountA, seed, 1);
+        assertApproxEqAbs(amountB, seed, 1);
+        assertEq(vault.positionLiquidity(), liquidity);
+        assertEq(vault.poolId(), poolId);
         assertEq(boardroom.callbackCount(), 2);
         assertEq(boardroom.lastSelector(), ModuleCallbackTargetMock.activateProtocolLiquidity.selector);
         assertEq(boardroom.lastCaller(), address(liquidityFactory));
-        assertEq(boardroom.addressArg0(), lockerAddress);
-        assertEq(boardroom.addressArg1(), pool);
+        assertEq(boardroom.addressArg0(), vaultAddress);
+        assertEq(boardroom.bytes32Arg0(), poolId);
 
         uint256 added = 10 ether;
         _approveAsBoardroom(address(shares), address(liquidityFactory), added);
         _approveAsBoardroom(address(quote), address(liquidityFactory), added);
-        LockedLiquidityFactory.AddParams memory addParams = LockedLiquidityFactory.AddParams({
+        PledgeV4LiquidityFactory.AddParams memory addParams = PledgeV4LiquidityFactory.AddParams({
             tokenA: address(shares),
             tokenB: address(quote),
             amountADesired: added,
             amountBDesired: added,
-            amountAMin: added,
-            amountBMin: added,
+            amountAMin: added * 95 / 100,
+            amountBMin: added * 95 / 100,
             deadline: block.timestamp
         });
         vm.prank(address(boardroom));
-        liquidityFactory.addLockedLiquidity(addParams);
+        liquidityFactory.addProtocolLiquidity(addParams);
 
-        uint256 allLiquidity = locker.lockedLiquidity();
+        uint256 allLiquidity = vault.positionLiquidity();
         vm.prank(address(boardroom));
-        liquidityFactory.removeLockedLiquidity(
-            LockedLiquidityFactory.RemoveParams({
+        liquidityFactory.removeProtocolLiquidity(
+            PledgeV4LiquidityFactory.RemoveParams({
                 liquidity: allLiquidity, amountAMin: 0, amountBMin: 0, deadline: block.timestamp
             })
         );
-        assertEq(locker.lockedLiquidity(), 0);
+        assertEq(vault.positionLiquidity(), 0);
 
         vm.prank(address(boardroom));
-        liquidityFactory.closeLockedLiquidity();
-        assertTrue(locker.isClosed());
-        (,,, LockedLiquidityFactory.PositionStatus status) = liquidityFactory.positionOfBoardroom(address(boardroom));
-        assertEq(uint256(status), uint256(LockedLiquidityFactory.PositionStatus.Closed));
+        liquidityFactory.closeProtocolLiquidity();
+        assertTrue(vault.isClosed());
+        (,,, PledgeV4LiquidityFactory.PositionStatus status) = liquidityFactory.positionOfBoardroom(address(boardroom));
+        assertEq(uint256(status), uint256(PledgeV4LiquidityFactory.PositionStatus.Closed));
         assertEq(boardroom.lastSelector(), ModuleCallbackTargetMock.closeProtocolLiquidityFromFactory.selector);
         assertEq(boardroom.lastCaller(), address(liquidityFactory));
     }
@@ -1023,7 +988,7 @@ contract BoardroomRealModuleIntegrationTest is Test {
         assertEq(boardroom.lastCaller(), address(curve));
         assertEq(boardroom.lastExpectedFacetSetHash(), RELEASE_HASH);
 
-        (address reservedCurve,,,,,,) = liquidityFactory.migrationReservationOf(address(boardroom));
+        (address reservedCurve,,,,,) = liquidityFactory.migrationReservationOf(address(boardroom));
         assertEq(reservedCurve, address(0));
     }
 
@@ -1108,6 +1073,14 @@ contract BoardroomRealModuleIntegrationTest is Test {
                 amount
             )
         );
+    }
+
+    function _mineHookSalt() internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(liquidityFactory.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
     }
 
     function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {

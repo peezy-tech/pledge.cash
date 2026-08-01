@@ -10,8 +10,7 @@ const DEPLOYMENT_DISCOVERY_FIELDS = [
   "boardroomFactory",
   "tokenGrantFactory",
   "distributionFactory",
-  "lockedLiquidityFactory",
-  "ammFactory",
+  "pledgeV4LiquidityFactory",
 ] as const;
 
 export type DiscoveryScanRange = {
@@ -33,7 +32,6 @@ export function emptyDiscoverySnapshot(): DiscoverySnapshot {
     grantsByAddress: {},
     distributionsByAddress: {},
     lockersByAddress: {},
-    poolsByAddress: {},
   };
 }
 

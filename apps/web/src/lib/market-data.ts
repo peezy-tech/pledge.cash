@@ -1,6 +1,8 @@
 import type { Address } from "@pledge.cash/sdk";
 
 const WAD = 1_000_000_000_000_000_000n;
+const Q96 = 1n << 96n;
+const Q192 = 1n << 192n;
 
 export type ExactRational = {
   numerator: bigint;
@@ -176,11 +178,6 @@ export type MarketValuation = {
   fullyDilutedValue: MetricState<ExactQuoteValue>;
 };
 
-export type SwapExecutionMetrics = {
-  effectiveExecutionPrice: MetricState<NormalizedPrice>;
-  feeInclusivePriceImpact: MetricState<ExactRational>;
-};
-
 export function exactRational(numerator: bigint, denominator: bigint = 1n): ExactRational {
   if (denominator === 0n) throw new Error("An exact rational denominator cannot be zero.");
   if (numerator === 0n) return { numerator: 0n, denominator: 1n };
@@ -254,12 +251,13 @@ export function normalizedPriceFromAmounts(
   };
 }
 
-export function verifiedAmmSpotPrice(input: {
+/** Derives exact normalized spot price and near-price virtual depth from Uniswap v4 slot0 and active liquidity. */
+export function verifiedUniswapV4SpotPrice(input: {
   pool: Address;
-  token0: Address;
-  token1: Address;
-  reserve0: bigint;
-  reserve1: bigint;
+  currency0: Address;
+  currency1: Address;
+  sqrtPriceX96: bigint;
+  liquidity: bigint;
   projectToken: Address;
   projectDecimals: number;
   quoteToken: Address;
@@ -268,27 +266,41 @@ export function verifiedAmmSpotPrice(input: {
   if (sameAddress(input.projectToken, input.quoteToken)) {
     return unavailableMetric("Project and quote tokens must be different.");
   }
-  const projectIsToken0 = sameAddress(input.projectToken, input.token0);
-  const projectIsToken1 = sameAddress(input.projectToken, input.token1);
-  const quoteIsToken0 = sameAddress(input.quoteToken, input.token0);
-  const quoteIsToken1 = sameAddress(input.quoteToken, input.token1);
-  if (!(projectIsToken0 && quoteIsToken1) && !(projectIsToken1 && quoteIsToken0)) {
-    return unavailableMetric("The AMM pool token pair does not match the project and quote tokens.");
+  const projectIsCurrency0 = sameAddress(input.projectToken, input.currency0);
+  const projectIsCurrency1 = sameAddress(input.projectToken, input.currency1);
+  const quoteIsCurrency0 = sameAddress(input.quoteToken, input.currency0);
+  const quoteIsCurrency1 = sameAddress(input.quoteToken, input.currency1);
+  if (!(projectIsCurrency0 && quoteIsCurrency1) && !(projectIsCurrency1 && quoteIsCurrency0)) {
+    return unavailableMetric("The Uniswap v4 PoolKey currencies do not match the project and quote tokens.");
   }
-  if (input.reserve0 < 0n || input.reserve1 < 0n) {
-    return unavailableMetric("AMM reserves cannot be negative.");
+  if (input.sqrtPriceX96 <= 0n) return unavailableMetric("The Uniswap v4 pool does not expose a positive sqrt price.");
+  if (input.liquidity <= 0n) return unavailableMetric("The Uniswap v4 pool has no active liquidity at the current tick.");
+
+  const currency0DepthRaw = (input.liquidity * Q96) / input.sqrtPriceX96;
+  const currency1DepthRaw = (input.liquidity * input.sqrtPriceX96) / Q96;
+  const projectDepthRaw = projectIsCurrency0 ? currency0DepthRaw : currency1DepthRaw;
+  const quoteDepthRaw = quoteIsCurrency0 ? currency0DepthRaw : currency1DepthRaw;
+  if (projectDepthRaw === 0n || quoteDepthRaw === 0n) {
+    return unavailableMetric("The Uniswap v4 active-liquidity depth rounds to zero for this token pair.");
   }
-  const projectReserve = projectIsToken0 ? input.reserve0 : input.reserve1;
-  const quoteReserve = quoteIsToken0 ? input.reserve0 : input.reserve1;
-  if (projectReserve === 0n || quoteReserve === 0n) {
-    return unavailableMetric("The AMM pool has no two-sided liquidity.");
-  }
-  const projectDepth = exactTokenAmount(input.projectToken, projectReserve, input.projectDecimals);
-  const quoteDepth = exactTokenAmount(input.quoteToken, quoteReserve, input.quoteDecimals);
+
+  const projectDecimals = checkedDecimals(input.projectDecimals);
+  const quoteDecimals = checkedDecimals(input.quoteDecimals);
+  const priceSquaredX192 = input.sqrtPriceX96 * input.sqrtPriceX96;
+  const quotePerBase = projectIsCurrency0
+    ? exactRational(priceSquaredX192 * powerOfTen(projectDecimals), Q192 * powerOfTen(quoteDecimals))
+    : exactRational(Q192 * powerOfTen(projectDecimals), priceSquaredX192 * powerOfTen(quoteDecimals));
+  const projectDepth = exactTokenAmount(input.projectToken, projectDepthRaw, projectDecimals);
+  const quoteDepth = exactTokenAmount(input.quoteToken, quoteDepthRaw, quoteDecimals);
+
   return knownMetric({
-    ...normalizedPriceFromAmounts(projectDepth, quoteDepth),
     source: "amm-spot",
     pool: input.pool,
+    baseToken: input.projectToken,
+    baseDecimals: projectDecimals,
+    quoteToken: input.quoteToken,
+    quoteDecimals,
+    quotePerBase,
     projectDepth,
     quoteDepth,
   });
@@ -502,17 +514,17 @@ export function curveBuyQuoteAmountRaw(availableBuyInventory: bigint, projectDec
   return availableBuyInventory < oneToken ? availableBuyInventory : oneToken;
 }
 
-export function routeLivenessForAmm(input: {
+export function routeLivenessForUniswapV4(input: {
   tokenPairVerified: boolean;
-  reserve0?: bigint | undefined;
-  reserve1?: bigint | undefined;
+  liquidity?: bigint | undefined;
+  sqrtPriceX96?: bigint | undefined;
 }): RouteLiveness {
-  if (!input.tokenPairVerified) return routeLiveness("unavailable", "The pool token pair does not match this route.");
-  if (input.reserve0 === undefined || input.reserve1 === undefined) {
-    return routeLiveness("unknown", "Current AMM reserves have not been verified.");
+  if (!input.tokenPairVerified) return routeLiveness("unavailable", "The PoolKey currencies do not match this route.");
+  if (input.sqrtPriceX96 === undefined || input.liquidity === undefined) {
+    return routeLiveness("unknown", "Current Uniswap v4 slot0 and active liquidity have not been verified.");
   }
-  if (input.reserve0 === 0n || input.reserve1 === 0n) {
-    return routeLiveness("no-liquidity", "The AMM pool has no two-sided liquidity.");
+  if (input.sqrtPriceX96 === 0n || input.liquidity === 0n) {
+    return routeLiveness("no-liquidity", "The Uniswap v4 pool has no active liquidity at the current tick.");
   }
   return routeLiveness("live");
 }
@@ -605,42 +617,6 @@ export function deriveMarketValuation(input: {
   return {
     marketCap: valueSupplyAtSpot(input.spotPrice.value, input.currentSupplyOutsideTreasury),
     fullyDilutedValue: valueSupplyAtSpot(input.spotPrice.value, input.totalSupply),
-  };
-}
-
-export function swapExecutionMetrics(input: {
-  tokenIn: Address;
-  tokenInDecimals: number;
-  tokenOut: Address;
-  tokenOutDecimals: number;
-  amountIn: bigint;
-  amountOut: bigint;
-  reserveIn: bigint;
-  reserveOut: bigint;
-}): SwapExecutionMetrics {
-  if (input.amountIn <= 0n || input.amountOut <= 0n) {
-    const reason = "Execution metrics require positive input and output amounts.";
-    return { effectiveExecutionPrice: unavailableMetric(reason), feeInclusivePriceImpact: unavailableMetric(reason) };
-  }
-  if (input.reserveIn <= 0n || input.reserveOut <= 0n) {
-    const reason = "Execution metrics require verified two-sided AMM reserves.";
-    return { effectiveExecutionPrice: unavailableMetric(reason), feeInclusivePriceImpact: unavailableMetric(reason) };
-  }
-
-  const inputAmount = exactTokenAmount(input.tokenIn, input.amountIn, input.tokenInDecimals);
-  const outputAmount = exactTokenAmount(input.tokenOut, input.amountOut, input.tokenOutDecimals);
-  const inputDepth = exactTokenAmount(input.tokenIn, input.reserveIn, input.tokenInDecimals);
-  const outputDepth = exactTokenAmount(input.tokenOut, input.reserveOut, input.tokenOutDecimals);
-  const effectiveExecutionPrice = normalizedPriceFromAmounts(inputAmount, outputAmount);
-  const spotPrice = normalizedPriceFromAmounts(inputDepth, outputDepth);
-  const feeInclusivePriceImpact = divideRationals(
-    subtractRationals(spotPrice.quotePerBase, effectiveExecutionPrice.quotePerBase),
-    spotPrice.quotePerBase,
-  );
-
-  return {
-    effectiveExecutionPrice: knownMetric(effectiveExecutionPrice),
-    feeInclusivePriceImpact: knownMetric(feeInclusivePriceImpact),
   };
 }
 

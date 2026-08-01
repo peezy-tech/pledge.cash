@@ -37,7 +37,7 @@ or alert subscription.
 ## Participate
 
 `Participate` compares every route discovered for this Boardroom. Available route types are `Reserve bond`, `Liquidity
-bond`, `Dutch auction`, `Fixed-price sale`, `Bonding curve`, `Airdrop`, and `AMM market`.
+bond`, `Dutch auction`, `Fixed-price sale`, `Bonding curve`, `Airdrop`, and `Uniswap v4 market`.
 
 Select the exact route before entering an amount. A closed, sold-out, fully claimed, or migrated route stays visible as history but does not expose an actionable workflow. Approval, quote, price protection, deadline, recipient, balance, allowance, and wallet-specific limits appear only where the route needs them.
 

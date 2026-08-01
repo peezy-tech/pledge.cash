@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
   migratingBondingCurveAbi,
+  pledgeV4LiquidityVaultAbi,
   type PledgeCashLogClient
 } from "@pledge.cash/sdk";
 import { encodeFunctionData, type Address, type Hex } from "viem";
@@ -17,42 +17,49 @@ const boardroom = address("b0a4d");
 const otherBoardroom = address("b0a4e");
 const curve = address("c011");
 const spoofCurve = address("bad");
-const locker = address("10cc");
-const pool = address("a110");
+const vault = address("10cc");
+const poolId = hex32("a110");
 const quote = address("a55e7");
 const factory = address("fac");
 const txHash = hex32("123");
 const salt = hex32("44");
 
 describe("market lifecycle projector", () => {
-  test("projects only canonically bound Boardroom, curve, factory, and locker sources", async () => {
+  test("projects only canonically bound Boardroom, curve, factory, and v4 vault sources", async () => {
     const logs: RawLog[] = [
       rawLog("BondingCurvePrecommitted", boardroom, 1n, 0, { curve, quoteAsset: quote, fundingAmount: 100n }),
       rawLog("ProtocolLiquidityReserved", boardroom, 1n, 1, {
-        expectedLocker: locker,
+        expectedVault: vault,
+        expectedPoolId: poolId,
         quoteAsset: quote,
         curve,
-        pairKey: hex32("55"),
         salt,
         expiresAt: 1_000n
       }),
       rawLog("MigrationReserved", factory, 1n, 2, {
         boardroom,
         curve,
-        expectedLocker: locker,
-        expectedPool: pool,
+        expectedVault: vault,
+        expectedPoolId: poolId,
         salt
       }),
       rawLog("CurvePhaseChanged", curve, 2n, 0, { phase: 1, reason: 0, phaseEndsAt: 2_000n }),
       rawLog("QuoteForfeitureOpened", curve, 3n, 0, { windowEndsAt: 3_000n }),
-      rawLog("FeesForwarded", locker, 3n, 1, { boardroom, amount0: 3n, amount1: 4n }),
+      rawLog("FeesForwarded", vault, 3n, 1, {
+        boardroom,
+        protocolFeeRecipient: quote,
+        boardroomAmount0: 3n,
+        boardroomAmount1: 4n,
+        protocolAmount0: 1n,
+        protocolAmount1: 1n
+      }),
       rawLog("CurvePhaseChanged", spoofCurve, 3n, 2, { phase: 5, reason: 2, phaseEndsAt: 0n })
     ];
 
     const events = await queryMarketLifecycleEvents(client(logs), {
       boardrooms: [{ boardroom }],
       fromBlock: 0n,
-      lockedLiquidityFactory: factory,
+      pledgeV4LiquidityFactory: factory,
       toBlock: 10n
     });
 
@@ -71,8 +78,8 @@ describe("market lifecycle projector", () => {
       primaryMarketQuoteAsset: quote
     });
     expect(marketStateUpdateForEvent(events[2]!)).toMatchObject({
-      liquidityReservationExpectedLocker: locker,
-      liquidityReservationExpectedPool: pool
+      liquidityReservationExpectedVault: vault,
+      liquidityReservationExpectedPoolId: poolId
     });
   });
 
@@ -90,9 +97,8 @@ describe("market lifecycle projector", () => {
     expect(cancel.decodedFunction).toContain("MigratingBondingCurve.cancel");
     expect(cancel.decodedFunction).toContain("MerkleAirdrop.cancel");
 
-    const claim = decodeKnownCall(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
-    expect(claim.decodedFunction).toContain("AmmPool.claimFees");
-    expect(claim.decodedFunction).toContain("LockedLiquidity.claimFees");
+    const claim = decodeKnownCall(encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }));
+    expect(claim.decodedFunction).toContain("PledgeV4LiquidityVault.claimFees");
 
     expect(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" })).toBe(
       encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" })

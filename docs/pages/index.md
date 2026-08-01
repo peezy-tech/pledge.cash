@@ -26,7 +26,7 @@ It does **not** certify a team, guarantee a token's value, or turn project claim
 Every canonical project workspace uses the same sequence:
 
 1. **Overview** — identify the Boardroom, project token, lifecycle, and available actions.
-2. **Participate** — compare the exact bond, sale, curve, airdrop, or AMM routes discovered for that project.
+2. **Participate** — compare the exact bond, sale, curve, airdrop, or Uniswap v4 routes discovered for that project.
 3. **Governance** — see the controller/proposer, scheduled operations, and when active stakers can intervene.
 4. **Transparency** — inspect treasury assets, supply, obligations, distributions, liquidity, and provenance.
 
@@ -44,8 +44,8 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 ## Current Availability
 
-Canonical protocol v1 has not been broadcast to HyperEVM testnet or Monad
-testnet. Both checked-in artifacts are **pending**, so public
+Canonical protocol v1 has not been broadcast to Monad testnet. Its checked-in
+artifact is **pending**, so public
 contract-dependent workflows are unavailable. A matching local Anvil
 deployment and seed can be used for isolated development; local state is not a
 public deployment.

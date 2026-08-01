@@ -15,7 +15,7 @@ import {
   currentUnixTimestamp,
   deriveExecutableDistributionRoute,
   routeLiveness,
-  routeLivenessForAmm,
+  routeLivenessForUniswapV4,
   type ExecutableDistributionRoute,
   type RouteLiveness,
 } from "../../lib/market-data";
@@ -261,10 +261,7 @@ export function ParticipatePage({
   const activeRoute = selection.route;
   const activeOption = options.find((option) => option.id === activeRoute);
   const activeContent = activeOption ? content[activeOption.id] ?? content[activeOption.path] : undefined;
-  const actionableContent =
-    activeOption?.available || activeOption?.path === "support"
-      ? activeContent
-      : undefined;
+  const actionableContent = activeOption?.available ? activeContent : undefined;
 
   useEffect(() => {
     const notification = nextParticipationSelectionNotification(notificationKeyRef.current, selectionScope, selection);
@@ -406,7 +403,7 @@ function unavailableRouteGuidance(
 ): string {
   if (option.reason) return option.reason;
   if (option.path === "migrating-bonding-curve" && options.some((candidate) => candidate.path === "amm" && candidate.available)) {
-    return "This curve has migrated. Choose the live AMM route to keep trading, or inspect its historical contract in the route details.";
+    return "This curve has migrated. Choose the live Uniswap v4 route to keep trading, or inspect its historical contract in the route details.";
   }
   if (option.path === "dutch-auction") {
     return "This auction is scheduled, ended, sold out, or cancelled. Its final settlement price and historical terms remain visible in the route details.";
@@ -419,9 +416,6 @@ function unavailableRouteGuidance(
   }
   if (option.path === "merkle-airdrop") {
     return "This claim route is closed or fully claimed. Its allocation contract remains visible in the route details.";
-  }
-  if (option.path === "support") {
-    return "Monthly support pauses when the project Boardroom is not Active.";
   }
   return "You can inspect this route’s history and contract, but it is not currently accepting participation.";
 }
@@ -459,7 +453,7 @@ export function participationOptions(
     });
   }
   if (pools.length === 0 && content.amm) {
-    const reason = "No AMM pool address is recorded for this project.";
+    const reason = "No canonical Uniswap v4 vault is recorded for this project.";
     const liveness = routeLiveness("unavailable", reason);
     options.push({
       available: false,
@@ -471,28 +465,6 @@ export function participationOptions(
       path: "amm",
       reason,
       status: "Unavailable",
-    });
-  }
-
-  if (content.support) {
-    const available = dashboard.snapshot.status === 0;
-    const reason = available
-      ? undefined
-      : "The project Boardroom is not Active, so recurring-support invoices are paused.";
-    options.push({
-      address: dashboard.address,
-      available,
-      description:
-        "Schedule a voluntary monthly USDC contribution; authorize every period separately.",
-      group: available ? "live" : "unavailable",
-      id: "support",
-      label: "Monthly support",
-      liveness: available
-        ? routeLiveness("live")
-        : routeLiveness("unavailable", reason!),
-      path: "support",
-      ...(reason ? { reason } : {}),
-      status: available ? "Live" : "Paused",
     });
   }
 
@@ -757,16 +729,16 @@ function ammLiveness(
   market: ParticipationPoolMarketState | undefined,
 ): RouteLiveness {
   if (pool) {
-    return routeLivenessForAmm({
+    return routeLivenessForUniswapV4({
       tokenPairVerified: sameAddress(pool.token0, projectToken) || sameAddress(pool.token1, projectToken),
-      reserve0: pool.reserve0,
-      reserve1: pool.reserve1,
+      liquidity: pool.liquidity,
+      sqrtPriceX96: pool.sqrtPriceX96,
     });
   }
   if (market?.loading) return routeLiveness("checking");
-  if (market?.error) return routeLiveness("unavailable", `Current AMM pool state could not be read: ${market.error}`);
-  if (market?.loaded) return routeLiveness("unavailable", "No current reserve snapshot was returned for this recorded pool address.");
-  return routeLiveness("unknown", "Current AMM tokens and reserves have not been loaded for this recorded pool address.");
+  if (market?.error) return routeLiveness("unavailable", `Current Uniswap v4 pool state could not be read: ${market.error}`);
+  if (market?.loaded) return routeLiveness("unavailable", "No current v4 PoolId state was returned for this recorded vault.");
+  return routeLiveness("unknown", "Current v4 PoolKey, slot0, and active liquidity have not been loaded for this recorded vault.");
 }
 
 function livenessPresentation(liveness: RouteLiveness): { group: ParticipationRouteGroup; reason?: string; status: string } {
@@ -887,7 +859,6 @@ function fallbackOption(id: ParticipationContentKey): ParticipationOption {
   if (path === "fixed-price-sale") return { ...common, description: "Buy at a published unit price.", label: "Fixed-price sale" };
   if (path === "migrating-bonding-curve") return { ...common, description: "Buy or sell against a price curve.", label: "Bonding curve" };
   if (path === "merkle-airdrop") return { ...common, description: "Claim a published allocation.", label: "Airdrop" };
-  if (path === "support") return { ...common, description: "Schedule a voluntary monthly USDC contribution with explicit renewals.", label: "Monthly support" };
   return { ...common, description: "Swap through the project liquidity pool.", label: "AMM market" };
 }
 

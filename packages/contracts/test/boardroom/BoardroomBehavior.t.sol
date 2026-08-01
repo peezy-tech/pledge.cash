@@ -4,9 +4,6 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmPool} from "../../src/amm/AmmPool.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
 import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
@@ -204,26 +201,6 @@ contract FlashGovernanceAttacker is IFlashShareCallback {
     function flashShareCallback() external {
         boardroom.startWindDown(boardroom.facetSetHash());
         token.approve(address(lender), type(uint256).max);
-    }
-}
-
-contract AmmFlashGovernanceAttacker {
-    IBoardroom public immutable boardroom;
-    AmmPool public immutable pool;
-    bool public immutable shareIsToken0;
-
-    constructor(IBoardroom boardroom_, AmmPool pool_) {
-        boardroom = boardroom_;
-        pool = pool_;
-        shareIsToken0 = pool_.token0() == boardroom_.shareToken();
-    }
-
-    function attack(uint256 amount) external {
-        pool.swap(shareIsToken0 ? amount : 0, shareIsToken0 ? 0 : amount, address(this), hex"01");
-    }
-
-    function ammCall(address, uint256, uint256, bytes calldata) external {
-        boardroom.startWindDown(boardroom.facetSetHash());
     }
 }
 
@@ -1151,7 +1128,7 @@ contract BoardroomBehaviorTest is Test {
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(BoardroomGovernanceLogic.InvalidParentTransition.selector, stranger));
-        boardroom.recordLockedLiquidityFromDistribution(releaseAHash, address(0x1234), address(0x5678));
+        boardroom.recordProtocolLiquidityFromDistribution(releaseAHash, address(0x1234), bytes32(uint256(0x5678)));
 
         assertEq(boardroom.activeObligationCount(), 0);
     }

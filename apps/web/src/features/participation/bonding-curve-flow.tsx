@@ -54,7 +54,7 @@ export type BondingCurveActionIntent = {
   curve: Address;
   deadlineMinutes: string;
   factory: Address;
-  lockedLiquidityFactory: Address;
+  liquidityFactory: Address;
   mode: CurveMode;
   quoteToken: Address;
   recipient: Address;
@@ -129,7 +129,7 @@ export function BondingCurveFlow({
     curve: state?.address,
     deadlineMinutes,
     factory: state?.factory,
-    lockedLiquidityFactory: state?.lockedLiquidityFactory,
+    liquidityFactory: state?.liquidityFactory,
     mode,
     quoteToken: state?.quoteToken,
     recipient,
@@ -233,7 +233,7 @@ export function BondingCurveFlow({
       curve: state.address,
       deadlineMinutes,
       factory: state.factory,
-      lockedLiquidityFactory: state.lockedLiquidityFactory,
+      liquidityFactory: state.liquidityFactory,
       mode,
       quoteToken: state.quoteToken,
       recipient,
@@ -446,7 +446,7 @@ export function bondingCurveActionIdentity(input: {
   curve: Address | undefined;
   deadlineMinutes: string;
   factory: Address | undefined;
-  lockedLiquidityFactory: Address | undefined;
+  liquidityFactory: Address | undefined;
   mode: CurveMode;
   quoteToken: Address | undefined;
   recipient: Address | undefined;
@@ -461,7 +461,7 @@ export function bondingCurveActionIdentity(input: {
     input.curve?.toLowerCase() ?? "",
     input.deadlineMinutes,
     input.factory?.toLowerCase() ?? "",
-    input.lockedLiquidityFactory?.toLowerCase() ?? "",
+    input.liquidityFactory?.toLowerCase() ?? "",
     input.mode,
     input.quoteToken?.toLowerCase() ?? "",
     input.recipient?.toLowerCase() ?? "",
@@ -526,7 +526,7 @@ function assertBondingCurveQuoteIdentity(quote: CurveQuote, intent: BondingCurve
     && sameAddress(quote.state.address, intent.curve)
     && sameAddress(quote.state.factory, intent.factory)
     && sameAddress(quote.state.boardroom, intent.boardroom)
-    && sameAddress(quote.state.lockedLiquidityFactory, intent.lockedLiquidityFactory)
+    && sameAddress(quote.state.liquidityFactory, intent.liquidityFactory)
     && sameAddress(quote.state.shareToken, intent.shareToken)
     && sameAddress(quote.state.quoteToken, intent.quoteToken);
   if (!matches) throw new Error("The refreshed quote does not match this wallet, curve, direction, or exact trade amount.");

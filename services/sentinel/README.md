@@ -27,7 +27,7 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_RPC_URL_<chainId>` | yes | RPC URL for each configured chain. |
 | `SENTINEL_CONFIRMATIONS_<chainId>` | no | Confirmation lag per chain, default `5`, local chain `31337` default `0`. |
 | `SENTINEL_POLL_INTERVAL_MS` | no | Watcher loop delay, default `12000`. |
-| `SENTINEL_MAX_BLOCK_RANGE` | no | Maximum block span per watcher pass, capped at and defaulting to `1000` for the public HyperEVM testnet RPC. |
+| `SENTINEL_MAX_BLOCK_RANGE` | no | Maximum block span per watcher pass, capped at and defaulting to `1000` for public testnet RPCs. |
 | `SENTINEL_EXPLORER_URL_<chainId>` | no | Explorer base URL used in rendered notifications. |
 | `BETTER_AUTH_SECRET` | yes | Unique 32+ character secret used to protect self-hosted auth state and tokens. |
 | `BETTER_AUTH_URL` | yes | Public Sentinel API origin. Better Auth is mounted at `/auth`. |
@@ -98,7 +98,7 @@ destination of a Boardroom-control proof.
 
 `POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and canonical controller ERC-1271 envelope. At one pinned finalized block, Sentinel proves the deployment-attested permanent roots, then authenticates the governance-selected active release from the registry: published metadata, a strict selector table bounded to 256 entries, every published and active route, exact loupe grouping, and every unique facet runtime code hash. The deployment's `protocolFacetRegistryOwner` records genesis ceremony evidence; it is not a permanent live-owner pin. Sentinel requires the current registry `owner()` to be a well-formed nonzero authority but permits governance or timelock handoffs. An exact expected current owner is supplied only to explicit release-operator actions, not inferred by Sentinel's live release proof. Sentinel also proves kernel-clone provenance, applied Boardroom storage version and layout, and the reciprocal controller topology. Later legitimate releases do not need to appear in the genesis deployment artifact. The signed identity includes the active facet-set hash, Boardroom epoch, controller generation, configuration epoch, and configuration hash. Sentinel rechecks the finalized block hash and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, malformed release evidence, a changed facet set, migration downtime, changed controller context, malformed RPC results, and finality uncertainty fail closed.
 
-Canonical Sentinel release evidence for chains `998` and `10143` remains pending. The local Anvil proof is not a public deployment claim.
+Canonical Sentinel release evidence for chain `10143` remains pending. The local Anvil proof is not a public deployment claim.
 
 Signed-in accounts can read their own keyset-paginated delivery receipts from `GET /notifications`. The response exposes safe operational state and action context, but never returns raw provider errors, chat identifiers, credentials, or another account's rows. A `sent` receipt means the provider accepted the send; it does not prove that a person read it.
 

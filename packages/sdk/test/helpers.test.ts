@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { decodeFunctionData, encodeErrorResult, encodeFunctionData, type Address, type Hex } from "viem";
 import {
-  ammPoolAbi,
-  ammRouterAbi,
   boardroomAbi,
   boardroomTokenAbi,
   boardroomRewardsAbi,
@@ -20,12 +18,12 @@ import {
   buildBoardroomFixedPriceSaleCancelAction,
   buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomFixedPriceSaleBatch,
-  buildBoardroomLockedLiquidityBatch,
-  buildBoardroomLockedLiquidityAddBatch,
-  buildBoardroomLockedLiquidityCloseAction,
-  buildBoardroomLockedLiquidityExitTransaction,
-  buildBoardroomLockedLiquidityFeeClaimAction,
-  buildBoardroomLockedLiquidityRemoveAction,
+  buildBoardroomProtocolLiquidityBatch,
+  buildBoardroomProtocolLiquidityAddBatch,
+  buildBoardroomProtocolLiquidityCloseAction,
+  buildBoardroomProtocolLiquidityExitTransaction,
+  buildBoardroomProtocolLiquidityFeeClaimAction,
+  buildBoardroomProtocolLiquidityRemoveAction,
   buildBoardroomMerkleAirdropBatch,
   buildBoardroomMerkleAirdropCancelAction,
   buildBoardroomMerkleAirdropCloseAction,
@@ -58,23 +56,21 @@ import {
   buildMerkleAirdropGrantClaimTransaction,
   decodeKnownPledgeCashError,
   discoverBoardroomDistributions,
-  discoverBoardroomLockedLiquidity,
+  discoverBoardroomProtocolLiquidity,
   discoverBoardrooms,
   discoverGrantHistory,
-  discoverPools,
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
-  poolFeesAbi,
   predictBondMarketAddress,
   predictDutchAuctionAddress,
-  predictAmmPoolAddress,
-  predictLockedLiquidityAddress,
+  readProtocolLiquidityPoolId,
+  predictProtocolLiquidityVaultAddress,
   predictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress,
   queryGrantsHeldByAddress,
@@ -87,11 +83,11 @@ import {
   readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
-  readLockedLiquidityState,
+  readProtocolLiquidityVaultState,
   readMerkleAirdropState,
   readMigratingBondingCurveState,
   tokenGrantFactoryAbi,
-  type BoardroomLockedLiquidityTerms,
+  type BoardroomProtocolLiquidityTerms,
   type BondMarketTerms,
   type BoardroomDutchAuctionTerms,
   type BoardroomFixedPriceSaleTerms,
@@ -121,11 +117,10 @@ const sale = "0x0000000000000000000000000000000000000a1e" as Address;
 const auction = "0x0000000000000000000000000000000000000a0c" as Address;
 const airdrop = "0x0000000000000000000000000000000000000a1d" as Address;
 const curve = "0x0000000000000000000000000000000000000c0e" as Address;
-const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
-const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
-const locker = "0x00000000000000000000000000000000000010cd" as Address;
+const liquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
+const liquidityVault = "0x00000000000000000000000000000000000010cd" as Address;
 const boardroomController = "0x000000000000000000000000000000000000c011" as Address;
-const pool = "0x0000000000000000000000000000000000000a00" as Address;
+const poolId = "0x5555555555555555555555555555555555555555555555555555555555555555" as Hex;
 const wrappedNative = "0x00000000000000000000000000000000000000ee" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 const expectedFacetSetHash = "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
@@ -214,15 +209,16 @@ const airdropGrantTerms = {
   salt,
 } satisfies MerkleAirdropGrantClaimTerms;
 
-const lockedLiquidityTerms = {
+const protocolLiquidityTerms = {
   quoteToken: paymentToken,
   shareAmountDesired: 1000n,
   quoteAmountDesired: 2000n,
   shareAmountMin: 900n,
   quoteAmountMin: 1900n,
+  sqrtPriceX96: 1n << 96n,
   deadline: 12345n,
   salt,
-} satisfies BoardroomLockedLiquidityTerms;
+} satisfies BoardroomProtocolLiquidityTerms;
 
 const bondTerms = {
   quoteToken: paymentToken,
@@ -332,8 +328,8 @@ describe("SDK action and query helpers", () => {
       bondingCurve: curve,
       primaryMarketQuoteAsset: paymentToken,
       liquidityStatus: 1,
-      liquidityLocker: locker,
-      liquidityPool: pool,
+      liquidityVault,
+      liquidityPoolId: poolId,
       liquidityQuoteAsset: paymentToken,
       proposer: issuer,
       delay: 86_400n,
@@ -367,10 +363,10 @@ describe("SDK action and query helpers", () => {
       forfeitureWindowEndsAt: 0n,
       saleStatus: 0,
       airdropStatus: 0,
-      lockedLiquidityFactory,
+      liquidityFactory,
       quoteToken: paymentToken,
-      locker,
-      pool: "0x0000000000000000000000000000000000000a00",
+      liquidityVault,
+      liquidityPoolId: poolId,
       migrationSupply: 500n,
       remainingSaleShares: 800n,
       outstandingCurveShareLiability: 200n,
@@ -393,11 +389,22 @@ describe("SDK action and query helpers", () => {
       unrecoveredQuote: 0n,
       forfeitedQuote: 0n,
       canMigrate: false,
-      router: "0x0000000000000000000000000000000000000a0a",
       tokenA: shareToken,
       tokenB: paymentToken,
+      poolManager: other,
+      protocolFeeRecipient: issuer,
+      currency0: paymentToken,
+      currency1: shareToken,
+      hook: assetPolicy,
+      poolId,
+      positionSalt: salt,
+      tickLower: -887_220,
+      tickUpper: 887_220,
+      poolFee: 3_000,
+      tickSpacing: 60,
       liquidityState: 1,
-      lockedLiquidity: 777n,
+      positionLiquidity: 777n,
+      totalSupply: 700n,
     });
 
     await expect(readFactoryState(client, factory)).resolves.toMatchObject({
@@ -447,7 +454,8 @@ describe("SDK action and query helpers", () => {
       activeObligationCount: 4n,
       primaryMarketMode: 2,
       liquidityStatus: 1,
-      liquidityLocker: locker,
+      liquidityVault,
+      liquidityPoolId: poolId,
     });
     await expect(readFixedPriceSaleState(client, sale)).resolves.toMatchObject({
       address: sale,
@@ -495,14 +503,15 @@ describe("SDK action and query helpers", () => {
       canMigrate: false,
       closed: false,
     });
-    await expect(readLockedLiquidityState(client, locker)).resolves.toMatchObject({
-      address: locker,
+    await expect(readProtocolLiquidityVaultState(client, liquidityVault)).resolves.toMatchObject({
+      address: liquidityVault,
       boardroom,
       tokenA: shareToken,
       tokenB: paymentToken,
-      pool: "0x0000000000000000000000000000000000000a00",
+      poolId,
       liquidityState: 1,
-      lockedLiquidity: 777n,
+      positionLiquidity: 777n,
+      totalSupply: 700n,
     });
   });
 
@@ -972,12 +981,13 @@ describe("SDK action and query helpers", () => {
       expectedFacetSetHash,
       minShareLiquidity: 1n,
       minQuoteLiquidity: 2n,
+      sqrtPriceX96: 1n << 96n,
       deadline: 12345n,
     });
     expect(migrate.address).toBe(curve);
     expect(migrate.abi).toBe(migratingBondingCurveAbi);
     expect(migrate.functionName).toBe("migrate");
-    expect(migrate.args).toEqual([expectedFacetSetHash, 1n, 2n, 12345n]);
+    expect(migrate.args).toEqual([expectedFacetSetHash, 1n, 2n, 1n << 96n, 12345n]);
     expect(buildMigratingBondingCurveExpireTransaction(curve).functionName).toBe("expire");
 
     const finalizeUnwind = buildMigratingBondingCurveFinalizeUnwindTransaction(curve, expectedFacetSetHash);
@@ -1080,14 +1090,14 @@ describe("SDK action and query helpers", () => {
     });
   });
 
-  test("builds Boardroom locked-liquidity transaction inputs", () => {
-    const batch = buildBoardroomLockedLiquidityBatch({
+  test("builds Boardroom protocol-liquidity transaction inputs", () => {
+    const batch = buildBoardroomProtocolLiquidityBatch({
       boardroom,
       expectedFacetSetHash,
-      factory: lockedLiquidityFactory,
+      factory: liquidityFactory,
       shareToken,
-      terms: lockedLiquidityTerms,
-      policy: lockedLiquidityFactory,
+      terms: protocolLiquidityTerms,
+      policy: liquidityFactory,
       assetPolicy,
     });
 
@@ -1103,7 +1113,7 @@ describe("SDK action and query helpers", () => {
       encodeFunctionData({
         abi: erc20Abi,
         functionName: "approve",
-        args: [lockedLiquidityFactory, lockedLiquidityTerms.shareAmountDesired],
+        args: [liquidityFactory, protocolLiquidityTerms.shareAmountDesired],
       }),
     );
     expect(calls[1]).toMatchObject({ policy: assetPolicy, target: paymentToken, value: 0n });
@@ -1111,14 +1121,14 @@ describe("SDK action and query helpers", () => {
       encodeFunctionData({
         abi: erc20Abi,
         functionName: "approve",
-        args: [lockedLiquidityFactory, lockedLiquidityTerms.quoteAmountDesired],
+        args: [liquidityFactory, protocolLiquidityTerms.quoteAmountDesired],
       }),
     );
-    expect(calls[2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory, value: 0n });
+    expect(calls[2]).toMatchObject({ policy: liquidityFactory, target: liquidityFactory, value: 0n });
     expect(calls[2]?.data).toBe(
       encodeFunctionData({
-        abi: lockedLiquidityFactoryAbi,
-        functionName: "createLockedLiquidity",
+        abi: pledgeV4LiquidityFactoryAbi,
+        functionName: "createProtocolLiquidity",
         args: [
           {
             tokenA: shareToken,
@@ -1127,6 +1137,7 @@ describe("SDK action and query helpers", () => {
             amountBDesired: 2000n,
             amountAMin: 900n,
             amountBMin: 1900n,
+            sqrtPriceX96: 1n << 96n,
             deadline: 12345n,
             salt,
           },
@@ -1134,23 +1145,23 @@ describe("SDK action and query helpers", () => {
       }),
     );
 
-    const add = buildBoardroomLockedLiquidityAddBatch({
+    const add = buildBoardroomProtocolLiquidityAddBatch({
       boardroom,
       expectedFacetSetHash,
-      factory: lockedLiquidityFactory,
+      factory: liquidityFactory,
       shareToken,
       terms: {
-        ...lockedLiquidityTerms,
+        ...protocolLiquidityTerms,
         shareTokenSide: "tokenA",
       },
-      policy: lockedLiquidityFactory,
+      policy: liquidityFactory,
       assetPolicy,
     });
     expect(add.args[1]).toHaveLength(3);
-    expect(add.args[1][2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(add.args[1][2]).toMatchObject({ policy: liquidityFactory, target: liquidityFactory });
     expect(add.args[1][2]?.data).toBe(encodeFunctionData({
-      abi: lockedLiquidityFactoryAbi,
-      functionName: "addLockedLiquidity",
+      abi: pledgeV4LiquidityFactoryAbi,
+      functionName: "addProtocolLiquidity",
       args: [{
         tokenA: shareToken,
         tokenB: paymentToken,
@@ -1162,35 +1173,35 @@ describe("SDK action and query helpers", () => {
       }],
     }));
 
-    const remove = buildBoardroomLockedLiquidityRemoveAction({
+    const remove = buildBoardroomProtocolLiquidityRemoveAction({
       boardroom,
       expectedFacetSetHash,
-      policy: lockedLiquidityFactory,
-      factory: lockedLiquidityFactory,
+      policy: liquidityFactory,
+      factory: liquidityFactory,
       liquidity: 5n,
       amountAMin: 1n,
       amountBMin: 2n,
       deadline: 12345n,
     });
-    expect(remove.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(remove.args[1]).toMatchObject({ policy: liquidityFactory, target: liquidityFactory });
     expect(remove.args[1].data).toBe(encodeFunctionData({
-      abi: lockedLiquidityFactoryAbi,
-      functionName: "removeLockedLiquidity",
+      abi: pledgeV4LiquidityFactoryAbi,
+      functionName: "removeProtocolLiquidity",
       args: [{ liquidity: 5n, amountAMin: 1n, amountBMin: 2n, deadline: 12345n }],
     }));
 
-    const close = buildBoardroomLockedLiquidityCloseAction({
+    const close = buildBoardroomProtocolLiquidityCloseAction({
       boardroom,
       expectedFacetSetHash,
-      policy: lockedLiquidityFactory,
-      factory: lockedLiquidityFactory,
+      policy: liquidityFactory,
+      factory: liquidityFactory,
     });
-    expect(close.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(close.args[1]).toMatchObject({ policy: liquidityFactory, target: liquidityFactory });
     expect(close.args[1].data).toBe(
-      encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+      encodeFunctionData({ abi: pledgeV4LiquidityFactoryAbi, functionName: "closeProtocolLiquidity" }),
     );
 
-    const exit = buildBoardroomLockedLiquidityExitTransaction({
+    const exit = buildBoardroomProtocolLiquidityExitTransaction({
       boardroom,
       expectedFacetSetHash,
       amountAMin: 1n,
@@ -1202,17 +1213,17 @@ describe("SDK action and query helpers", () => {
     expect(exit.functionName).toBe("exitProtocolLiquidity");
     expect(exit.args).toEqual([expectedFacetSetHash, 1n, 2n, 12345n]);
 
-    const claim = buildBoardroomLockedLiquidityFeeClaimAction({
+    const claim = buildBoardroomProtocolLiquidityFeeClaimAction({
       boardroom,
       expectedFacetSetHash,
-      policy: lockedLiquidityFactory,
-      locker,
+      policy: liquidityFactory,
+      vault: liquidityVault,
     });
     expect(claim.address).toBe(boardroom);
     expect(claim.abi).toBe(boardroomAbi);
     expect(claim.functionName).toBe("execute");
-    expect(claim.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: locker, value: 0n });
-    expect(claim.args[1].data).toBe(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
+    expect(claim.args[1]).toMatchObject({ policy: liquidityFactory, target: liquidityVault, value: 0n });
+    expect(claim.args[1].data).toBe(encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }));
   });
 
   test("requires assetPolicy for Boardroom approval batches", () => {
@@ -1263,29 +1274,28 @@ describe("SDK action and query helpers", () => {
     ).toThrow(error);
 
     expect(() =>
-      buildBoardroomLockedLiquidityBatch({
+      buildBoardroomProtocolLiquidityBatch({
         boardroom,
         expectedFacetSetHash,
-        factory: lockedLiquidityFactory,
+        factory: liquidityFactory,
         shareToken,
-        terms: lockedLiquidityTerms,
-        policy: lockedLiquidityFactory,
+        terms: protocolLiquidityTerms,
+        policy: liquidityFactory,
       }),
     ).toThrow(error);
   });
 
-  test("predicts AMM pool and locked-liquidity addresses", async () => {
-    const pool = "0x0000000000000000000000000000000000000a00" as Address;
+  test("reads canonical PoolId and predicts protocol-liquidity vault addresses", async () => {
     const client = mockReadClient({
-      predictPoolAddress: pool,
-      predictLockedLiquidityAddress: locker,
+      poolIdFor: poolId,
+      predictLiquidityVaultAddress: liquidityVault,
       predictDutchAuctionAddress: auction,
       predictMigratingBondingCurveAddress: curve,
       predictMerkleAirdropAddress: airdrop,
     });
 
-    await expect(predictAmmPoolAddress(client, { factory: ammFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(pool);
-    await expect(predictLockedLiquidityAddress(client, { factory: lockedLiquidityFactory, boardroom, salt })).resolves.toBe(locker);
+    await expect(readProtocolLiquidityPoolId(client, { factory: liquidityFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(poolId);
+    await expect(predictProtocolLiquidityVaultAddress(client, { factory: liquidityFactory, boardroom, salt })).resolves.toBe(liquidityVault);
     await expect(predictDutchAuctionAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(auction);
     await expect(predictMigratingBondingCurveAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(curve);
     await expect(predictMerkleAirdropAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(airdrop);
@@ -1320,7 +1330,7 @@ describe("SDK action and query helpers", () => {
     expect(heldWithClosed.find((grant) => grant.tokenId === 1n)?.lastHolder).toBe(holder);
   });
 
-  test("discovers boardrooms, distributions, lockers, and pools from logs", async () => {
+  test("discovers boardrooms, distributions, and canonical protocol liquidity from logs", async () => {
     const client = mockLogClient({
       BoardroomCreated: [
         boardroomCreatedLog(20n, 0, boardroom, issuer),
@@ -1335,12 +1345,8 @@ describe("SDK action and query helpers", () => {
         distributionCreatedLog(24n, 0, other, holder, 1n),
       ],
       ProtocolLiquidityCreated: [
-        lockedLiquidityCreatedLog(25n, 0, locker, boardroom),
-        lockedLiquidityCreatedLog(26n, 0, other, holder),
-      ],
-      PoolCreated: [
-        poolCreatedLog(19n, 0, pool, shareToken, paymentToken),
-        poolCreatedLog(27n, 0, other, grantToken, paymentToken),
+        protocolLiquidityCreatedLog(25n, 0, liquidityVault, boardroom),
+        protocolLiquidityCreatedLog(26n, 0, other, holder),
       ],
     });
 
@@ -1353,13 +1359,9 @@ describe("SDK action and query helpers", () => {
     expect(distributions.items.map((item) => item.kind)).toEqual(["dutch-auction", "merkle-airdrop", "migrating-bonding-curve", "fixed-price-sale"]);
     expect(distributions.items.map((item) => item.distribution)).toEqual([auction, airdrop, curve, sale]);
 
-    const lockers = await discoverBoardroomLockedLiquidity(client, { factory: lockedLiquidityFactory, boardroom });
-    expect(lockers.items).toHaveLength(1);
-    expect(lockers.items[0]).toMatchObject({ locker, boardroom, pool });
-
-    const pools = await discoverPools(client, { factory: ammFactory, token: shareToken });
-    expect(pools.items).toHaveLength(1);
-    expect(pools.items[0]).toMatchObject({ pool, token0: shareToken, token1: paymentToken });
+    const vaults = await discoverBoardroomProtocolLiquidity(client, { factory: liquidityFactory, boardroom });
+    expect(vaults.items).toHaveLength(1);
+    expect(vaults.items[0]).toMatchObject({ vault: liquidityVault, boardroom, poolId });
   });
 
   test("returns partial discovery results when a chunked log range fails", async () => {
@@ -1427,28 +1429,22 @@ describe("SDK action and query helpers", () => {
     expect(decoded?.args).toEqual([10n, 0n]);
     expect(decoded?.message).toBe("Invalid creation fee payment: expected 10, received 0.");
 
-    const routerData = encodeErrorResult({
-      abi: ammRouterAbi,
-      errorName: "TransferAmountMismatch",
-      args: [paymentToken, 10n, 9n],
+    const factoryData = encodeErrorResult({
+      abi: pledgeV4LiquidityFactoryAbi,
+      errorName: "UnsafeLiquidityMinimums",
+      args: [10n, 11n, 20n, 21n],
     });
-    expect(decodeKnownPledgeCashError(routerData)).toMatchObject({
-      name: "TransferAmountMismatch",
-      args: [paymentToken, 10n, 9n],
-    });
-
-    const poolData = encodeErrorResult({
-      abi: ammPoolAbi,
-      errorName: "TooManySamplePoints",
-      args: [33n, 32n],
-    });
-    expect(decodeKnownPledgeCashError(poolData)).toMatchObject({
-      name: "TooManySamplePoints",
-      args: [33n, 32n],
+    expect(decodeKnownPledgeCashError(factoryData)).toMatchObject({
+      name: "UnsafeLiquidityMinimums",
+      args: [10n, 11n, 20n, 21n],
     });
 
-    const feeVaultData = encodeErrorResult({ abi: poolFeesAbi, errorName: "OnlyPool" });
-    expect(decodeKnownPledgeCashError(feeVaultData)).toMatchObject({ name: "OnlyPool", args: [] });
+    const vaultData = encodeErrorResult({
+      abi: pledgeV4LiquidityVaultAbi,
+      errorName: "PositionNotEmpty",
+      args: [33n],
+    });
+    expect(decodeKnownPledgeCashError(vaultData)).toMatchObject({ name: "PositionNotEmpty", args: [33n] });
 
     const curveData = encodeErrorResult({
       abi: migratingBondingCurveAbi,
@@ -1573,10 +1569,10 @@ function distributionCreatedLog(
   };
 }
 
-function lockedLiquidityCreatedLog(
+function protocolLiquidityCreatedLog(
   blockNumber: bigint,
   logIndex: number,
-  discoveredLocker: Address,
+  discoveredVault: Address,
   discoveredBoardroom: Address,
 ) {
   return {
@@ -1584,29 +1580,16 @@ function lockedLiquidityCreatedLog(
     logIndex,
     transactionHash: `0x${(blockNumber + 200n).toString(16).padStart(64, "0")}` as Hex,
     args: {
-      locker: discoveredLocker,
+      vault: discoveredVault,
       boardroom: discoveredBoardroom,
-      pool,
-      tokenA: shareToken,
-      tokenB: paymentToken,
+      poolId,
+      quoteAsset: paymentToken,
       amountA: 1000n,
       amountB: 2000n,
       liquidity: 3000n,
+      sqrtPriceX96: 1n << 96n,
       salt,
-    },
-  };
-}
-
-function poolCreatedLog(blockNumber: bigint, logIndex: number, discoveredPool: Address, token0: Address, token1: Address) {
-  return {
-    blockNumber,
-    logIndex,
-    transactionHash: `0x${(blockNumber + 300n).toString(16).padStart(64, "0")}` as Hex,
-    args: {
-      pool: discoveredPool,
-      token0,
-      token1,
-      poolCount: 1n,
+      curve,
     },
   };
 }

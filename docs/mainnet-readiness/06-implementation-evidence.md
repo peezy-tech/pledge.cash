@@ -28,8 +28,7 @@ duplicating volatile hashes, byte sizes, gas numbers, or test counts.
   A storage-version activation pauses ordinary writes on each Boardroom until
   anyone runs its release-pinned atomic migration.
 - Views remain backward-safe or explicitly expose migration state.
-- Canonical grants, distributions, rewards, bonds, curves, AMM, and
-  locked-liquidity callbacks read and echo the current hash in the same
+- Canonical grants, distributions, rewards, bonds, curves, and P4LP-liquidity callbacks read and echo the current hash in the same
   transaction.
 - Registry ownership is handed to protocol governance after bootstrap. That
   owner remains ultimately authoritative over Boardroom assets and redemption
@@ -45,7 +44,7 @@ The current work has recorded:
 - the complete Boardroom behavior and controller suites running through the
   canonical kernel/facets;
 - callback-driven module integration across grants, distributions, rewards,
-  bonds, curves, AMM, and locked liquidity;
+  bonds, curves, Uniswap v4, and P4LP liquidity;
 - six stateful wind-down/redemption properties at 256 runs and 128,000 calls
   each, including hostile payout retry;
 - Foundry v1.7.1 runtime measurements below the 8 KiB kernel and 20 KiB
@@ -65,7 +64,7 @@ final exact-head release ledger.
 
 - full contract suite on the final source tree;
 - clean SDK regeneration, typecheck, and SDK tests;
-- web, Sentinel, and x402 integration suites using the canonical release
+- web and Sentinel integration suites using the canonical release
   identity and migration gates;
 - fresh-Anvil deterministic deployment, idempotence, standalone verifier,
   Boardroom lifecycle, seed, and service integrations on the final reviewed

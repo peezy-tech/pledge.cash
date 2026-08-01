@@ -213,26 +213,28 @@ primary issuance and liquidity seeding.
 
 ## Protocol-owned liquidity
 
-Each Boardroom has one permanent quote-asset identity, at most one canonical AMM pool, and at most one canonical locker.
-There is no replacement pair. State is explicit:
+Each Boardroom has one permanent quote-asset identity, at most one canonical Uniswap v4 PoolId, and at most one
+canonical P4LP vault. There is no replacement pair. Boardroom position state is explicit:
 
 - `Unconfigured`;
 - `Active`;
 - `Closed`.
 
 Before launch, the owner can configure or add liquidity immediately through policy-checked calls. After launch while
-Active, partial or full removal requires a delayed controller operation. Removed assets always return to the Boardroom.
-A zero LP balance does not close the singleton: closure is explicit, empty-only, reservation-free, and irreversible.
+Active, removal requires a delayed controller operation and can burn only protocol claims already held by the vault.
+Externally held P4LP is never removable by Boardroom governance. Removed assets always return to the Boardroom. A zero
+position does not close the singleton: closure is explicit, empty-only, reservation-free, and irreversible.
 
-During `WindingDown`, full exit is permissionless. If hostile underlying tokens prevent exact removal, the LP token can
-be returned to the Boardroom as the liveness fallback. `Snapshotting` and `RedemptionsOpen` prohibit liquidity
-mutation. Curve migration must consume the singleton reservation and create the first canonical position atomically.
-Releasing a reservation never clears the quote identity.
+During `WindingDown`, full exit is permissionless. If hostile underlying tokens prevent exact removal, the vault enters
+Claims without calling either token, transfers protocol-held P4LP to the Boardroom, and registers P4LP for redemption.
+External claim holders can redeem underlying independently. `Snapshotting` and `RedemptionsOpen` prohibit active
+liquidity mutation. Curve migration must consume the singleton vault/PoolId reservation and create the first canonical
+position atomically. Releasing a reservation never clears the quote identity.
 
 ## Curve terminal policy
 
 The immutable release values are a 90-day maximum lifetime, seven-day migration grace, 30-day sell-only settlement
-grace, 30-day quote-quarantine delay, seven-day forfeiture-veto window, and 50-basis-point maximum AMM price deviation.
+grace, 30-day quote-quarantine delay, seven-day forfeiture-veto window, and 50-basis-point maximum v4 initialization-price deviation.
 Cancellation, expiry, and failed migration use a permissionless sell-only unwind in which fungible sell rights follow
 the shares. Permissionless migration derives shares from quote allocated first at the terminal marginal price.
 

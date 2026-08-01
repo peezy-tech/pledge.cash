@@ -99,12 +99,12 @@ export type WatcherBoardroom = {
   readonly bondingCurveSettlementReason: number | null;
   readonly bondingCurvePhaseEndsAt: bigint;
   readonly liquidityStatus: number;
-  readonly liquidityLocker: Lowercase<Address> | null;
-  readonly liquidityPool: Lowercase<Address> | null;
+  readonly liquidityVault: Lowercase<Address> | null;
+  readonly liquidityPoolId: Lowercase<Hex> | null;
   readonly liquidityQuoteAsset: Lowercase<Address> | null;
   readonly liquidityReservationCurve: Lowercase<Address> | null;
-  readonly liquidityReservationExpectedLocker: Lowercase<Address> | null;
-  readonly liquidityReservationExpectedPool: Lowercase<Address> | null;
+  readonly liquidityReservationExpectedVault: Lowercase<Address> | null;
+  readonly liquidityReservationExpectedPoolId: Lowercase<Hex> | null;
   readonly liquidityReservationPairKey: Lowercase<Hex> | null;
   readonly liquidityReservationSalt: Lowercase<Hex> | null;
   readonly liquidityReservationExpiresAt: bigint;
@@ -964,13 +964,13 @@ async function fetchMarketEvents(
         boardrooms: boardroomChunk.map((item) => ({
           boardroom: item.address,
           bondingCurve: item.bondingCurve,
-          liquidityLocker: item.liquidityLocker,
-          liquidityReservationExpectedLocker: item.liquidityReservationExpectedLocker
+          liquidityVault: item.liquidityVault,
+          liquidityReservationExpectedVault: item.liquidityReservationExpectedVault
         })),
         fromBlock: window.fromBlock,
-        ...(deployment.lockedLiquidityFactory === undefined
+        ...(deployment.pledgeV4LiquidityFactory === undefined
           ? {}
-          : { lockedLiquidityFactory: deployment.lockedLiquidityFactory }),
+          : { pledgeV4LiquidityFactory: deployment.pledgeV4LiquidityFactory }),
         toBlock: window.toBlock
       }))
     );
@@ -1540,12 +1540,12 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         bondingCurveSettlementReason: row.bondingCurveSettlementReason,
         bondingCurvePhaseEndsAt: row.bondingCurvePhaseEndsAt,
         liquidityStatus: row.liquidityStatus,
-        liquidityLocker: row.liquidityLocker as Lowercase<Address> | null,
-        liquidityPool: row.liquidityPool as Lowercase<Address> | null,
+        liquidityVault: row.liquidityVault as Lowercase<Address> | null,
+        liquidityPoolId: row.liquidityPoolId as Lowercase<Hex> | null,
         liquidityQuoteAsset: row.liquidityQuoteAsset as Lowercase<Address> | null,
         liquidityReservationCurve: row.liquidityReservationCurve as Lowercase<Address> | null,
-        liquidityReservationExpectedLocker: row.liquidityReservationExpectedLocker as Lowercase<Address> | null,
-        liquidityReservationExpectedPool: row.liquidityReservationExpectedPool as Lowercase<Address> | null,
+        liquidityReservationExpectedVault: row.liquidityReservationExpectedVault as Lowercase<Address> | null,
+        liquidityReservationExpectedPoolId: row.liquidityReservationExpectedPoolId as Lowercase<Hex> | null,
         liquidityReservationPairKey: row.liquidityReservationPairKey as Lowercase<Hex> | null,
         liquidityReservationSalt: row.liquidityReservationSalt as Lowercase<Hex> | null,
         liquidityReservationExpiresAt: row.liquidityReservationExpiresAt
@@ -1727,8 +1727,8 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
       if (!current) throw new Error(`Unknown Boardroom market topology ${input.boardroom}`);
 
       assertTopologyAddress(current.bondingCurve, input.bondingCurve, "bonding curve");
-      assertTopologyAddress(current.liquidityLocker, input.liquidityLocker, "liquidity locker");
-      assertTopologyAddress(current.liquidityPool, input.liquidityPool, "liquidity pool");
+      assertTopologyAddress(current.liquidityVault, input.liquidityVault, "protocol-liquidity vault");
+      assertTopologyHex(current.liquidityPoolId, input.liquidityPoolId, "Uniswap v4 PoolId");
       assertTopologyAddress(current.primaryMarketQuoteAsset, input.primaryMarketQuoteAsset, "primary-market quote asset");
       assertTopologyAddress(current.liquidityQuoteAsset, input.liquidityQuoteAsset, "liquidity quote asset");
       const nextQuote = input.primaryMarketQuoteAsset ?? input.liquidityQuoteAsset;
@@ -1744,14 +1744,14 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           "liquidity reservation curve"
         );
         assertTopologyAddress(
-          current.liquidityReservationExpectedLocker,
-          input.liquidityReservationExpectedLocker,
-          "liquidity reservation locker"
+          current.liquidityReservationExpectedVault,
+          input.liquidityReservationExpectedVault,
+          "liquidity reservation vault"
         );
-        assertTopologyAddress(
-          current.liquidityReservationExpectedPool,
-          input.liquidityReservationExpectedPool,
-          "liquidity reservation pool"
+        assertTopologyHex(
+          current.liquidityReservationExpectedPoolId,
+          input.liquidityReservationExpectedPoolId,
+          "liquidity reservation PoolId"
         );
         assertTopologyHex(
           current.liquidityReservationPairKey,
@@ -1770,12 +1770,12 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         bondingCurvePhase: input.bondingCurvePhase,
         bondingCurvePhaseEndsAt: input.bondingCurvePhaseEndsAt,
         bondingCurveSettlementReason: input.bondingCurveSettlementReason,
-        liquidityLocker: input.liquidityLocker,
-        liquidityPool: input.liquidityPool,
+        liquidityVault: input.liquidityVault,
+        liquidityPoolId: input.liquidityPoolId,
         liquidityQuoteAsset: input.liquidityQuoteAsset,
         liquidityReservationCurve: input.liquidityReservationCurve,
-        liquidityReservationExpectedLocker: input.liquidityReservationExpectedLocker,
-        liquidityReservationExpectedPool: input.liquidityReservationExpectedPool,
+        liquidityReservationExpectedVault: input.liquidityReservationExpectedVault,
+        liquidityReservationExpectedPoolId: input.liquidityReservationExpectedPoolId,
         liquidityReservationExpiresAt: input.liquidityReservationExpiresAt,
         liquidityReservationPairKey: input.liquidityReservationPairKey,
         liquidityReservationSalt: input.liquidityReservationSalt,
@@ -1787,8 +1787,8 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
       if (input.clearLiquidityReservation) {
         Object.assign(set, {
           liquidityReservationCurve: null,
-          liquidityReservationExpectedLocker: null,
-          liquidityReservationExpectedPool: null,
+          liquidityReservationExpectedVault: null,
+          liquidityReservationExpectedPoolId: null,
           liquidityReservationExpiresAt: 0n,
           liquidityReservationPairKey: null,
           liquidityReservationSalt: null
@@ -2046,12 +2046,12 @@ function mergeBoardrooms(
       bondingCurveSettlementReason: null,
       bondingCurvePhaseEndsAt: 0n,
       liquidityStatus: 0,
-      liquidityLocker: null,
-      liquidityPool: null,
+      liquidityVault: null,
+      liquidityPoolId: null,
       liquidityQuoteAsset: null,
       liquidityReservationCurve: null,
-      liquidityReservationExpectedLocker: null,
-      liquidityReservationExpectedPool: null,
+      liquidityReservationExpectedVault: null,
+      liquidityReservationExpectedPoolId: null,
       liquidityReservationPairKey: null,
       liquidityReservationSalt: null,
       liquidityReservationExpiresAt: 0n

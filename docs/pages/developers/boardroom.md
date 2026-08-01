@@ -27,8 +27,8 @@ Before enabling an action:
   configuration hash;
 - read scalar obligation counts, per-kind counts, canonical membership, permanent policy provenance, and bounded
   factory/event pages;
-- read primary-market mode, permanent curve and quote identities, global curve liability, liquidity state, locker,
-  pool, and reservation;
+- read primary-market mode, permanent curve and quote identities, global curve liability, liquidity state, P4LP vault,
+  PoolId, and reservation;
 - during Snapshotting, read the frozen asset count, cursor, per-asset status, and frozen redemption supply.
 
 A current-state read cannot prove complete lifetime history when log or pagination reads are incomplete. Surface partial
@@ -55,8 +55,10 @@ closed.
 ## Wind-down and snapshotting
 
 Treat `Active -> WindingDown -> Snapshotting -> RedemptionsOpen` as monotonic. Starting wind-down advances the
-Boardroom epoch in O(1). Redemptions require zero active obligations, a terminal reward pool, closed singleton
-liquidity, completed treasury-share handling, and the elapsed wind-down delay.
+Boardroom epoch in O(1). Redemptions require zero active obligations, a terminal reward pool, resolved singleton
+liquidity, completed treasury-share handling, and the elapsed wind-down delay. Exact v4 exit can empty the vault;
+hostile-token fallback instead registers protocol-held P4LP and closes the Boardroom obligation while the vault remains
+in Claims for independent holder redemption.
 
 `beginSnapshot` freezes registry length and redemption supply. Anyone may
 process bounded pages with `snapshotAssets(expectedFacetSetHash, maximum)`;

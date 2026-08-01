@@ -2,18 +2,12 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
-import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
-
-interface IReservationAmmFactory {
-    function initialLiquidityReservationFor(address tokenA, address tokenB)
-        external
-        view
-        returns (address initializer, address recipient, address reservationOwner, address manager);
-}
+import {PledgeV4Hook} from "../../src/uniswap/PledgeV4Hook.sol";
+import {PledgeV4LiquidityFactory} from "../../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {V4PoolManagerMock} from "../helpers/V4PoolManagerMock.sol";
 
 contract ReservationPolicyRegistry {
     mapping(address => bool) public isModulePolicy;
@@ -44,8 +38,8 @@ contract ReservationBoardroom {
 
     address public permanentQuoteAsset;
     address public pendingCurve;
-    address public pendingLocker;
-    bytes32 public pendingPairKey;
+    address public pendingVault;
+    bytes32 public pendingPoolId;
     bytes32 public pendingSalt;
 
     error PrimaryMarketAlreadyCommitted();
@@ -62,10 +56,10 @@ contract ReservationBoardroom {
 
     function precommitProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64
     ) external {
@@ -75,34 +69,29 @@ contract ReservationBoardroom {
         }
         permanentQuoteAsset = quoteAsset;
         pendingCurve = curve;
-        pendingLocker = expectedLocker;
-        pendingPairKey = pairKey;
+        pendingVault = expectedVault;
+        pendingPoolId = expectedPoolId;
         pendingSalt = salt;
     }
 
     function releaseProtocolLiquidityReservation(
         bytes32 expectedFacetSetHash,
         address curve,
-        bytes32 pairKey,
+        bytes32 poolId,
         bytes32 salt
     ) external {
         require(expectedFacetSetHash == facetSetHash);
-        if (curve != pendingCurve || pairKey != pendingPairKey || salt != pendingSalt) revert ReservationMismatch();
+        if (curve != pendingCurve || poolId != pendingPoolId || salt != pendingSalt) revert ReservationMismatch();
         pendingCurve = address(0);
-        pendingLocker = address(0);
-        pendingPairKey = bytes32(0);
+        pendingVault = address(0);
+        pendingPoolId = bytes32(0);
         pendingSalt = bytes32(0);
     }
 
-    function activateProtocolLiquidity(
-        bytes32 expectedFacetSetHash,
-        address,
-        address,
-        address,
-        address,
-        bytes32,
-        bytes32
-    ) external pure {
+    function activateProtocolLiquidity(bytes32 expectedFacetSetHash, address, bytes32, address, address, bytes32)
+        external
+        pure
+    {
         require(expectedFacetSetHash == facetSetHash);
     }
 
@@ -138,7 +127,7 @@ contract ReservationDistribution {
         return type(uint64).max;
     }
 
-    function release(LockedLiquidityFactory liquidityFactory) external {
+    function release(PledgeV4LiquidityFactory liquidityFactory) external {
         liquidityFactory.releaseMigrationReservation(
             ReservationBoardroom(boardroom).facetSetHash(), boardroom, shareToken, quoteToken, migrationSalt
         );
@@ -147,7 +136,7 @@ contract ReservationDistribution {
 
 contract ReservationDistributionFactory {
     function createAndReserve(
-        LockedLiquidityFactory liquidityFactory,
+        PledgeV4LiquidityFactory liquidityFactory,
         address boardroom,
         address shareToken,
         address quoteToken,
@@ -171,10 +160,11 @@ contract ReservationQuote {
     }
 }
 
+contract ReservationFeeRecipient {}
+
 contract MigrationReservationBoundaryTest is Test {
-    AmmFactory internal ammFactory;
-    AmmRouter internal router;
-    LockedLiquidityFactory internal liquidityFactory;
+    V4PoolManagerMock internal poolManager;
+    PledgeV4LiquidityFactory internal liquidityFactory;
     ReservationPolicyRegistry internal registry;
     ReservationBoardroomFactory internal boardroomFactory;
     ReservationBoardroom internal boardroom;
@@ -182,13 +172,13 @@ contract MigrationReservationBoundaryTest is Test {
     address internal shareToken;
 
     function setUp() public {
-        WETH wrappedNative = new WETH();
         boardroomFactory = new ReservationBoardroomFactory();
-        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
-        router = new AmmRouter(address(ammFactory), address(wrappedNative));
-        liquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
-        ammFactory.setLiquidityRouter(address(router));
-        ammFactory.setReservationManager(address(liquidityFactory));
+        poolManager = new V4PoolManagerMock();
+        ReservationFeeRecipient feeRecipient = new ReservationFeeRecipient();
+        liquidityFactory = new PledgeV4LiquidityFactory(
+            IPoolManager(address(poolManager)), address(boardroomFactory), address(feeRecipient), address(this)
+        );
+        liquidityFactory.deployHook(_mineHookSalt());
 
         registry = new ReservationPolicyRegistry();
         boardroom = new ReservationBoardroom(address(registry));
@@ -206,18 +196,17 @@ contract MigrationReservationBoundaryTest is Test {
         ReservationDistribution first = _reserve(firstQuote, firstSalt);
 
         vm.expectRevert(
-            abi.encodeWithSelector(LockedLiquidityFactory.PositionAlreadyConfigured.selector, address(boardroom))
+            abi.encodeWithSelector(PledgeV4LiquidityFactory.PositionAlreadyConfigured.selector, address(boardroom))
         );
         _reserve(secondQuote, keccak256("different-pair-and-salt"));
 
-        (address curve, address expectedLocker,, address reservedShareToken, address quoteAsset,, bytes32 salt) =
+        (address curve, address expectedVault,, address reservedShareToken, address quoteAsset, bytes32 salt) =
             liquidityFactory.migrationReservationOf(address(boardroom));
         assertEq(curve, address(first));
-        assertNotEq(expectedLocker, address(0));
+        assertNotEq(expectedVault, address(0));
         assertEq(reservedShareToken, shareToken);
         assertEq(quoteAsset, firstQuote);
         assertEq(salt, firstSalt);
-        _assertAmmReservation(firstQuote, address(first), expectedLocker, true);
     }
 
     function testReleaseClearsOnlyPendingReservationAndPreservesPermanentQuoteTombstone() public {
@@ -227,11 +216,10 @@ contract MigrationReservationBoundaryTest is Test {
         boardroom.setIssuedDistribution(address(first), true);
 
         first.release(liquidityFactory);
-        (address curve,,,,,,) = liquidityFactory.migrationReservationOf(address(boardroom));
+        (address curve,,,,,) = liquidityFactory.migrationReservationOf(address(boardroom));
         assertEq(curve, address(0));
         assertEq(boardroom.permanentQuoteAsset(), quote);
         assertEq(boardroom.pendingCurve(), address(0));
-        _assertAmmReservation(quote, address(0), address(0), false);
 
         vm.expectRevert(ReservationBoardroom.PrimaryMarketAlreadyCommitted.selector);
         _reserve(quote, keccak256("replacement-forbidden"));
@@ -242,7 +230,9 @@ contract MigrationReservationBoundaryTest is Test {
         ReservationBoardroom unregistered = new ReservationBoardroom(address(registry));
         address unregisteredShare = unregistered.shareToken();
         address quote = address(new ReservationQuote());
-        vm.expectRevert(abi.encodeWithSelector(LockedLiquidityFactory.InvalidBoardroom.selector, address(unregistered)));
+        vm.expectRevert(
+            abi.encodeWithSelector(PledgeV4LiquidityFactory.InvalidBoardroom.selector, address(unregistered))
+        );
         distributionFactory.createAndReserve(
             liquidityFactory, address(unregistered), unregisteredShare, quote, keccak256("unregistered")
         );
@@ -266,17 +256,26 @@ contract MigrationReservationBoundaryTest is Test {
         assertEq(boardroom.permanentQuoteAsset(), address(0));
     }
 
-    function testPredictedLockerAndAmmReservationAreBoundToCurve() public {
+    function testPredictedVaultAndPoolIdAreBoundToCurve() public {
         address quote = address(new ReservationQuote());
         bytes32 salt = keccak256("prediction-boundary");
         ReservationDistribution distribution = _reserve(quote, salt);
-        (address curve, address expectedLocker, address expectedPool,,,,) =
+        (address curve, address expectedVault, bytes32 expectedPoolId,,,) =
             liquidityFactory.migrationReservationOf(address(boardroom));
 
         assertEq(curve, address(distribution));
-        assertEq(expectedLocker, liquidityFactory.predictLockedLiquidityAddress(address(boardroom), salt));
-        assertEq(expectedPool, router.poolFor(boardroom.shareToken(), quote));
-        _assertAmmReservation(quote, address(distribution), expectedLocker, true);
+        assertEq(expectedVault, liquidityFactory.predictLiquidityVaultAddress(address(boardroom), salt));
+        assertEq(expectedPoolId, liquidityFactory.poolIdFor(boardroom.shareToken(), quote));
+    }
+
+    function testReservationDoesNotGiveThirdPartyPoolInitializationAuthority() public {
+        address quote = address(new ReservationQuote());
+        _reserve(quote, keccak256("hook-auth-boundary"));
+        bytes32 poolId = liquidityFactory.poolIdFor(shareToken, quote);
+        PoolKey memory key = liquidityFactory.poolKeyFor(shareToken, quote);
+
+        vm.expectRevert(abi.encodeWithSelector(PledgeV4Hook.PoolInitializationNotAuthorized.selector, poolId));
+        poolManager.initialize(key, 1 << 96);
     }
 
     function _reserve(address quote, bytes32 salt) internal returns (ReservationDistribution distribution) {
@@ -284,15 +283,11 @@ contract MigrationReservationBoundaryTest is Test {
             distributionFactory.createAndReserve(liquidityFactory, address(boardroom), shareToken, quote, salt);
     }
 
-    function _assertAmmReservation(address quote, address expectedOwner, address expectedLocker, bool expectedPresent)
-        internal
-        view
-    {
-        (address initializer, address recipient, address reservationOwner, address manager) =
-            IReservationAmmFactory(address(ammFactory)).initialLiquidityReservationFor(shareToken, quote);
-        assertEq(reservationOwner, expectedOwner);
-        assertEq(initializer, expectedLocker);
-        assertEq(recipient, expectedLocker);
-        assertEq(manager, expectedPresent ? address(liquidityFactory) : address(0));
+    function _mineHookSalt() internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(liquidityFactory.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
     }
 }

@@ -13,7 +13,7 @@ description: Search the public Boardroom directory and recover from incomplete p
 
 1. Confirm the header’s `Network`.
 2. Use `Search projects` to enter a name, symbol, or Boardroom address.
-3. Narrow the directory with `All`, `Saved`, `Fixed price`, `Curve`, `Airdrop`, or `AMM`.
+3. Narrow the directory with `All`, `Saved`, `Fixed price`, `Curve`, `Airdrop`, or `Uniswap v4`.
 4. Select a project row to open its canonical project workspace.
 
 Search text and participation type are kept in the URL, so browser back and forward navigation restores them. When the directory is paginated, `Load more projects` expands the loaded set; a search only filters projects already loaded.
@@ -33,7 +33,7 @@ connect a wallet, subscribe to governance alerts, or prove that the project's cu
 From the project, use:
 
 - `Overview` for authority, supply, treasury, obligations, and the next useful action.
-- `Participate` for live bond, sale, curve, airdrop, or AMM routes.
+- `Participate` for live bond, sale, curve, airdrop, or Uniswap v4 routes.
 - `Governance` for controller authority, proposer, generations, epochs, delay, thresholds, and scheduled operations.
 - `Transparency` for detailed balances, commitments, history, and addresses.
 

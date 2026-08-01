@@ -1,8 +1,5 @@
 import { decodeErrorResult, isHex, type Abi, type Hex } from "viem";
 import {
-  ammFactoryAbi,
-  ammPoolAbi,
-  ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
@@ -16,11 +13,11 @@ import {
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4HookAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   migratingBondingCurveAbi,
   merkleAirdropAbi,
-  poolFeesAbi,
   protocolFacetRegistryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -28,9 +25,6 @@ import {
 import type { DecodedPledgeCashError } from "./types";
 
 const pledgeCashErrorAbis: readonly Abi[] = [
-  ammFactoryAbi,
-  ammPoolAbi,
-  ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
@@ -44,11 +38,11 @@ const pledgeCashErrorAbis: readonly Abi[] = [
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4HookAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   migratingBondingCurveAbi,
   merkleAirdropAbi,
-  poolFeesAbi,
   protocolFacetRegistryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,

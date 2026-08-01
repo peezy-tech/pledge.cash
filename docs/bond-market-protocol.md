@@ -14,7 +14,7 @@ same state machine by configuration. A bond purchase must simultaneously:
 4. preserve that payout as a non-transferable position after the auction closes.
 
 A fixed sale has no debt or control-variable decay. A bonding curve offers immediate, reversible inventory and may
-migrate to an AMM. A grant has vesting and can be soulbound, but it has a fixed holder and price schedule rather than a
+migrate to Uniswap v4 liquidity. A grant has vesting and can be soulbound, but it has a fixed holder and price schedule rather than a
 permissionless auction. Combining those contracts would leave pricing, capacity, and wind-down accounting split across
 several independently mutable obligations. `BondMarket` therefore owns the small, explicit state machine while using
 the existing Boardroom execution, asset policy, obligation, and redemption boundaries.
@@ -23,9 +23,9 @@ the existing Boardroom execution, asset policy, obligation, and redemption bound
 
 - The Boardroom creates and pre-funds a market with its 18-decimal project share token.
 - A buyer commits the configured ERC20 quote asset.
-- A reserve market accepts a readable ERC20 that is not a registered first-party pledge.cash pool.
-- A liquidity market accepts only a funded pool registered by the configured `AmmFactory`, and that pool must contain
-  the creating Boardroom's share token.
+- A reserve market accepts a readable ERC20 that is not a registered first-party P4LP claim.
+- A liquidity market accepts only the creating Boardroom's funded canonical P4LP vault, registered by the configured
+  `PledgeV4LiquidityFactory`; its PoolKey must contain that Boardroom's share token.
 - Quote assets move directly from the buyer to the Boardroom. Project-token capacity stays in the market until it is
   claimed or returned.
 - A keeper may finalize a concluded market or redeem a matured position, but redemption always pays the immutable
@@ -47,11 +47,10 @@ Older Olympus LP bonds are a different design generation. They used a bond calcu
 risk-adjusted value; that calculator should not be confused with the SDA's price-discovery mechanism or a generic
 Uniswap V2 TWAP.
 
-pledge.cash does already have an AMM observation primitive. `AmmPool.currentCumulativePrices` and `AmmPool.sample`
-provide bounded historical time-weighted samples for a specific pledge.cash pool. That is sufficient infrastructure for
-a future market type whose terms explicitly depend on a pool TWAP, subject to liquidity, window, manipulation, and
-quote-routing policy. This bond market intentionally does not consume it: adding an AMM reference would change the
-security model from a self-contained auction to oracle-dependent settlement.
+The Uniswap v4 generation intentionally does not ship a pledge.cash TWAP. A future market whose terms depend on an
+external pool price needs an explicitly reviewed oracle or oracle hook, including liquidity, window, manipulation, and
+quote-routing policy. This bond market intentionally consumes neither v4 spot nor Quoter output: adding either would
+change the security model from a self-contained auction to oracle-dependent settlement.
 
 ## Price and capacity
 

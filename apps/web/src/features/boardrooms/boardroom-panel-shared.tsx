@@ -153,13 +153,13 @@ export function grantStatusTone(grant: BoardroomGrantSnapshot): StatusTone {
 
 export function lockerStatusLabel(locker: BoardroomLockedLiquiditySnapshot): string {
   if (locker.error) return "Read failed";
-  if (locker.state?.lockedLiquidity === 0n) return "Exited";
-  return "Locked";
+  if (locker.state?.positionLiquidity === 0n) return "Exited";
+  return "Funded";
 }
 
 export function lockerStatusTone(locker: BoardroomLockedLiquiditySnapshot): StatusTone {
   if (locker.error) return "danger";
-  if (locker.state?.lockedLiquidity === 0n) return "warning";
+  if (locker.state?.positionLiquidity === 0n) return "warning";
   return "default";
 }
 
@@ -253,11 +253,11 @@ export function windDownBlockers(boardroomSnapshot: BoardroomSnapshot | undefine
             : "Close or cancel this distribution.",
     }));
   const lockerBlockers = boardroomSnapshot.lockedLiquiditySummaries
-    .filter((locker) => locker.error || (locker.state?.lockedLiquidity ?? 0n) !== 0n)
+    .filter((locker) => locker.error || (locker.state?.positionLiquidity ?? 0n) !== 0n)
     .map((locker) => ({
-      kind: "Locker",
+      kind: "Protocol liquidity",
       address: locker.address,
-      action: locker.error ? "Reload the locked-liquidity state." : "Exit locked liquidity during wind-down.",
+      action: locker.error ? "Reload the protocol-liquidity vault state." : "Exit protocol liquidity or release P4LP claims during wind-down.",
     }));
 
   return [...grantBlockers, ...distributionBlockers, ...lockerBlockers];

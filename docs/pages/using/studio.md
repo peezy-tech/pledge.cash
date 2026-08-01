@@ -45,7 +45,7 @@ Use `Distributions` to choose `Dutch auction`, `Fixed price`, `Bond market`, `Ai
 
 - a Dutch auction sets inventory, payment token, descending start/floor prices, buyer cap, finite schedule, and salt.
 - A fixed-price sale sets inventory, payment token, unit price, buyer cap, and schedule.
-- a bond market sets reserve or first-party LP quote asset, pre-funded capacity, auction prices, debt buffer, vesting, cadence, and schedule. Bond positions are non-transferable.
+- a bond market sets a reserve token or the Boardroom's canonical P4LP token as its quote asset, plus pre-funded capacity, auction prices, debt buffer, vesting, cadence, and schedule. Bond positions are non-transferable.
 - a Merkle airdrop sets inventory, root, claim schedule, optional grant-claim cap, and salt.
 - a migrating bonding curve sets sale and migration inventory, quote token, curve terms, graduation target, liquidity share, schedule, and salts.
 
@@ -55,12 +55,15 @@ closing or cancelling other distributions, and curve migration when the contract
 
 ## Liquidity
 
-Use `Liquidity` for Boardroom-owned `Locked Liquidity` and, when a project AMM pool exists, `Add Liquidity` and `Manage LP`. Confirm token pair, desired amounts, minimums, recipient, deadlines, and whether native-asset wrapping is enabled.
+Use `Liquidity` to create or manage the Boardroom's canonical P4LP vault. Confirm currencies, PoolId, desired amounts,
+minimums, recipient, deadline, and initial `sqrtPriceX96`. External deposits mint P4LP only while the vault is Active;
+P4LP redemption opens only after Claims begins. Native wrapping is not currently part of these transactions.
 
-If the app says `No project AMM pool is available`, create or migrate project liquidity first. Studio does not accept an unrelated pool as project liquidity.
+If the app says no canonical project v4 pool is available, create or migrate project liquidity first. Studio does not
+accept an unrelated PoolId, vault, or third-party v4 position as project liquidity.
 
 After a Dutch auction, liquidity remains optional. Studio does not prefill a proceeds percentage. Use the auction's last
-successful price only when initializing a new pool; add to an existing canonical pool at its live ratio.
+successful price only as an initialization reference; additions use the existing vault's fixed PoolKey and live v4 state.
 
 ## Governance
 
@@ -80,7 +83,7 @@ Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
 
 1. `Start Wind-Down` as the owner before launch or after launch when active stake meets the 10%
    current-and-previous-block eligible-supply threshold.
-2. Resolve grants, distributions, and locked-liquidity blockers.
+2. Resolve grants, distributions, and P4LP-liquidity blockers.
 3. `Burn Treasury Shares` where applicable.
 4. Verify the frozen redeemable-asset registry and every dependency count.
 5. Enter `Snapshotting`, then process bounded asset pages until the frozen cursor reaches the frozen count. Treat an

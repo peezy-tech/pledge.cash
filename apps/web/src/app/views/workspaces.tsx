@@ -34,7 +34,7 @@ export function ProjectDiagnostics({
           creationFee={creationFee}
           deployment={deployment}
           factorySnapshot={factorySnapshot}
-          localAmmProtocolFeeRecipient={deployment?.ammProtocolFeeRecipient}
+          localProtocolFeeRecipient={deployment?.pledgeV4ProtocolFeeRecipient}
         />
         <WalletPanel wallet={wallet} />
       </div>

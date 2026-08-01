@@ -1,4 +1,4 @@
-import { lockedLiquidityFactoryAbi } from "@pledge.cash/sdk";
+import { boardroomAbi, pledgeV4LiquidityFactoryAbi } from "@pledge.cash/sdk";
 import { decodeFunctionData, type Hex } from "viem";
 
 import type { JsonValue } from "../db/schema";
@@ -22,8 +22,8 @@ export type RiskContext = {
   readonly decodeStatus: DecodeStatus;
   readonly distributionFactory?: AddressString | string;
   readonly evaluatedAt?: Date;
-  readonly liquidityLocker?: AddressString | string;
-  readonly lockedLiquidityFactory?: AddressString | string;
+  readonly liquidityVault?: AddressString | string;
+  readonly pledgeV4LiquidityFactory?: AddressString | string;
   readonly policyRegistry?: AddressString | string;
 };
 
@@ -64,7 +64,7 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
   const targetIsBoardroom = sameAddress(call.target, ctx.boardroom);
   const targetIsController = sameAddress(call.target, ctx.controller);
   const canonicalLiquidityFactoryCall =
-    sameAddress(call.policy, ctx.lockedLiquidityFactory) && sameAddress(call.target, ctx.lockedLiquidityFactory);
+    sameAddress(call.policy, ctx.pledgeV4LiquidityFactory) && sameAddress(call.target, ctx.pledgeV4LiquidityFactory);
 
   if (targetIsController && selector === SELECTORS.controller.updateConfiguration) {
     findings.push(
@@ -120,24 +120,24 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
     );
   }
 
-  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.createLockedLiquidity) {
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.createProtocolLiquidity) {
     findings.push(
       callFinding(
         call,
         "create-protocol-liquidity",
         "high",
-        "Creates the permanent singleton protocol-liquidity locker, pool, and quote-asset identity."
+        "Creates the canonical pledge.cash vault and Uniswap v4 PoolId for protocol liquidity."
       )
     );
   }
 
-  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.addLockedLiquidity) {
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.addProtocolLiquidity) {
     findings.push(
-      callFinding(call, "add-protocol-liquidity", "medium", "Adds treasury assets to the permanent canonical liquidity pair.")
+      callFinding(call, "add-protocol-liquidity", "medium", "Adds treasury assets to the canonical full-range Uniswap v4 position.")
     );
   }
 
-  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.removeLockedLiquidity) {
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.removeProtocolLiquidity) {
     const zeroMinOut = hasZeroExitMinOut(call);
     findings.push(
       callFinding(
@@ -151,24 +151,55 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
     );
   }
 
-  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.closeLockedLiquidity) {
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.closeProtocolLiquidity) {
     findings.push(
       callFinding(call, "close-protocol-liquidity", "medium", "Irreversibly closes the empty canonical liquidity position.")
     );
   }
 
   if (
-    sameAddress(call.policy, ctx.lockedLiquidityFactory) &&
-    sameAddress(call.target, ctx.liquidityLocker) &&
-    selector === SELECTORS.liquidityLocker.claimFees
+    sameAddress(call.policy, ctx.pledgeV4LiquidityFactory) &&
+    sameAddress(call.target, ctx.liquidityVault) &&
+    selector === SELECTORS.liquidityVault.claimFees
   ) {
     findings.push(
       callFinding(
         call,
         "claim-protocol-liquidity-fees",
         "low",
-        "Forwards accrued canonical locker fees to the Boardroom without moving LP principal."
+        "Collects v4 position fees, forwarding 95% to the Boardroom and 5% to the protocol recipient."
       )
+    );
+  }
+
+  if (targetIsBoardroom && selector === SELECTORS.protocolLiquidityBoardroom.exit) {
+    const zeroMinOut = hasZeroExitMinOut(call);
+    findings.push(
+      callFinding(
+        call,
+        "remove-protocol-liquidity",
+        zeroMinOut ? "high" : "medium",
+        zeroMinOut
+          ? "Exits protocol liquidity during wind-down with a zero minimum output, allowing severe slippage."
+          : "Exits the protocol-owned Uniswap v4 position to the Boardroom during wind-down."
+      )
+    );
+  }
+
+  if (targetIsBoardroom && selector === SELECTORS.protocolLiquidityBoardroom.returnClaims) {
+    findings.push(
+      callFinding(
+        call,
+        "release-protocol-liquidity-claims",
+        "medium",
+        "Releases the protocol-owned P4LP claims to the Boardroom during wind-down."
+      )
+    );
+  }
+
+  if (targetIsBoardroom && selector === SELECTORS.protocolLiquidityBoardroom.closeAfterWindDown) {
+    findings.push(
+      callFinding(call, "close-protocol-liquidity", "medium", "Closes an empty protocol-liquidity vault after wind-down.")
     );
   }
 
@@ -249,7 +280,7 @@ function isPolicyAdminCall(call: StoredCall, ctx: RiskContext, selector: Hex | u
 }
 
 function hasZeroExitMinOut(call: StoredCall): boolean {
-  const decoded = decodeExitLockedLiquidity(call.data);
+  const decoded = decodeProtocolLiquidityExit(call.data);
   if (decoded) {
     return decoded.amountAMin === 0n || decoded.amountBMin === 0n;
   }
@@ -266,14 +297,20 @@ function hasZeroExitMinOut(call: StoredCall): boolean {
   return false;
 }
 
-function decodeExitLockedLiquidity(data: string): { amountAMin: bigint; amountBMin: bigint } | undefined {
+function decodeProtocolLiquidityExit(data: string): { amountAMin: bigint; amountBMin: bigint } | undefined {
   if (!isHex(data)) return undefined;
 
   try {
-    const decoded = decodeFunctionData({ abi: lockedLiquidityFactoryAbi, data });
-    if (decoded.functionName !== "removeLockedLiquidity") return undefined;
-    const [params] = decoded.args;
-    return { amountAMin: params.amountAMin, amountBMin: params.amountBMin };
+    const decoded = decodeFunctionData({ abi: [...pledgeV4LiquidityFactoryAbi, ...boardroomAbi], data });
+    if (decoded.functionName === "removeProtocolLiquidity") {
+      const [params] = decoded.args;
+      return { amountAMin: params.amountAMin, amountBMin: params.amountBMin };
+    }
+    if (decoded.functionName === "exitProtocolLiquidity") {
+      const [, amountAMin, amountBMin] = decoded.args;
+      return { amountAMin, amountBMin };
+    }
+    return undefined;
   } catch {
     return undefined;
   }

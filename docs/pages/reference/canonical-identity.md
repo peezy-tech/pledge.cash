@@ -1,6 +1,6 @@
 ---
 title: Canonical identity
-description: How pledge.cash proves Boardrooms, project tokens, grants, distributions, pools, and lockers belong to the selected deployment.
+description: How pledge.cash proves Boardrooms, project tokens, grants, distributions, v4 pools, and P4LP vaults belong to the selected deployment.
 ---
 
 # Canonical identity
@@ -16,18 +16,18 @@ Canonical identity is a relationship, not a logo or address-shaped string. It al
 | Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
 | Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
 | Distribution | The selected DistributionFactory permanently records the address, Boardroom, and kind, while the distribution reports that factory, Boardroom, and verified project share token |
-| Bond market | The selected BondMarketFactory reports the market, while the market reports that factory, the verified Boardroom, and its project share token; liquidity bonds additionally accept only a funded pool from the configured AmmFactory that contains that share token |
+| Bond market | The selected BondMarketFactory reports the market, while the market reports that factory, the verified Boardroom, and its project share token; liquidity bonds additionally accept only that Boardroom's funded P4LP vault from the configured liquidity factory |
 | Merkle airdrop | The distribution proof above and the configured TokenGrantFactory agree |
-| Migrating curve | The distribution proof above holds and the curve reports the configured LockedLiquidityFactory; a migration reservation exists only before it is consumed or released |
-| Locked liquidity | The LockerFactory's permanent locker and Boardroom mappings agree with the locker-reported factory and Boardroom, its router is the configured AMM router, and its token pair contains the verified project share token |
-| AMM pool | The configured AmmFactory recognizes the sorted pair and pool address |
+| Migrating curve | The distribution proof above holds and the curve reports the configured `PledgeV4LiquidityFactory`; its reservation commits the expected vault and PoolId until consumed or released |
+| P4LP vault | Factory mappings, Boardroom position, and vault-reported factory/Boardroom agree; PoolManager, hook, currencies, fee, tick spacing, PoolId, and project share-token side match the deployment |
+| Uniswap v4 pool | The full PoolKey hashes to the recorded PoolId and the configured StateView reports initialized slot0; a PoolId alone does not prove a pledge.cash vault owns liquidity there |
 
 No single display field proves the whole row.
 
 Active obligation lists and migration reservations prove current lifecycle state, not permanent identity. They are cleared
-when obligations are pruned or reservations are consumed or released. A terminal grant, distribution, or locker can
+when obligations are pruned or reservations are consumed or released. A terminal grant, distribution, or vault can
 remain canonical through its permanent factory and reciprocal contract records; after curve migration, verify the
-resulting locker and pool rather than requiring the spent reservation.
+resulting vault and PoolId rather than requiring the spent reservation.
 
 ## Canonical routes
 
@@ -39,8 +39,8 @@ Transient RPC failure is different. The app can report that a canonical object i
 
 Chain id alone is insufficient, especially on local Anvil. A reset can deploy a new stack on the same chain id. Transaction refresh and cached state must also match the deployment identity active when the read or transaction began.
 
-HyperEVM testnet chain `998` and Monad testnet chain `10143` both have pending
-canonical protocol-v1 artifacts. Neither has a current root identity for
+Monad testnet chain `10143` has a pending canonical protocol-v1 artifact. It
+does not have a current root identity for
 writes. A local chain has an identity only while its ignored artifact, Anvil
 state, and source build remain together.
 

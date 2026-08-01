@@ -9,9 +9,9 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-Canonical protocol v1 is pending on HyperEVM testnet `998` and Monad testnet
-`10143`. Neither checked-in artifact provides usable root addresses. Clients
-must withhold contract-dependent workflows while either selected artifact is
+Canonical protocol v1 is pending on Monad testnet `10143`. The checked-in
+artifact does not provide usable root addresses. Clients
+must withhold contract-dependent workflows while the selected artifact is
 pending.
 
 Do not develop against guessed or historical addresses. A candidate artifact
@@ -21,7 +21,8 @@ fee, and immutable-wiring verification succeeds.
 
 ## Deterministic deployment flow
 
-1. Configure deterministic deployer owner, protocol governance, treasury, AMM fee manager, wrapped native, and broadcaster.
+1. Configure deterministic deployer owner, protocol governance, treasury, wrapped native, canonical PoolManager,
+   Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and broadcaster.
 2. Run the chain-specific dry-run wrapper and confirm chain id.
 3. Broadcast through the maintained wrapper.
 4. Verify the candidate against live RPC state and runtime code hashes.
@@ -31,6 +32,22 @@ fee, and immutable-wiring verification succeeds.
 
 Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
 
+## Sepolia fork gate
+
+Before selecting a production network, run the complete deployment against a
+local fork of Ethereum Sepolia's canonical Uniswap v4 stack:
+
+```sh
+bun run test:sepolia-fork:deployment
+```
+
+The gate checks the upstream chain and dependency bytecode, deploys and
+receipt-verifies protocol genesis, reruns the deterministic deployment, and
+then verifies that its addresses, release identity, ownership, policies, and
+live wiring remain unchanged. It uses no Sepolia funds and sends no Sepolia
+transactions. Pin `SEPOLIA_FORK_BLOCK` when the evidence must be exactly
+repeatable.
+
 ## Local Anvil scenario
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
@@ -39,7 +56,7 @@ Also run `bun run scenario:boardroom:local` on a fresh Anvil state. That
 scenario activates release B, proves writes stop before migration, migrates
 three Boardrooms independently, and resumes cleanup and redemption.
 
-The seed covers standalone grant variants plus nine Boardroom projects: direct canonical AMM, active fixed price, active
+The seed covers standalone grant variants plus nine Boardroom projects: direct canonical P4LP/v4 liquidity, active fixed price, active
 Dutch auction, active curve, closed sale, live Merkle airdrop, launched generation-1 controller governance with a
 scheduled operation, winding down with an open distribution blocker, and winding down with CASH registered while the
 snapshot delay remains pending. The fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic

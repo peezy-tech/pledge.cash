@@ -216,7 +216,7 @@ export function TransparencyPage({
 
       <RuledSection>
         <SectionHeading title="Current liquidity positions" description="Positions the Boardroom currently has locked for project market liquidity." />
-        <CoverageStatement coverage={dashboard.currentStateCoverage?.lockedLiquidity} label="locked-liquidity position" />
+        <CoverageStatement coverage={dashboard.currentStateCoverage?.lockedLiquidity} label="protocol-liquidity vault" />
         <LiquidityTable lockers={snapshot.lockedLiquiditySummaries} />
       </RuledSection>
 
@@ -497,27 +497,35 @@ function DistributionTable({ distributions }: { distributions: readonly Boardroo
 }
 
 function LiquidityTable({ lockers }: { lockers: readonly BoardroomLockedLiquiditySnapshot[] }): React.JSX.Element {
-  if (lockers.length === 0) return <EmptyTable label="No locked liquidity positions were read." />;
+  if (lockers.length === 0) return <EmptyTable label="No protocol-liquidity vaults were read." />;
   return (
-    <TableFrame label="Locked liquidity positions">
+    <TableFrame label="Uniswap v4 protocol liquidity">
       <table className={tableClassName}>
         <thead className={tableHeadClassName}>
-          <tr><th className={tableCellClassName} scope="col">Locker</th><th className={tableCellClassName} scope="col">Pool</th><th className={tableCellClassName} scope="col">Locked LP</th><th className={tableCellClassName} scope="col">Claimable token A</th><th className={tableCellClassName} scope="col">Claimable token B</th></tr>
+          <tr><th className={tableCellClassName} scope="col">P4LP vault</th><th className={tableCellClassName} scope="col">Pool ID</th><th className={tableCellClassName} scope="col">Position liquidity</th><th className={tableCellClassName} scope="col">P4LP supply</th><th className={tableCellClassName} scope="col">State</th></tr>
         </thead>
         <tbody>
           {lockers.map((locker) => (
             <tr key={locker.address}>
               <th className={tableCellClassName} scope="row"><AddressLink address={locker.address} />{locker.error ? <span className="mt-1 block text-xs font-normal text-red-200">Read failed</span> : null}</th>
-              <td className={tableCellClassName}>{locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown"}</td>
-              <td className={tableCellClassName}>{formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata)}</td>
-              <td className={tableCellClassName}>{formatTokenAmount(locker.claimableA, locker.tokenAMetadata)}</td>
-              <td className={tableCellClassName}>{formatTokenAmount(locker.claimableB, locker.tokenBMetadata)}</td>
+              <td className={`${tableCellClassName} max-w-64 break-all font-mono text-xs`}>{locker.state?.poolId ?? "Unknown"}</td>
+              <td className={tableCellClassName}>{locker.state?.positionLiquidity?.toString() ?? "Unknown"}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(locker.state?.totalSupply, locker.liquidityMetadata)}</td>
+              <td className={tableCellClassName}>{protocolLiquidityStateLabel(locker.state?.liquidityState)}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </TableFrame>
   );
+}
+
+function protocolLiquidityStateLabel(state: number | undefined): string {
+  if (state === 0) return "Unconfigured";
+  if (state === 1) return "Active";
+  if (state === 2) return "Claims";
+  if (state === 3) return "Closed";
+  return "Unknown";
 }
 
 function EmptyTable({ label }: { label: string }): React.JSX.Element {

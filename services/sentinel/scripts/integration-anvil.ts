@@ -115,7 +115,8 @@ let anvil: AnvilHandle | undefined;
 try {
   anvil = await ensureAnvil();
   const wrappedNative = process.env.WRAPPED_NATIVE_ADDRESS ?? (await deployWrappedNative());
-  await deployContracts(wrappedNative as Address);
+  const v4Infrastructure = await deployV4InfrastructureMock();
+  await deployContracts(wrappedNative as Address, v4Infrastructure);
 
   const deployment = normalizeDeployment(
     await readJson<PledgeCashDeployment>(deploymentPath)
@@ -390,7 +391,25 @@ async function deployWrappedNative(): Promise<string> {
   return match[1]!;
 }
 
-async function deployContracts(wrappedNative: Address): Promise<void> {
+async function deployV4InfrastructureMock(): Promise<Address> {
+  // This harness exercises Sentinel's deployment and governance reads, not v4 execution.
+  // One code-bearing local placeholder therefore satisfies every external-infrastructure
+  // attestation without pretending to be a functional Universal Router or periphery stack.
+  const output = await runCommand("deploy local v4 infrastructure mock", "forge", [
+    "create",
+    "test/helpers/V4PoolManagerMock.sol:V4PoolManagerMock",
+    "--rpc-url",
+    rpcUrl,
+    "--private-key",
+    deployerKey,
+    "--broadcast"
+  ], { cwd: contractsDir });
+  const match = /Deployed to:\s*(0x[a-fA-F0-9]{40})/.exec(output);
+  if (!match) throw new Error("forge create V4PoolManagerMock did not print a deployed address");
+  return match[1]! as Address;
+}
+
+async function deployContracts(wrappedNative: Address, v4Infrastructure: Address): Promise<void> {
   await runCommand("deploy contracts", "forge", [
     "script",
     "script/Deploy.s.sol:Deploy",
@@ -411,7 +430,12 @@ async function deployContracts(wrappedNative: Address): Promise<void> {
       PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER: deployer.address,
       PLEDGE_CASH_PROTOCOL_GOVERNANCE: deployer.address,
       PLEDGE_CASH_PROTOCOL_TREASURY: deployer.address,
-      PLEDGE_CASH_AMM_FEE_MANAGER: deployer.address,
+      UNISWAP_V4_POOL_MANAGER: v4Infrastructure,
+      UNISWAP_UNIVERSAL_ROUTER: v4Infrastructure,
+      UNISWAP_V4_QUOTER: v4Infrastructure,
+      UNISWAP_V4_STATE_VIEW: v4Infrastructure,
+      UNISWAP_V4_POSITION_MANAGER: v4Infrastructure,
+      PERMIT2_ADDRESS: v4Infrastructure,
       WRAPPED_NATIVE_ADDRESS: wrappedNative,
       WRITE_DEPLOYMENT_STATE: "true"
     }

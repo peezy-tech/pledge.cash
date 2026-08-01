@@ -1,6 +1,5 @@
-import { encodeFunctionData, type Address, type Hex } from "viem";
+import { encodeAbiParameters, encodeFunctionData, parseAbi, parseAbiParameters, type Address, type Hex } from "viem";
 import {
-  ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomFactoryAbi,
@@ -13,8 +12,8 @@ import {
   dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
@@ -25,8 +24,8 @@ import type {
   BoardroomLaunchConfig,
   BoardroomFixedPriceSaleTerms,
   BoardroomDutchAuctionTerms,
-  BoardroomLockedLiquidityTerms,
-  BoardroomLockedLiquidityAddTerms,
+  BoardroomProtocolLiquidityTerms,
+  BoardroomProtocolLiquidityAddTerms,
   BoardroomMerkleAirdropTerms,
   BoardroomMigratingBondingCurveTerms,
   BoardroomShareGrantTerms,
@@ -35,14 +34,65 @@ import type {
   DutchAuctionTerms,
   GrantCreationArgs,
   GrantCreationTerms,
-  LockedLiquidityTerms,
-  LockedLiquidityAddTerms,
+  ProtocolLiquidityTerms,
+  ProtocolLiquidityAddTerms,
   MerkleAirdropGrantClaimTerms,
   MerkleAirdropTerms,
   MigratingBondingCurveTerms,
+  UniswapV4PoolKey,
 } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
+const MAX_UINT128 = (1n << 128n) - 1n;
+const UNIVERSAL_ROUTER_V4_SWAP = "0x10" as const satisfies Hex;
+const V4_EXACT_INPUT_SINGLE_ACTIONS = "0x060c0e" as const satisfies Hex;
+export const uniswapUniversalRouterAbi = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
+export const permit2Abi = parseAbi([
+  "function approve(address token, address spender, uint160 amount, uint48 expiration)",
+]);
+const exactInputSingleParameters = parseAbiParameters(
+  "(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, bytes hookData",
+);
+const currencyAndAmountParameters = parseAbiParameters("address currency, uint256 amount");
+const currencyRecipientAndAmountParameters = parseAbiParameters(
+  "address currency, address recipient, uint256 amount",
+);
+const v4SwapCommandParameters = parseAbiParameters("bytes actions, bytes[] params");
+
+export function deriveUniswapV4SqrtPriceX96(input: {
+  tokenA: Address;
+  tokenB: Address;
+  amountA: bigint;
+  amountB: bigint;
+}): bigint {
+  if (input.tokenA.toLowerCase() === input.tokenB.toLowerCase()) {
+    throw new Error("Uniswap v4 currencies must be distinct.");
+  }
+  if (input.amountA <= 0n || input.amountB <= 0n) {
+    throw new Error("Uniswap v4 price amounts must be positive.");
+  }
+  const tokenAIsCurrency0 = input.tokenA.toLowerCase() < input.tokenB.toLowerCase();
+  const amount0 = tokenAIsCurrency0 ? input.amountA : input.amountB;
+  const amount1 = tokenAIsCurrency0 ? input.amountB : input.amountA;
+  const sqrtPriceX96 = integerSqrt((amount1 << 192n) / amount0);
+  if (sqrtPriceX96 < 4_295_128_739n || sqrtPriceX96 >= 1_461_446_703_485_210_103_287_273_052_203_988_822_378_723_970_342n) {
+    throw new Error("Derived Uniswap v4 price is outside TickMath bounds.");
+  }
+  return sqrtPriceX96;
+}
+
+function integerSqrt(value: bigint): bigint {
+  if (value < 0n) throw new Error("Cannot take the square root of a negative bigint.");
+  if (value < 2n) return value;
+  let left = 1n;
+  let right = 1n << BigInt((value.toString(2).length + 1) >> 1);
+  while (left + 1n < right) {
+    const middle = (left + right) >> 1n;
+    if (middle * middle <= value) left = middle;
+    else right = middle;
+  }
+  return left;
+}
 
 function requireFacetSetHash(value: Hex): Hex {
   if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
@@ -964,25 +1014,67 @@ export function buildFixedPriceSaleBuyTransaction(input: {
   };
 }
 
-export function buildAmmSwapExactTokensForTokensTransaction(input: {
-  router: Address;
+export function buildUniswapV4SwapExactInputSingleTransaction(input: {
+  universalRouter: Address;
+  poolKey: UniswapV4PoolKey;
+  currencyIn: Address;
   amountIn: bigint;
   amountOutMin: bigint;
-  path: readonly [Address, Address];
   recipient: Address;
   deadline: bigint;
+  hookData?: Hex;
 }) {
-  return {
-    address: input.router,
-    abi: ammRouterAbi,
-    functionName: "swapExactTokensForTokens" as const,
-    args: [
+  if (input.amountIn <= 0n || input.amountIn > MAX_UINT128) {
+    throw new Error("amountIn must fit a positive uint128.");
+  }
+  if (input.amountOutMin < 0n || input.amountOutMin > MAX_UINT128) {
+    throw new Error("amountOutMin must fit uint128.");
+  }
+  const currency0 = input.poolKey.currency0.toLowerCase();
+  const currency1 = input.poolKey.currency1.toLowerCase();
+  if (currency0 >= currency1) throw new Error("Uniswap v4 PoolKey currencies must be sorted.");
+  const currencyIn = input.currencyIn.toLowerCase();
+  if (currencyIn !== currency0 && currencyIn !== currency1) {
+    throw new Error("currencyIn is not part of the PoolKey.");
+  }
+  const zeroForOne = currencyIn === currency0;
+  const currencyOut = zeroForOne ? input.poolKey.currency1 : input.poolKey.currency0;
+  const params = [
+    encodeAbiParameters(exactInputSingleParameters, [
+      input.poolKey,
+      zeroForOne,
       input.amountIn,
       input.amountOutMin,
-      input.path,
-      input.recipient,
-      input.deadline,
-    ] as const,
+      input.hookData ?? "0x",
+    ]),
+    encodeAbiParameters(currencyAndAmountParameters, [input.currencyIn, input.amountIn]),
+    encodeAbiParameters(currencyRecipientAndAmountParameters, [currencyOut, input.recipient, 0n]),
+  ] as const;
+  const commandInput = encodeAbiParameters(v4SwapCommandParameters, [V4_EXACT_INPUT_SINGLE_ACTIONS, params]);
+  return {
+    address: input.universalRouter,
+    abi: uniswapUniversalRouterAbi,
+    functionName: "execute" as const,
+    args: [UNIVERSAL_ROUTER_V4_SWAP, [commandInput], input.deadline] as const,
+  };
+}
+
+export function buildPermit2ApprovalTransaction(input: {
+  permit2: Address;
+  token: Address;
+  universalRouter: Address;
+  amount: bigint;
+  expiration: number;
+}) {
+  if (input.amount < 0n || input.amount >= 1n << 160n) throw new Error("Permit2 amount must fit uint160.");
+  if (!Number.isSafeInteger(input.expiration) || input.expiration < 0 || input.expiration >= 2 ** 48) {
+    throw new Error("Permit2 expiration must fit uint48.");
+  }
+  return {
+    address: input.permit2,
+    abi: permit2Abi,
+    functionName: "approve" as const,
+    args: [input.token, input.universalRouter, input.amount, input.expiration] as const,
   };
 }
 
@@ -1097,7 +1189,7 @@ export function merkleAirdropGrantClaimArgs(terms: MerkleAirdropGrantClaimTerms)
   } as const;
 }
 
-export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
+export function protocolLiquidityArgs(terms: ProtocolLiquidityTerms) {
   return [
     {
       tokenA: terms.tokenA,
@@ -1106,13 +1198,14 @@ export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
       amountBDesired: terms.amountBDesired,
       amountAMin: terms.amountAMin,
       amountBMin: terms.amountBMin,
+      sqrtPriceX96: terms.sqrtPriceX96,
       deadline: terms.deadline,
       salt: terms.salt,
     },
   ] as const;
 }
 
-export function lockedLiquidityAddArgs(terms: LockedLiquidityAddTerms) {
+export function protocolLiquidityAddArgs(terms: ProtocolLiquidityAddTerms) {
   return [
     {
       tokenA: terms.tokenA,
@@ -1406,6 +1499,7 @@ export function buildMigratingBondingCurveMigrationTransaction(input: {
   expectedFacetSetHash: Hex;
   minShareLiquidity: bigint;
   minQuoteLiquidity: bigint;
+  sqrtPriceX96: bigint;
   deadline: bigint;
 }) {
   return {
@@ -1416,6 +1510,7 @@ export function buildMigratingBondingCurveMigrationTransaction(input: {
       input.expectedFacetSetHash,
       input.minShareLiquidity,
       input.minQuoteLiquidity,
+      input.sqrtPriceX96,
       input.deadline,
     ] as const,
   };
@@ -1576,7 +1671,7 @@ export function buildBoardroomMerkleAirdropCancelCall(input: { policy: Address; 
   });
 }
 
-export function buildBoardroomLockedLiquidityApprovalCall(input: {
+export function buildBoardroomProtocolLiquidityApprovalCall(input: {
   policy: Address;
   token: Address;
   factory: Address;
@@ -1593,28 +1688,28 @@ export function buildBoardroomLockedLiquidityApprovalCall(input: {
   });
 }
 
-export function buildBoardroomLockedLiquidityCreationCall(input: {
+export function buildBoardroomProtocolLiquidityCreationCall(input: {
   policy: Address;
   factory: Address;
-  terms: LockedLiquidityTerms;
+  terms: ProtocolLiquidityTerms;
 }): BoardroomCall {
   return buildBoardroomCall({
     policy: input.policy,
     target: input.factory,
     data: encodeFunctionData({
-      abi: lockedLiquidityFactoryAbi,
-      functionName: "createLockedLiquidity",
-      args: lockedLiquidityArgs(input.terms),
+      abi: pledgeV4LiquidityFactoryAbi,
+      functionName: "createProtocolLiquidity",
+      args: protocolLiquidityArgs(input.terms),
     }),
   });
 }
 
-export function buildBoardroomLockedLiquidityBatch(input: {
+export function buildBoardroomProtocolLiquidityBatch(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
-  terms: BoardroomLockedLiquidityTerms;
+  terms: BoardroomProtocolLiquidityTerms;
   policy?: Address;
   assetPolicy?: Address;
 }) {
@@ -1630,9 +1725,10 @@ export function buildBoardroomLockedLiquidityBatch(input: {
           amountBDesired: input.terms.quoteAmountDesired,
           amountAMin: input.terms.shareAmountMin,
           amountBMin: input.terms.quoteAmountMin,
+          sqrtPriceX96: input.terms.sqrtPriceX96,
           deadline: input.terms.deadline,
           salt: input.terms.salt,
-        } satisfies LockedLiquidityTerms)
+        } satisfies ProtocolLiquidityTerms)
       : ({
           tokenA: input.terms.quoteToken,
           tokenB: input.shareToken,
@@ -1640,23 +1736,24 @@ export function buildBoardroomLockedLiquidityBatch(input: {
           amountBDesired: input.terms.shareAmountDesired,
           amountAMin: input.terms.quoteAmountMin,
           amountBMin: input.terms.shareAmountMin,
+          sqrtPriceX96: input.terms.sqrtPriceX96,
           deadline: input.terms.deadline,
           salt: input.terms.salt,
-        } satisfies LockedLiquidityTerms);
+        } satisfies ProtocolLiquidityTerms);
   const calls = [
-    buildBoardroomLockedLiquidityApprovalCall({
+    buildBoardroomProtocolLiquidityApprovalCall({
       policy: assetPolicy,
       token: input.shareToken,
       factory: input.factory,
       amount: input.terms.shareAmountDesired,
     }),
-    buildBoardroomLockedLiquidityApprovalCall({
+    buildBoardroomProtocolLiquidityApprovalCall({
       policy: assetPolicy,
       token: input.terms.quoteToken,
       factory: input.factory,
       amount: input.terms.quoteAmountDesired,
     }),
-    buildBoardroomLockedLiquidityCreationCall({
+    buildBoardroomProtocolLiquidityCreationCall({
       policy,
       factory: input.factory,
       terms,
@@ -1670,28 +1767,28 @@ export function buildBoardroomLockedLiquidityBatch(input: {
   });
 }
 
-export function buildBoardroomLockedLiquidityAddCall(input: {
+export function buildBoardroomProtocolLiquidityAddCall(input: {
   policy: Address;
   factory: Address;
-  terms: LockedLiquidityAddTerms;
+  terms: ProtocolLiquidityAddTerms;
 }): BoardroomCall {
   return buildBoardroomCall({
     policy: input.policy,
     target: input.factory,
     data: encodeFunctionData({
-      abi: lockedLiquidityFactoryAbi,
-      functionName: "addLockedLiquidity",
-      args: lockedLiquidityAddArgs(input.terms),
+      abi: pledgeV4LiquidityFactoryAbi,
+      functionName: "addProtocolLiquidity",
+      args: protocolLiquidityAddArgs(input.terms),
     }),
   });
 }
 
-export function buildBoardroomLockedLiquidityAddBatch(input: {
+export function buildBoardroomProtocolLiquidityAddBatch(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
-  terms: BoardroomLockedLiquidityAddTerms;
+  terms: BoardroomProtocolLiquidityAddTerms;
   policy?: Address;
   assetPolicy?: Address;
 }) {
@@ -1707,7 +1804,7 @@ export function buildBoardroomLockedLiquidityAddBatch(input: {
         amountAMin: input.terms.shareAmountMin,
         amountBMin: input.terms.quoteAmountMin,
         deadline: input.terms.deadline,
-      } satisfies LockedLiquidityAddTerms)
+      } satisfies ProtocolLiquidityAddTerms)
     : ({
         tokenA: input.terms.quoteToken,
         tokenB: input.shareToken,
@@ -1716,29 +1813,29 @@ export function buildBoardroomLockedLiquidityAddBatch(input: {
         amountAMin: input.terms.quoteAmountMin,
         amountBMin: input.terms.shareAmountMin,
         deadline: input.terms.deadline,
-      } satisfies LockedLiquidityAddTerms);
+      } satisfies ProtocolLiquidityAddTerms);
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
     expectedFacetSetHash: input.expectedFacetSetHash,
     calls: [
-      buildBoardroomLockedLiquidityApprovalCall({
+      buildBoardroomProtocolLiquidityApprovalCall({
         policy: assetPolicy,
         token: input.shareToken,
         factory: input.factory,
         amount: input.terms.shareAmountDesired,
       }),
-      buildBoardroomLockedLiquidityApprovalCall({
+      buildBoardroomProtocolLiquidityApprovalCall({
         policy: assetPolicy,
         token: input.terms.quoteToken,
         factory: input.factory,
         amount: input.terms.quoteAmountDesired,
       }),
-      buildBoardroomLockedLiquidityAddCall({ policy, factory: input.factory, terms }),
+      buildBoardroomProtocolLiquidityAddCall({ policy, factory: input.factory, terms }),
     ],
   });
 }
 
-export function buildBoardroomLockedLiquidityRemoveCall(input: {
+export function buildBoardroomProtocolLiquidityRemoveCall(input: {
   policy: Address;
   factory: Address;
   liquidity: bigint;
@@ -1750,8 +1847,8 @@ export function buildBoardroomLockedLiquidityRemoveCall(input: {
     policy: input.policy,
     target: input.factory,
     data: encodeFunctionData({
-      abi: lockedLiquidityFactoryAbi,
-      functionName: "removeLockedLiquidity",
+      abi: pledgeV4LiquidityFactoryAbi,
+      functionName: "removeProtocolLiquidity",
       args: [{
         liquidity: input.liquidity,
         amountAMin: input.amountAMin,
@@ -1762,7 +1859,7 @@ export function buildBoardroomLockedLiquidityRemoveCall(input: {
   });
 }
 
-export function buildBoardroomLockedLiquidityRemoveAction(input: {
+export function buildBoardroomProtocolLiquidityRemoveAction(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   policy: Address;
@@ -1775,22 +1872,22 @@ export function buildBoardroomLockedLiquidityRemoveAction(input: {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
     expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomLockedLiquidityRemoveCall(input),
+    call: buildBoardroomProtocolLiquidityRemoveCall(input),
   });
 }
 
-export function buildBoardroomLockedLiquidityCloseCall(input: {
+export function buildBoardroomProtocolLiquidityCloseCall(input: {
   policy: Address;
   factory: Address;
 }): BoardroomCall {
   return buildBoardroomCall({
     policy: input.policy,
     target: input.factory,
-    data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+    data: encodeFunctionData({ abi: pledgeV4LiquidityFactoryAbi, functionName: "closeProtocolLiquidity" }),
   });
 }
 
-export function buildBoardroomLockedLiquidityCloseAction(input: {
+export function buildBoardroomProtocolLiquidityCloseAction(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   policy: Address;
@@ -1799,11 +1896,11 @@ export function buildBoardroomLockedLiquidityCloseAction(input: {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
     expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomLockedLiquidityCloseCall(input),
+    call: buildBoardroomProtocolLiquidityCloseCall(input),
   });
 }
 
-export function buildBoardroomLockedLiquidityExitTransaction(input: {
+export function buildBoardroomProtocolLiquidityExitTransaction(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   amountAMin: bigint;
@@ -1823,14 +1920,14 @@ export function buildBoardroomLockedLiquidityExitTransaction(input: {
   };
 }
 
-export function buildBoardroomReturnProtocolLiquidityAsLpTransaction(input: {
+export function buildBoardroomReturnProtocolLiquidityClaimsTransaction(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
 }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
-    functionName: "returnProtocolLiquidityAsLp",
+    functionName: "returnProtocolLiquidityClaims",
     args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
@@ -1847,25 +1944,65 @@ export function buildBoardroomCloseProtocolLiquidityTransaction(input: {
   };
 }
 
-export function buildBoardroomLockedLiquidityFeeClaimAction(input: {
+export function buildBoardroomProtocolLiquidityFeeClaimAction(input: {
   boardroom: Address;
   expectedFacetSetHash: Hex;
   policy: Address;
-  locker: Address;
+  vault: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
     expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomLockedLiquidityFeeClaimCall(input),
+    call: buildBoardroomProtocolLiquidityFeeClaimCall(input),
   });
 }
 
-export function buildBoardroomLockedLiquidityFeeClaimCall(input: { policy: Address; locker: Address }): BoardroomCall {
+export function buildBoardroomProtocolLiquidityFeeClaimCall(input: { policy: Address; vault: Address }): BoardroomCall {
   return buildBoardroomCall({
     policy: input.policy,
-    target: input.locker,
-    data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
+    target: input.vault,
+    data: encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }),
   });
+}
+
+export function buildProtocolLiquidityClaimDepositTransaction(input: {
+  vault: Address;
+  amountADesired: bigint;
+  amountBDesired: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  recipient: Address;
+  deadline: bigint;
+}) {
+  return {
+    address: input.vault,
+    abi: pledgeV4LiquidityVaultAbi,
+    functionName: "depositLiquidityForClaims" as const,
+    args: [
+      input.amountADesired,
+      input.amountBDesired,
+      input.amountAMin,
+      input.amountBMin,
+      input.recipient,
+      input.deadline,
+    ] as const,
+  };
+}
+
+export function buildProtocolLiquidityClaimRedemptionTransaction(input: {
+  vault: Address;
+  claims: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  recipient: Address;
+  deadline: bigint;
+}) {
+  return {
+    address: input.vault,
+    abi: pledgeV4LiquidityVaultAbi,
+    functionName: "redeemClaims" as const,
+    args: [input.claims, input.amountAMin, input.amountBMin, input.recipient, input.deadline] as const,
+  };
 }
 
 export function buildBoardroomGrantCreationCall(input: {

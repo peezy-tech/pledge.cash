@@ -3,7 +3,7 @@ import type {
   BondMarketState,
   DutchAuctionState,
   FixedPriceSaleState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState as LockedLiquidityState,
   MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashDeployment,
@@ -15,6 +15,7 @@ import {
   Flame,
   Gift,
   Lock,
+  PackageOpen,
   Plus,
   RefreshCw,
   Search,
@@ -249,6 +250,7 @@ export function BoardroomPanel({
     exit: exitLockedLiquidity,
     load: loadLockedLiquidity,
     predict: predictLockedLiquidity,
+    releaseClaims: releaseLockedLiquidityClaims,
     setLockedLiquidityAddress,
     setLockedLiquidityExitForm,
     setLockedLiquidityForm,
@@ -585,6 +587,7 @@ export function BoardroomPanel({
         lockedLiquiditySnapshot={lockedLiquiditySnapshot}
         pendingAction={pendingAction}
         manageCapability={capabilities?.manageLiquidity}
+        permissionlessCapability={capabilities?.permissionlessWindDown}
         predictedLockedLiquidity={predictedLockedLiquidity}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setLockedLiquidityExitForm={setLockedLiquidityExitForm}
@@ -596,6 +599,7 @@ export function BoardroomPanel({
         exitLockedLiquidity={exitLockedLiquidity}
         loadLockedLiquidity={loadLockedLiquidity}
         predictLockedLiquidity={predictLockedLiquidity}
+        releaseLockedLiquidityClaims={releaseLockedLiquidityClaims}
         removeLockedLiquidity={lockedLiquidity.remove}
         runAction={runAction}
       /> : null}
@@ -858,8 +862,8 @@ function migratingCurveFacts(
     { label: "Migration quote", value: formatTokenAmount(migratingCurveSnapshot?.migrationQuote, distributionSummary?.quoteTokenMetadata) },
     { label: "Quote quarantine", value: migratingCurveSnapshot ? String(Boolean(migratingCurveSnapshot.quoteQuarantined)) : "Unknown" },
     { label: "Quote token", value: migratingCurveSnapshot ? <AddressLink address={migratingCurveSnapshot.quoteToken} /> : "Unknown" },
-    { label: "Locker", value: migratingCurveSnapshot?.locker ? <AddressLink address={migratingCurveSnapshot.locker} /> : "Unknown" },
-    { label: "Pool", value: migratingCurveSnapshot?.pool ? <AddressLink address={migratingCurveSnapshot.pool} /> : "Unknown" },
+    { label: "Liquidity vault", value: migratingCurveSnapshot?.liquidityVault ? <AddressLink address={migratingCurveSnapshot.liquidityVault} /> : "Unknown" },
+    { label: "PoolId", value: migratingCurveSnapshot?.liquidityPoolId ?? "Unknown" },
   ];
 }
 
@@ -869,17 +873,17 @@ function lockedLiquidityFacts(
   predictedLockedLiquidity: Address | undefined,
 ): BoardroomFact[] {
   return [
-    { label: "Predicted locker", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
+    { label: "Predicted vault", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
     {
       label: "State",
       value: lockedLiquiditySnapshot?.liquidityState === undefined
         ? "Unknown"
         : lockedLiquiditySnapshot.liquidityState.toString(),
     },
-    { label: "Locked LP", value: formatTokenAmount(lockedLiquiditySnapshot?.lockedLiquidity, lockerSummary?.liquidityMetadata) },
+    { label: "Position liquidity", value: formatTokenAmount(lockedLiquiditySnapshot?.positionLiquidity, lockerSummary?.liquidityMetadata) },
     { label: "Token A", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenA} /> : "Unknown" },
     { label: "Token B", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenB} /> : "Unknown" },
-    { label: "Pool", value: lockedLiquiditySnapshot?.pool ? <AddressLink address={lockedLiquiditySnapshot.pool} /> : "Unknown" },
+    { label: "PoolId", value: lockedLiquiditySnapshot?.poolId ?? "Unknown" },
   ];
 }
 
@@ -1083,7 +1087,7 @@ function BondMarketPanel({
     >
       <div className="border-t border-zinc-800 p-4">
         <p className="m-0 text-sm leading-6 text-zinc-400">
-          Prefund a declining-price auction with project tokens. Buyers commit a reserve asset or a canonical first-party LP token and receive immutable, non-transferable positions.
+          Prefund a declining-price auction with project tokens. Buyers commit a reserve asset or a canonical first-party P4LP claim and receive immutable, non-transferable positions.
         </p>
         <div className="mt-3 flex gap-2" role="group" aria-label="Bond quote asset type">
           {(["reserve", "liquidity"] as const).map((kind) => (
@@ -1094,13 +1098,13 @@ function BondMarketPanel({
               variant={bondMarketForm.kind === kind ? "default" : "secondary"}
               onClick={() => setBondMarketForm((current) => ({ ...current, kind }))}
             >
-              {kind === "reserve" ? "Reserve asset" : "First-party LP token"}
+              {kind === "reserve" ? "Reserve asset" : "First-party P4LP claim"}
             </Button>
           ))}
         </div>
       </div>
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
-        <TextField form={bondMarketForm} field="quoteToken" label={bondMarketForm.kind === "reserve" ? "Reserve quote token" : "AMM LP token"} setForm={setBondMarketForm} />
+        <TextField form={bondMarketForm} field="quoteToken" label={bondMarketForm.kind === "reserve" ? "Reserve quote token" : "P4LP claim token"} setForm={setBondMarketForm} />
         <TextField form={bondMarketForm} field="capacity" inputMode="decimal" label="Project-token capacity" setForm={setBondMarketForm} />
         <TextField form={bondMarketForm} field="initialPrice" inputMode="decimal" label="Initial price per project token" setForm={setBondMarketForm} />
         <TextField form={bondMarketForm} field="minimumPrice" inputMode="decimal" label="Minimum price" setForm={setBondMarketForm} />
@@ -1611,7 +1615,7 @@ function MigratingCurvePanel({
         <TextField form={migratingCurveForm} field="basePrice" inputMode="decimal" label="Base price" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="slope" inputMode="decimal" label="Slope" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="graduationQuoteTarget" inputMode="decimal" label="Graduation target" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to LP bps" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to v4 liquidity bps" setForm={setMigratingCurveForm} />
         <TextField description={timestampPreview(migratingCurveForm.startTime, "Trading starts immediately")} form={migratingCurveForm} field="startTime" inputMode="numeric" label="Trading starts" setForm={setMigratingCurveForm} />
         <TextField description={timestampPreview(migratingCurveForm.endTime, "A finite end is required")} form={migratingCurveForm} field="endTime" inputMode="numeric" label="Trading ends" setForm={setMigratingCurveForm} />
         <TextField description="Bytes32 identity for the deterministic liquidity migration." form={migratingCurveForm} field="migrationSalt" label="Migration salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
@@ -1661,7 +1665,7 @@ function MigratingCurvePanel({
       />
       <details className="border-t border-zinc-800 px-4 py-3">
         <summary className="cursor-pointer text-sm font-medium text-zinc-300">Migration execution bounds</summary>
-        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">These minimum outputs and deadline protect the one-time migration transaction from stale liquidity conditions.</p>
+        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">These minimum outputs and deadline protect the one-time migration transaction from stale liquidity conditions. The initial v4 price is derived from the curve’s on-chain migration amounts and checked against its terminal price.</p>
         <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-3">
           <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Minimum project-token liquidity" setForm={setCurveMigrationForm} />
           <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="decimal" label="Minimum quote-token liquidity" setForm={setCurveMigrationForm} />
@@ -1671,7 +1675,7 @@ function MigratingCurvePanel({
       <ActionRow>
         <ActionButton actionId="migrate-curve" disabled={!migratingCurveSnapshot?.canMigrate} pendingAction={pendingAction} title={migratingCurveSnapshot?.canMigrate ? undefined : "Migration opens permissionlessly during the graduated phase."} onClick={() => void runAction("migrate-curve", migrateCurve)}>
           <ShieldCheck className="h-4 w-4" />
-          Migrate To Locked LP
+          Migrate To Uniswap v4
         </ActionButton>
       </ActionRow>
       <ActionRow>
@@ -1700,6 +1704,7 @@ function LockedLiquidityPanel({
   lockedLiquidityForm,
   lockedLiquiditySnapshot,
   manageCapability,
+  permissionlessCapability,
   pendingAction,
   predictedLockedLiquidity,
   setLockedLiquidityAddress,
@@ -1712,6 +1717,7 @@ function LockedLiquidityPanel({
   exitLockedLiquidity,
   loadLockedLiquidity,
   predictLockedLiquidity,
+  releaseLockedLiquidityClaims,
   removeLockedLiquidity,
   runAction,
 }: {
@@ -1723,6 +1729,7 @@ function LockedLiquidityPanel({
   lockedLiquidityForm: LockedLiquidityForm;
   lockedLiquiditySnapshot: LockedLiquidityState | undefined;
   manageCapability: Capability | undefined;
+  permissionlessCapability: Capability | undefined;
   pendingAction: string | undefined;
   predictedLockedLiquidity: Address | undefined;
   setLockedLiquidityAddress: (address: string) => void;
@@ -1735,17 +1742,19 @@ function LockedLiquidityPanel({
   exitLockedLiquidity: () => Promise<void>;
   loadLockedLiquidity: () => Promise<void>;
   predictLockedLiquidity: () => Promise<void>;
+  releaseLockedLiquidityClaims: () => Promise<void>;
   removeLockedLiquidity: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const lockerSummary = lockerSummaryFor(boardroomSnapshot, lockedLiquiditySnapshot?.address ?? lockedLiquidityAddress);
-  const canUseLockedLiquidityFactory = Boolean(deployment?.lockedLiquidityFactory);
+  const canUseLockedLiquidityFactory = Boolean(deployment?.pledgeV4LiquidityFactory);
   const lockerFacts = lockedLiquidityFacts(lockedLiquiditySnapshot, lockerSummary, predictedLockedLiquidity);
+  const windDownCapabilityReason = capabilityReason(permissionlessCapability);
 
   return (
     <Panel
-      title="Locked Liquidity"
-      description="Configure one permanent pool and locker, then add liquidity repeatedly to that same pair. Active removals use delayed governance; wind-down exits are permissionless, and empty closure is explicit and irreversible."
+      title="Uniswap v4 Protocol Liquidity"
+      description="Configure one canonical PoolId and full-range P4LP vault. The Boardroom controls protocol principal while v4 remains the permissionless swap engine; wind-down can exit principal or release redeemable claims."
       action={
         <Button type="button" variant="secondary" onClick={() => setLockedLiquidityForm((current) => ({ ...current, salt: randomSalt() }))}>
           <Wand2 className="h-4 w-4" />
@@ -1763,6 +1772,7 @@ function LockedLiquidityPanel({
         <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
           <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="decimal" label="Minimum project tokens" setForm={setLockedLiquidityForm} />
           <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="decimal" label="Minimum quote tokens" setForm={setLockedLiquidityForm} />
+          <TextField form={lockedLiquidityForm} field="sqrtPriceX96" inputMode="numeric" label="Initial sqrt price X96" setForm={setLockedLiquidityForm} />
           <TextField description={timestampPreview(lockedLiquidityForm.deadline)} form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Creation deadline" setForm={setLockedLiquidityForm} />
           <Field description="Match the project token to the pool factory’s canonical token ordering." label="Project-token side">
             <div className="flex min-h-11 items-center gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200" role="radiogroup" aria-label="Project-token side">
@@ -1788,7 +1798,7 @@ function LockedLiquidityPanel({
               </label>
             </div>
           </Field>
-          <TextField description="The bytes32 salt fixes the predicted locker address." form={lockedLiquidityForm} field="salt" label="Locker salt" setForm={setLockedLiquidityForm} className="xl:col-span-2" />
+          <TextField description="The bytes32 salt fixes the predicted P4LP vault address." form={lockedLiquidityForm} field="salt" label="Vault salt" setForm={setLockedLiquidityForm} className="xl:col-span-2" />
         </div>
       </details>
       <ActionRow>
@@ -1810,7 +1820,7 @@ function LockedLiquidityPanel({
           onClick={() => void runAction("create-locked-liquidity", createLockedLiquidity)}
         >
           <Lock className="h-4 w-4" />
-          Create Lock
+          Create Canonical Vault
         </ActionButton>
         <ActionButton
           actionId="add-locked-liquidity"
@@ -1824,7 +1834,7 @@ function LockedLiquidityPanel({
         </ActionButton>
       </ActionRow>
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto]">
-        <Field label="Locker address">
+        <Field label="Vault address">
           <Input value={lockedLiquidityAddress} onChange={(event) => setLockedLiquidityAddress(event.target.value)} spellCheck={false} />
         </Field>
         <div className="flex items-end gap-2 border-b border-zinc-800 p-4">
@@ -1846,7 +1856,7 @@ function LockedLiquidityPanel({
         <summary className="cursor-pointer text-sm font-medium text-zinc-300">Removal and wind-down exit bounds</summary>
         <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">Active removal is a delayed controller operation and always returns assets to the Boardroom. During wind-down, anyone may exit the whole position.</p>
         <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-4">
-          <TextField form={lockedLiquidityExitForm} field="liquidity" inputMode="decimal" label="LP tokens to remove" setForm={setLockedLiquidityExitForm} />
+          <TextField form={lockedLiquidityExitForm} field="liquidity" inputMode="decimal" label="v4 liquidity units to remove" setForm={setLockedLiquidityExitForm} />
           <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Minimum token A" setForm={setLockedLiquidityExitForm} />
           <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Minimum token B" setForm={setLockedLiquidityExitForm} />
           <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Removal deadline" setForm={setLockedLiquidityExitForm} />
@@ -1857,13 +1867,17 @@ function LockedLiquidityPanel({
           <ArrowDownToLine className="h-4 w-4" />
           Remove To Boardroom
         </ActionButton>
-        <ActionButton actionId="exit-locked-liquidity" disabled={boardroomSnapshot?.status !== 1 || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={boardroomSnapshot?.status !== 1 ? "The full exit becomes permissionless only during wind-down." : capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
+        <ActionButton actionId="exit-locked-liquidity" disabled={boardroomSnapshot?.status !== 1 || lockedLiquiditySnapshot?.liquidityState !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} title={boardroomSnapshot?.status !== 1 ? "The full exit becomes permissionless only during wind-down." : windDownCapabilityReason} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
           <Flame className="h-4 w-4" />
           Exit During Wind-Down
         </ActionButton>
-        <ActionButton actionId="close-locked-liquidity" disabled={!lockedLiquiditySnapshot || (boardroomSnapshot?.status !== 0 && boardroomSnapshot?.status !== 1) || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("close-locked-liquidity", closeLockedLiquidity)}>
+        <ActionButton actionId="release-locked-liquidity-claims" disabled={boardroomSnapshot?.status !== 1 || lockedLiquiditySnapshot?.liquidityState !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} title={boardroomSnapshot?.status !== 1 ? "P4LP claims can be released only during wind-down." : windDownCapabilityReason} variant="danger" onClick={() => void runAction("release-locked-liquidity-claims", releaseLockedLiquidityClaims)}>
+          <PackageOpen className="h-4 w-4" />
+          Release P4LP Claims
+        </ActionButton>
+        <ActionButton actionId="close-locked-liquidity" disabled={!lockedLiquiditySnapshot || (boardroomSnapshot?.status !== 0 && boardroomSnapshot?.status !== 1) || !capabilityEnabled(boardroomSnapshot?.status === 1 ? permissionlessCapability : manageCapability)} pendingAction={pendingAction} title={capabilityReason(boardroomSnapshot?.status === 1 ? permissionlessCapability : manageCapability)} variant="danger" onClick={() => void runAction("close-locked-liquidity", closeLockedLiquidity)}>
           <XCircle className="h-4 w-4" />
-          Close Empty Position
+          Finalize Liquidity Position
         </ActionButton>
       </ActionRow>
       <CapabilityNotice capability={createCapability} fallback={manageCapability} />

@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import {
-  ammFactoryAbi,
-  ammPoolAbi,
-  ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
@@ -14,13 +11,13 @@ import {
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
-  poolFeesAbi,
+  pledgeV4HookAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   protocolFacetRegistryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -30,9 +27,6 @@ describe("generated SDK exports", () => {
   test("includes core contract ABIs", () => {
     expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
     expect(pledgeCashAbis.DistributionFactory).toBe(distributionFactoryAbi);
-    expect(pledgeCashAbis.AmmFactory).toBe(ammFactoryAbi);
-    expect(pledgeCashAbis.AmmPool).toBe(ammPoolAbi);
-    expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
     expect(pledgeCashAbis.Boardroom).toBe(boardroomAbi);
     expect(pledgeCashAbis.BoardroomController).toBe(boardroomControllerAbi);
     expect(pledgeCashAbis.BoardroomControllerFactory).toBe(boardroomControllerFactoryAbi);
@@ -41,11 +35,11 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.DutchAuctionSale).toBe(dutchAuctionSaleAbi);
-    expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
-    expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
     expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
     expect(pledgeCashAbis.MigratingBondingCurve).toBe(migratingBondingCurveAbi);
-    expect(pledgeCashAbis.PoolFees).toBe(poolFeesAbi);
+    expect(pledgeCashAbis.PledgeV4LiquidityFactory).toBe(pledgeV4LiquidityFactoryAbi);
+    expect(pledgeCashAbis.PledgeV4LiquidityVault).toBe(pledgeV4LiquidityVaultAbi);
+    expect(pledgeCashAbis.PledgeV4Hook).toBe(pledgeV4HookAbi);
     expect(pledgeCashAbis.ProtocolFacetRegistry).toBe(protocolFacetRegistryAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
@@ -57,8 +51,9 @@ describe("generated SDK exports", () => {
     expect(dutchAuctionSaleAbi.some((item) => item.type === "function" && item.name === "finalize")).toBe(true);
     expect(merkleAirdropAbi.some((item) => item.type === "function" && item.name === "claimGrant")).toBe(true);
     expect(migratingBondingCurveAbi.some((item) => item.type === "function" && item.name === "migrate")).toBe(true);
-    expect(ammRouterAbi.some((item) => item.type === "function" && item.name === "swapExactTokensForTokens")).toBe(true);
-    expect(lockedLiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createLockedLiquidity")).toBe(true);
+    expect(pledgeV4LiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createProtocolLiquidity")).toBe(true);
+    expect(pledgeV4LiquidityVaultAbi.some((item) => item.type === "function" && item.name === "depositLiquidityForClaims")).toBe(true);
+    expect(pledgeV4HookAbi.some((item) => item.type === "function" && item.name === "beforeInitialize")).toBe(true);
   });
 
   test("includes governance and participation functions consumed by helpers", () => {
@@ -153,12 +148,6 @@ describe("generated SDK exports", () => {
   });
 
   test("includes checked-in deployment metadata", () => {
-    expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.protocolVersion).toBe("pledge.cash.protocol.v1");
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();
     expect(pledgeCashDeployments[10143]?.chainId).toBe(10143);
     expect(pledgeCashDeployments[10143]?.status).toBe("pending");
     expect(pledgeCashDeployments[10143]?.protocolVersion).toBe("pledge.cash.protocol.v1");

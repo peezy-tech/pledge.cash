@@ -18,7 +18,5 @@ output/playwright/
 
 packages/contracts/deployments/*.json
 !packages/contracts/deployments/10143.json
-!packages/contracts/deployments/998.json
 !packages/contracts/deployments/10143.receipts.json
-!packages/contracts/deployments/998.receipts.json
 packages/contracts/deployments/releases/

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {AmmFactory} from "../amm/AmmFactory.sol";
-import {AmmRouter} from "../amm/AmmRouter.sol";
 import {AssetPolicy} from "../policy/AssetPolicy.sol";
 import {BoardroomGovernanceLogic} from "../boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomMarketLogic} from "../boardroom/BoardroomMarketLogic.sol";
@@ -22,8 +20,8 @@ import {BondMarketFactory} from "../bonds/BondMarketFactory.sol";
 import {DistributionFactory} from "../distribution/DistributionFactory.sol";
 import {ProtocolFeeRouter} from "../fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
-import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 import {BoardroomRewardsFactory} from "../rewards/BoardroomRewardsFactory.sol";
+import {PledgeV4LiquidityFactory} from "../uniswap/PledgeV4LiquidityFactory.sol";
 import {PledgeCashDeterministicDeployer} from "./PledgeCashDeterministicDeployer.sol";
 
 /// @notice Bytecode-bound salts for the sole canonical pledge.cash protocol release.
@@ -104,16 +102,8 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("TokenGrantFactory", keccak256(type(TokenGrantFactory).creationCode));
     }
 
-    function ammFactory() internal pure returns (bytes32) {
-        return _releaseSalt("AmmFactory", keccak256(type(AmmFactory).creationCode));
-    }
-
-    function ammRouter() internal pure returns (bytes32) {
-        return _releaseSalt("AmmRouter", keccak256(type(AmmRouter).creationCode));
-    }
-
-    function lockedLiquidityFactory() internal pure returns (bytes32) {
-        return _releaseSalt("LockedLiquidityFactory", keccak256(type(LockedLiquidityFactory).creationCode));
+    function pledgeV4LiquidityFactory() internal pure returns (bytes32) {
+        return _releaseSalt("PledgeV4LiquidityFactory", keccak256(type(PledgeV4LiquidityFactory).creationCode));
     }
 
     function distributionFactory() internal pure returns (bytes32) {
@@ -155,9 +145,7 @@ library PledgeCashDeploymentSalts {
                 keccak256(type(AssetPolicy).creationCode),
                 keccak256(type(ProtocolFeeRouter).creationCode),
                 keccak256(type(TokenGrantFactory).creationCode),
-                keccak256(type(AmmFactory).creationCode),
-                keccak256(type(AmmRouter).creationCode),
-                keccak256(type(LockedLiquidityFactory).creationCode),
+                keccak256(type(PledgeV4LiquidityFactory).creationCode),
                 keccak256(type(DistributionFactory).creationCode),
                 keccak256(type(BoardroomRewardsFactory).creationCode),
                 keccak256(type(BondMarketFactory).creationCode)

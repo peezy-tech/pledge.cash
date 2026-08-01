@@ -7,8 +7,8 @@ description: Go directly to the pledge.cash workspace that matches what you need
 
 Start with the outcome you want. You can inspect public project state before connecting a wallet.
 
-> **Availability:** canonical protocol v1 is pending on both HyperEVM and
-> Monad testnets. The workflows below describe a verified future deployment or
+> **Availability:** canonical protocol v1 is pending on Monad testnet. The
+> workflows below describe a verified future deployment or
 > a matching local Anvil scenario; public protocol writes are currently
 > unavailable.
 
@@ -21,7 +21,7 @@ Open `Explore`, search by name, symbol, or Boardroom address, then select a proj
 ## I want to buy, claim, or swap project tokens
 
 Open the project’s `Participate` section. The app shows only the routes discovered for that Boardroom: non-transferable
-bond markets, Dutch auctions, fixed-price sales, bonding curves, airdrops, and AMM markets. Review whether the route is
+bond markets, Dutch auctions, fixed-price sales, bonding curves, airdrops, and Uniswap v4 markets. Review whether the route is
 live, then connect the wallet that will act.
 
 [Learn about the project workspace](../using/project-workspace)

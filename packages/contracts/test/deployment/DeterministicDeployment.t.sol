@@ -5,8 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {CREATE3} from "solady/utils/CREATE3.sol";
-import {AmmFactory} from "../../src/amm/AmmFactory.sol";
-import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
 import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
@@ -32,8 +31,9 @@ import {PledgeCashDeploymentSalts} from "../../src/deployment/PledgeCashDeployme
 import {PledgeCashDeterministicDeployer} from "../../src/deployment/PledgeCashDeterministicDeployer.sol";
 import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
-import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
+import {PledgeV4LiquidityFactory} from "../../src/uniswap/PledgeV4LiquidityFactory.sol";
+import {V4PoolManagerMock} from "../helpers/V4PoolManagerMock.sol";
 
 contract DeterministicDeploymentTest is Test {
     address internal owner = address(0xA11CE);
@@ -213,9 +213,7 @@ contract DeterministicDeploymentTest is Test {
                 keccak256(type(AssetPolicy).creationCode),
                 keccak256(type(ProtocolFeeRouter).creationCode),
                 keccak256(type(TokenGrantFactory).creationCode),
-                keccak256(type(AmmFactory).creationCode),
-                keccak256(type(AmmRouter).creationCode),
-                keccak256(type(LockedLiquidityFactory).creationCode),
+                keccak256(type(PledgeV4LiquidityFactory).creationCode),
                 keccak256(type(DistributionFactory).creationCode),
                 keccak256(type(BoardroomRewardsFactory).creationCode),
                 keccak256(type(BondMarketFactory).creationCode)
@@ -290,28 +288,21 @@ contract DeterministicDeploymentTest is Test {
                 abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner, address(boardroomFactory)))
             )
         );
-        AmmFactory ammFactory = AmmFactory(
+        V4PoolManagerMock poolManager = new V4PoolManagerMock();
+        PledgeV4LiquidityFactory liquidityFactory = PledgeV4LiquidityFactory(
             _deploy(
-                PledgeCashDeploymentSalts.ammFactory(),
-                abi.encodePacked(type(AmmFactory).creationCode, abi.encode(owner, address(boardroomFactory)))
-            )
-        );
-        AmmRouter ammRouter = AmmRouter(
-            payable(_deploy(
-                    PledgeCashDeploymentSalts.ammRouter(),
-                    abi.encodePacked(
-                        type(AmmRouter).creationCode, abi.encode(address(ammFactory), address(wrappedNative))
-                    )
-                ))
-        );
-        LockedLiquidityFactory liquidityFactory = LockedLiquidityFactory(
-            _deploy(
-                PledgeCashDeploymentSalts.lockedLiquidityFactory(),
+                PledgeCashDeploymentSalts.pledgeV4LiquidityFactory(),
                 abi.encodePacked(
-                    type(LockedLiquidityFactory).creationCode, abi.encode(address(ammRouter), address(boardroomFactory))
+                    type(PledgeV4LiquidityFactory).creationCode,
+                    abi.encode(
+                        IPoolManager(address(poolManager)), address(boardroomFactory), address(protocolFeeRouter), owner
+                    )
                 )
             )
         );
+        bytes32 hookSalt = _mineHookSalt(liquidityFactory);
+        vm.prank(owner);
+        address hook = liquidityFactory.deployHook(hookSalt);
         DistributionFactory distributionFactory = DistributionFactory(
             _deploy(
                 PledgeCashDeploymentSalts.distributionFactory(),
@@ -331,7 +322,8 @@ contract DeterministicDeploymentTest is Test {
             _deploy(
                 PledgeCashDeploymentSalts.bondMarketFactory(),
                 abi.encodePacked(
-                    type(BondMarketFactory).creationCode, abi.encode(address(ammFactory), address(boardroomFactory))
+                    type(BondMarketFactory).creationCode,
+                    abi.encode(address(liquidityFactory), address(boardroomFactory))
                 )
             )
         );
@@ -339,15 +331,15 @@ contract DeterministicDeploymentTest is Test {
         assertEq(assetPolicy.owner(), owner);
         assertEq(protocolFeeRouter.owner(), owner);
         assertEq(tokenGrantFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(ammFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(ammRouter.factory(), address(ammFactory));
-        assertEq(liquidityFactory.ammRouter(), address(ammRouter));
+        assertEq(address(liquidityFactory.poolManager()), address(poolManager));
+        assertEq(address(liquidityFactory.hook()), hook);
+        assertEq(liquidityFactory.hookSalt(), hookSalt);
         assertEq(liquidityFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(distributionFactory.lockedLiquidityFactory(), address(liquidityFactory));
+        assertEq(distributionFactory.liquidityFactory(), address(liquidityFactory));
         assertEq(distributionFactory.tokenGrantFactory(), address(tokenGrantFactory));
         assertEq(distributionFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(rewardsFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(bondFactory.ammFactory(), address(ammFactory));
+        assertEq(bondFactory.liquidityFactory(), address(liquidityFactory));
         assertEq(bondFactory.boardroomFactory(), address(boardroomFactory));
     }
 
@@ -492,12 +484,10 @@ contract DeterministicDeploymentTest is Test {
             "TokenGrantFactory",
             keccak256(type(TokenGrantFactory).creationCode)
         );
-        _assertSalt(PledgeCashDeploymentSalts.ammFactory(), "AmmFactory", keccak256(type(AmmFactory).creationCode));
-        _assertSalt(PledgeCashDeploymentSalts.ammRouter(), "AmmRouter", keccak256(type(AmmRouter).creationCode));
         _assertSalt(
-            PledgeCashDeploymentSalts.lockedLiquidityFactory(),
-            "LockedLiquidityFactory",
-            keccak256(type(LockedLiquidityFactory).creationCode)
+            PledgeCashDeploymentSalts.pledgeV4LiquidityFactory(),
+            "PledgeV4LiquidityFactory",
+            keccak256(type(PledgeV4LiquidityFactory).creationCode)
         );
         _assertSalt(
             PledgeCashDeploymentSalts.distributionFactory(),
@@ -518,6 +508,14 @@ contract DeterministicDeploymentTest is Test {
 
     function _assertSalt(bytes32 actual, string memory contractName, bytes32 creationCodeHash) internal pure {
         assertEq(actual, _releaseSalt(contractName, creationCodeHash));
+    }
+
+    function _mineHookSalt(PledgeV4LiquidityFactory factory) internal view returns (bytes32 salt) {
+        for (uint256 candidate; candidate < 100_000; ++candidate) {
+            salt = bytes32(candidate);
+            if (uint160(factory.predictHookAddress(salt)) & ((1 << 14) - 1) == (1 << 13)) return salt;
+        }
+        revert("hook salt");
     }
 
     function _releaseSalt(string memory contractName, bytes32 creationCodeHash) internal pure returns (bytes32) {

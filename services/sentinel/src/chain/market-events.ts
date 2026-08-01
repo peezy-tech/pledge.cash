@@ -1,8 +1,8 @@
 import {
   boardroomAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
   migratingBondingCurveAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   type PledgeCashLogClient
 } from "@pledge.cash/sdk";
 import { getAbiItem, type Abi, type AbiEvent, type Address, type Hex } from "viem";
@@ -34,13 +34,13 @@ export type MarketLifecycleEventKind =
   | keyof typeof BOARDROOM_EVENT_FIELDS
   | keyof typeof CURVE_EVENT_FIELDS
   | keyof typeof LIQUIDITY_FACTORY_EVENT_FIELDS
-  | keyof typeof LIQUIDITY_LOCKER_EVENT_FIELDS;
+  | keyof typeof LIQUIDITY_VAULT_EVENT_FIELDS;
 
 export type MarketBoardroomBinding = {
   readonly boardroom: Address;
   readonly bondingCurve?: Address | null;
-  readonly liquidityLocker?: Address | null;
-  readonly liquidityReservationExpectedLocker?: Address | null;
+  readonly liquidityVault?: Address | null;
+  readonly liquidityReservationExpectedVault?: Address | null;
 };
 
 export type BoardroomMarketStateUpdate = {
@@ -50,12 +50,12 @@ export type BoardroomMarketStateUpdate = {
   readonly bondingCurvePhaseEndsAt?: bigint;
   readonly bondingCurveSettlementReason?: number;
   readonly clearLiquidityReservation?: boolean;
-  readonly liquidityLocker?: Lowercase<Address>;
-  readonly liquidityPool?: Lowercase<Address>;
+  readonly liquidityVault?: Lowercase<Address>;
+  readonly liquidityPoolId?: Lowercase<Hex>;
   readonly liquidityQuoteAsset?: Lowercase<Address>;
   readonly liquidityReservationCurve?: Lowercase<Address>;
-  readonly liquidityReservationExpectedLocker?: Lowercase<Address>;
-  readonly liquidityReservationExpectedPool?: Lowercase<Address>;
+  readonly liquidityReservationExpectedVault?: Lowercase<Address>;
+  readonly liquidityReservationExpectedPoolId?: Lowercase<Hex>;
   readonly liquidityReservationExpiresAt?: bigint;
   readonly liquidityReservationPairKey?: Lowercase<Hex>;
   readonly liquidityReservationSalt?: Lowercase<Hex>;
@@ -71,22 +71,22 @@ const BOARDROOM_EVENT_FIELDS = {
   BondingCurvePrecommitted: { curve: "address", quoteAsset: "address", fundingAmount: "uint" },
   PrimaryMarketModeChanged: { mode: "uint" },
   ProtocolLiquidityActivated: {
-    locker: "address",
-    pool: "address",
+    vault: "address",
+    poolId: "hex",
     quoteAsset: "address",
     curve: "address"
   },
-  ProtocolLiquidityClosed: { locker: "address", pool: "address", quoteAsset: "address" },
+  ProtocolLiquidityClosed: { vault: "address", poolId: "hex", quoteAsset: "address" },
   ProtocolLiquidityReservationReleased: {
     curve: "address",
-    expectedLocker: "address",
+    expectedVault: "address",
     salt: "hex"
   },
   ProtocolLiquidityReserved: {
-    expectedLocker: "address",
+    expectedVault: "address",
+    expectedPoolId: "hex",
     quoteAsset: "address",
     curve: "address",
-    pairKey: "hex",
     salt: "hex",
     expiresAt: "uint"
   }
@@ -95,8 +95,8 @@ const BOARDROOM_EVENT_FIELDS = {
 const CURVE_EVENT_FIELDS = {
   CurveGraduationLatched: { quoteReserve: "uint", remainingShares: "uint", migrationEndsAt: "uint" },
   CurveMigrated: {
-    locker: "address",
-    pool: "address",
+    vault: "address",
+    poolId: "hex",
     sharesToLiquidity: "uint",
     quoteToLiquidity: "uint",
     liquidity: "uint",
@@ -125,56 +125,75 @@ const CURVE_EVENT_FIELDS = {
 } as const satisfies Readonly<Record<string, EventFields>>;
 
 const LIQUIDITY_FACTORY_EVENT_FIELDS = {
-  MigrationReservationReleased: { boardroom: "address", curve: "address", salt: "hex" },
+  MigrationReservationReleased: { boardroom: "address", curve: "address", expectedPoolId: "hex", salt: "hex" },
   MigrationReserved: {
     boardroom: "address",
     curve: "address",
-    expectedLocker: "address",
-    expectedPool: "address",
+    expectedVault: "address",
+    expectedPoolId: "hex",
     salt: "hex"
   },
   ProtocolLiquidityAdded: {
     boardroom: "address",
-    locker: "address",
-    pool: "address",
+    vault: "address",
+    poolId: "hex",
     amountA: "uint",
     amountB: "uint",
     liquidity: "uint"
   },
   ProtocolLiquidityCreated: {
-    locker: "address",
+    vault: "address",
     boardroom: "address",
-    pool: "address",
+    poolId: "hex",
     quoteAsset: "address",
     amountA: "uint",
     amountB: "uint",
     liquidity: "uint",
+    sqrtPriceX96: "uint",
     salt: "hex",
     curve: "address"
   },
-  ProtocolLiquidityPositionClosed: { boardroom: "address", locker: "address", pool: "address" },
+  ProtocolLiquidityPositionClosed: { boardroom: "address", vault: "address", poolId: "hex" },
   ProtocolLiquidityRemoved: {
     boardroom: "address",
-    locker: "address",
-    pool: "address",
+    vault: "address",
+    poolId: "hex",
     liquidity: "uint",
     amountA: "uint",
     amountB: "uint"
   }
 } as const satisfies Readonly<Record<string, EventFields>>;
 
-const LIQUIDITY_LOCKER_EVENT_FIELDS = {
-  FeesForwarded: { boardroom: "address", amount0: "uint", amount1: "uint" },
-  LiquidityAdded: { pool: "address", amountA: "uint", amountB: "uint", liquidity: "uint" },
-  LiquidityClosed: { pool: "address" },
-  LiquidityRemoved: { pool: "address", liquidity: "uint", amountA: "uint", amountB: "uint" },
-  LiquidityReturnedAsLp: { pool: "address", boardroom: "address", liquidity: "uint" },
-  LockedLiquidityInitialized: {
+const LIQUIDITY_VAULT_EVENT_FIELDS = {
+  FeesForwarded: {
     boardroom: "address",
-    router: "address",
+    protocolFeeRecipient: "address",
+    boardroomAmount0: "uint",
+    boardroomAmount1: "uint",
+    protocolAmount0: "uint",
+    protocolAmount1: "uint"
+  },
+  LiquidityAdded: { poolId: "hex", amountA: "uint", amountB: "uint", liquidity: "uint" },
+  LiquidityClaimsMinted: { depositor: "address", recipient: "address", claims: "uint" },
+  LiquidityClosed: { poolId: "hex" },
+  LiquidityRemoved: { poolId: "hex", liquidity: "uint", amountA: "uint", amountB: "uint" },
+  PledgeV4LiquidityVaultInitialized: {
+    boardroom: "address",
+    poolId: "hex",
+    poolManager: "address",
     tokenA: "address",
-    tokenB: "address"
-  }
+    tokenB: "address",
+    positionSalt: "hex"
+  },
+  PositionClaimsRedeemed: {
+    holder: "address",
+    recipient: "address",
+    claims: "uint",
+    liquidity: "uint",
+    amountA: "uint",
+    amountB: "uint"
+  },
+  PositionClaimsReleased: { poolId: "hex", boardroom: "address", claims: "uint" }
 } as const satisfies Readonly<Record<string, EventFields>>;
 
 type RawEventLog = {
@@ -191,7 +210,7 @@ export async function queryMarketLifecycleEvents(
   input: {
     readonly boardrooms: readonly MarketBoardroomBinding[];
     readonly fromBlock: bigint;
-    readonly lockedLiquidityFactory?: Address;
+    readonly pledgeV4LiquidityFactory?: Address;
     readonly toBlock: bigint;
   }
 ): Promise<MarketLifecycleEvent[]> {
@@ -214,26 +233,26 @@ export async function queryMarketLifecycleEvents(
   );
 
   const curveToBoardroom = new Map<string, Lowercase<Address>>();
-  const lockerToBoardroom = new Map<string, Lowercase<Address>>();
+  const vaultToBoardroom = new Map<string, Lowercase<Address>>();
   for (const binding of input.boardrooms) {
     addBinding(curveToBoardroom, binding.bondingCurve, binding.boardroom);
-    addBinding(lockerToBoardroom, binding.liquidityLocker, binding.boardroom);
-    addBinding(lockerToBoardroom, binding.liquidityReservationExpectedLocker, binding.boardroom);
+    addBinding(vaultToBoardroom, binding.liquidityVault, binding.boardroom);
+    addBinding(vaultToBoardroom, binding.liquidityReservationExpectedVault, binding.boardroom);
   }
   for (const event of boardroomEvents) {
     if (event.kind === "BondingCurvePrecommitted") addBinding(curveToBoardroom, dataAddress(event, "curve"), event.boardroom);
-    if (event.kind === "ProtocolLiquidityActivated") addBinding(lockerToBoardroom, dataAddress(event, "locker"), event.boardroom);
+    if (event.kind === "ProtocolLiquidityActivated") addBinding(vaultToBoardroom, dataAddress(event, "vault"), event.boardroom);
     if (event.kind === "ProtocolLiquidityReserved") {
-      addBinding(lockerToBoardroom, dataAddress(event, "expectedLocker"), event.boardroom);
+      addBinding(vaultToBoardroom, dataAddress(event, "expectedVault"), event.boardroom);
     }
   }
 
   const factoryEvents: MarketLifecycleEvent[] = [];
-  if (input.lockedLiquidityFactory) {
+  if (input.pledgeV4LiquidityFactory) {
     const factoryLogs = await queryNamedEvents(
       client,
-      [input.lockedLiquidityFactory],
-      lockedLiquidityFactoryAbi,
+      [input.pledgeV4LiquidityFactory],
+      pledgeV4LiquidityFactoryAbi,
       LIQUIDITY_FACTORY_EVENT_FIELDS,
       input.fromBlock,
       input.toBlock
@@ -249,9 +268,9 @@ export async function queryMarketLifecycleEvents(
       factoryEvents.push(parsed);
       if (parsed.kind === "MigrationReserved") {
         addBinding(curveToBoardroom, dataAddress(parsed, "curve"), parsed.boardroom);
-        addBinding(lockerToBoardroom, dataAddress(parsed, "expectedLocker"), parsed.boardroom);
+        addBinding(vaultToBoardroom, dataAddress(parsed, "expectedVault"), parsed.boardroom);
       } else if (parsed.kind === "ProtocolLiquidityCreated") {
-        addBinding(lockerToBoardroom, dataAddress(parsed, "locker"), parsed.boardroom);
+        addBinding(vaultToBoardroom, dataAddress(parsed, "vault"), parsed.boardroom);
       }
     }
   }
@@ -265,17 +284,17 @@ export async function queryMarketLifecycleEvents(
     input.fromBlock,
     input.toBlock
   );
-  const lockerEvents = await queryBoundEvents(
+  const vaultEvents = await queryBoundEvents(
     client,
-    lockerToBoardroom,
-    lockedLiquidityAbi,
-    LIQUIDITY_LOCKER_EVENT_FIELDS,
+    vaultToBoardroom,
+    pledgeV4LiquidityVaultAbi,
+    LIQUIDITY_VAULT_EVENT_FIELDS,
     "liquidity-locker",
     input.fromBlock,
     input.toBlock
   );
 
-  return [...boardroomEvents, ...factoryEvents, ...curveEvents, ...lockerEvents].sort(compareMarketEvents);
+  return [...boardroomEvents, ...factoryEvents, ...curveEvents, ...vaultEvents].sort(compareMarketEvents);
 }
 
 export function marketStateUpdateForEvent(event: MarketLifecycleEvent): BoardroomMarketStateUpdate | undefined {
@@ -295,9 +314,10 @@ export function marketStateUpdateForEvent(event: MarketLifecycleEvent): Boardroo
         ...update,
         liquidityQuoteAsset: dataAddress(event, "quoteAsset"),
         liquidityReservationCurve: dataAddress(event, "curve"),
-        liquidityReservationExpectedLocker: dataAddress(event, "expectedLocker"),
+        liquidityReservationExpectedVault: dataAddress(event, "expectedVault"),
+        liquidityReservationExpectedPoolId: dataHex(event, "expectedPoolId"),
         liquidityReservationExpiresAt: dataBigInt(event, "expiresAt"),
-        liquidityReservationPairKey: dataHex(event, "pairKey"),
+        liquidityReservationPairKey: dataHex(event, "expectedPoolId"),
         liquidityReservationSalt: dataHex(event, "salt"),
         primaryMarketQuoteAsset: dataAddress(event, "quoteAsset")
       };
@@ -305,8 +325,8 @@ export function marketStateUpdateForEvent(event: MarketLifecycleEvent): Boardroo
       return {
         ...update,
         liquidityReservationCurve: dataAddress(event, "curve"),
-        liquidityReservationExpectedLocker: dataAddress(event, "expectedLocker"),
-        liquidityReservationExpectedPool: dataAddress(event, "expectedPool"),
+        liquidityReservationExpectedVault: dataAddress(event, "expectedVault"),
+        liquidityReservationExpectedPoolId: dataHex(event, "expectedPoolId"),
         liquidityReservationSalt: dataHex(event, "salt")
       };
     case "ProtocolLiquidityActivated":
@@ -314,8 +334,8 @@ export function marketStateUpdateForEvent(event: MarketLifecycleEvent): Boardroo
       return {
         ...update,
         clearLiquidityReservation: true,
-        liquidityLocker: dataAddress(event, "locker"),
-        liquidityPool: dataAddress(event, "pool"),
+        liquidityVault: dataAddress(event, "vault"),
+        liquidityPoolId: dataHex(event, "poolId"),
         liquidityQuoteAsset: dataAddress(event, "quoteAsset"),
         primaryMarketQuoteAsset: dataAddress(event, "quoteAsset"),
         liquidityStatus: 1
@@ -324,8 +344,8 @@ export function marketStateUpdateForEvent(event: MarketLifecycleEvent): Boardroo
       return {
         ...update,
         clearLiquidityReservation: true,
-        liquidityLocker: dataAddress(event, "locker"),
-        liquidityPool: dataAddress(event, "pool"),
+        liquidityVault: dataAddress(event, "vault"),
+        liquidityPoolId: dataHex(event, "poolId"),
         liquidityStatus: 1
       };
     case "ProtocolLiquidityClosed":

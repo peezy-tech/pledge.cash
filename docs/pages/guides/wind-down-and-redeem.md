@@ -51,19 +51,21 @@ quarantine plus an unvetoed seven-day window; a 1% current-and-previous-block el
 Only recovery or finalized forfeiture closes that dependency and releases its liquidity reservation. Do not bypass it
 with a fabricated close state.
 
-## 3. Exit and close singleton liquidity
+## 3. Resolve singleton P4LP liquidity
 
-Each Boardroom has at most one canonical locker and pool.
+Each Boardroom has at most one canonical P4LP vault and Uniswap v4 PoolId.
 
 During WindingDown anyone may:
 
-1. attempt full exact exit to the Boardroom;
-2. use the hostile-token fallback that returns the LP token claim to the Boardroom when exact underlying exit cannot
-   complete;
-3. explicitly close the empty, reservation-free singleton.
+1. attempt full exact exit of the vault position to the Boardroom;
+2. use the hostile-token fallback, which calls neither underlying, enters Claims, and transfers protocol-held P4LP to
+   the Boardroom;
+3. call the Boardroom close/finalize route to mark the factory and Boardroom singleton Closed and prune its obligation.
 
-A zero LP balance is not closure. Verify `liquidityStatus() == Closed`, with no pending migration reservation, before
-snapshotting. Removed assets always return to the Boardroom.
+P4LP was registered as an obligation dependency when the vault was created. The Claims fallback therefore lets the
+Boardroom close its lifecycle record before the vault position is empty, while external claim holders retain their
+proportional redemption route. Verify no migration reservation remains and that the P4LP snapshot entry is included.
+An exact exit with no external claims can instead empty and close the vault immediately.
 
 ## 4. Begin Snapshotting
 

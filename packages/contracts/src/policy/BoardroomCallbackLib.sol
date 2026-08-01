@@ -15,38 +15,38 @@ interface IBoardroomCallbackTarget {
 
     function recordGrantFromDistribution(bytes32 expectedFacetSetHash, address grant) external;
 
-    function recordLockedLiquidityFromDistribution(bytes32 expectedFacetSetHash, address locker, address pool) external;
+    function recordProtocolLiquidityFromDistribution(bytes32 expectedFacetSetHash, address vault, bytes32 poolId)
+        external;
 
     function settleBondingCurve(bytes32 expectedFacetSetHash) external;
 
     function precommitProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external;
 
     function activateProtocolLiquidity(
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external;
 
     function releaseProtocolLiquidityReservation(
         bytes32 expectedFacetSetHash,
         address curve,
-        bytes32 pairKey,
+        bytes32 expectedPoolId,
         bytes32 salt
     ) external;
 
-    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address locker) external;
+    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address vault) external;
 }
 
 /// @notice Hash-bound callbacks shared by canonical module factories and children.
@@ -90,13 +90,13 @@ library BoardroomCallbackLib {
         IBoardroomCallbackTarget(boardroom).recordGrantFromDistribution(expectedFacetSetHash, grant);
     }
 
-    function recordLockedLiquidityFromDistribution(
+    function recordProtocolLiquidityFromDistribution(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool
+        address vault,
+        bytes32 poolId
     ) internal {
-        IBoardroomCallbackTarget(boardroom).recordLockedLiquidityFromDistribution(expectedFacetSetHash, locker, pool);
+        IBoardroomCallbackTarget(boardroom).recordProtocolLiquidityFromDistribution(expectedFacetSetHash, vault, poolId);
     }
 
     function settleBondingCurve(address boardroom, bytes32 expectedFacetSetHash) internal {
@@ -106,47 +106,46 @@ library BoardroomCallbackLib {
     function precommitProtocolLiquidity(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) internal {
         IBoardroomCallbackTarget(boardroom)
             .precommitProtocolLiquidity(
-                expectedFacetSetHash, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
+                expectedFacetSetHash, expectedVault, expectedPoolId, quoteAsset, curve, salt, expiresAt
             );
     }
 
     function activateProtocolLiquidity(
         address boardroom,
         bytes32 expectedFacetSetHash,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) internal {
         IBoardroomCallbackTarget(boardroom)
-            .activateProtocolLiquidity(expectedFacetSetHash, locker, pool, quoteAsset, curve, pairKey, salt);
+            .activateProtocolLiquidity(expectedFacetSetHash, vault, poolId, quoteAsset, curve, salt);
     }
 
     function releaseProtocolLiquidityReservation(
         address boardroom,
         bytes32 expectedFacetSetHash,
         address curve,
-        bytes32 pairKey,
+        bytes32 expectedPoolId,
         bytes32 salt
     ) internal {
         IBoardroomCallbackTarget(boardroom)
-            .releaseProtocolLiquidityReservation(expectedFacetSetHash, curve, pairKey, salt);
+            .releaseProtocolLiquidityReservation(expectedFacetSetHash, curve, expectedPoolId, salt);
     }
 
-    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address locker)
+    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address vault)
         internal
     {
-        IBoardroomCallbackTarget(boardroom).closeProtocolLiquidityFromFactory(expectedFacetSetHash, locker);
+        IBoardroomCallbackTarget(boardroom).closeProtocolLiquidityFromFactory(expectedFacetSetHash, vault);
     }
 }

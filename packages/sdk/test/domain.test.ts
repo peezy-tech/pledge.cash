@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { decodeFunctionData, type Address, type Hex } from "viem";
+import { decodeAbiParameters, decodeFunctionData, getAddress, parseAbiParameters, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
   boardroomControllerAbi,
-  buildAmmSwapExactTokensForTokensTransaction,
+  buildUniswapV4SwapExactInputSingleTransaction,
   buildBoardroomReplaceControllerCall,
   buildBoardroomVetoOperationTransaction,
   buildControllerExecuteBoardroomOperationTransaction,
   buildControllerScheduleBoardroomOperationTransaction,
   buildControllerUpdateConfigurationData,
+  deriveUniswapV4SqrtPriceX96,
   buildBoardroomLaunchTransaction,
   buildBoardroomMintCall,
   buildDutchAuctionBuyTransaction,
@@ -46,6 +47,7 @@ const salt = "0x1111111111111111111111111111111111111111111111111111111111111111
 const expectedFacetSetHash = "0x3333333333333333333333333333333333333333333333333333333333333333" as Hex;
 const actionHash = "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
 const controller = "0x000000000000000000000000000000000000c011" as Address;
+const Q96 = 1n << 96n;
 
 const call = {
   policy,
@@ -53,6 +55,23 @@ const call = {
   value: 7n,
   data: "0x12345678" as Hex,
 } satisfies BoardroomCall;
+
+describe("Uniswap v4 price derivation", () => {
+  test("derives the same currency-ordered price from either token input order", () => {
+    expect(deriveUniswapV4SqrtPriceX96({
+      tokenA: paymentToken,
+      tokenB: shareToken,
+      amountA: 1n,
+      amountB: 4n,
+    })).toBe(2n * Q96);
+    expect(deriveUniswapV4SqrtPriceX96({
+      tokenA: shareToken,
+      tokenB: paymentToken,
+      amountA: 4n,
+      amountB: 1n,
+    })).toBe(2n * Q96);
+  });
+});
 
 describe("governance transaction planning", () => {
   test("builds launch, schedule, execution, and veto envelopes for the external controller", () => {
@@ -268,17 +287,55 @@ describe("participation readers and builders", () => {
       functionName: "buy",
       args: [100n, recipient, 251n, 900n],
     });
-    expect(buildAmmSwapExactTokensForTokensTransaction({
-      router: factory,
+    const v4Swap = buildUniswapV4SwapExactInputSingleTransaction({
+      universalRouter: factory,
+      poolKey: {
+        currency0: paymentToken,
+        currency1: shareToken,
+        fee: 3_000,
+        tickSpacing: 60,
+        hooks: policy,
+      },
+      currencyIn: paymentToken,
       amountIn: 250n,
       amountOutMin: 99n,
-      path: [paymentToken, shareToken],
       recipient,
       deadline: 900n,
-    })).toMatchObject({
+    });
+    const [actions, actionParams] = decodeAbiParameters(
+      parseAbiParameters("bytes actions, bytes[] params"),
+      v4Swap.args[1][0],
+    );
+    expect(actions).toBe("0x060c0e");
+    expect(actionParams).toHaveLength(3);
+    expect(decodeAbiParameters(
+      parseAbiParameters(
+        "(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, bytes hookData",
+      ),
+      actionParams[0]!,
+    )).toEqual([
+      {
+        currency0: getAddress(paymentToken),
+        currency1: getAddress(shareToken),
+        fee: 3_000,
+        tickSpacing: 60,
+        hooks: getAddress(policy),
+      },
+      true,
+      250n,
+      99n,
+      "0x",
+    ]);
+    expect(decodeAbiParameters(parseAbiParameters("address currency, uint256 amount"), actionParams[1]!))
+      .toEqual([paymentToken, 250n]);
+    expect(decodeAbiParameters(
+      parseAbiParameters("address currency, address recipient, uint256 amount"),
+      actionParams[2]!,
+    )).toEqual([shareToken, getAddress(recipient), 0n]);
+    expect(v4Swap).toMatchObject({
       address: factory,
-      functionName: "swapExactTokensForTokens",
-      args: [250n, 99n, [paymentToken, shareToken], recipient, 900n],
+      functionName: "execute",
+      args: ["0x10", [expect.stringMatching(/^0x/)], 900n],
     });
   });
 
@@ -333,11 +390,11 @@ describe("participation readers and builders", () => {
       return {
         factory,
         boardroom,
-        lockedLiquidityFactory: factory,
+        liquidityFactory: factory,
         shareToken,
         quoteToken: paymentToken,
-        locker: recipient,
-        pool: sale,
+        liquidityVault: recipient,
+        liquidityPoolId: salt,
         saleSupply: 1_000n,
         migrationSupply: 500n,
         remainingSaleShares: 800n,

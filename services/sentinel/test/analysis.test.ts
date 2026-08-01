@@ -73,18 +73,18 @@ describe("analyzeAction", () => {
       expect(abiExcerpts.TokenGrantFactory?.map((item) => item.name)).toEqual(
         expect.arrayContaining(["createGrant", "createGrantFromDistribution", "setCreationFee"])
       );
-      expect(abiExcerpts.LockedLiquidityFactory?.map((item) => item.name)).toEqual(
+      expect(abiExcerpts.PledgeV4LiquidityFactory?.map((item) => item.name)).toEqual(
         expect.arrayContaining([
           "ProtocolLiquidityCreated",
           "MigrationReserved",
-          "createLockedLiquidity",
-          "addLockedLiquidity",
-          "removeLockedLiquidity",
-          "closeLockedLiquidity"
+          "createProtocolLiquidity",
+          "addProtocolLiquidity",
+          "removeProtocolLiquidity",
+          "closeProtocolLiquidity"
         ])
       );
-      expect(abiExcerpts.LockedLiquidity?.map((item) => item.name)).toEqual(
-        expect.arrayContaining(["claimFees", "FeesForwarded", "LiquidityReturnedAsLp"])
+      expect(abiExcerpts.PledgeV4LiquidityVault?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["claimFees", "FeesForwarded", "PositionClaimsReleased"])
       );
       expect(abiExcerpts.MigratingBondingCurve?.map((item) => item.name)).toEqual(
         expect.arrayContaining([

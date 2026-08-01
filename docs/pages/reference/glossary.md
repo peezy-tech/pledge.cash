@@ -9,7 +9,7 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | --- | --- |
 | Active | Boardroom state in which allowed issuance and participation can continue. It can be pre-launch or launched. |
 | Airdrop manifest | Offchain data that maps a claim index and account to amount, proof, claim mode, and optional grant terms. The root commits to it, but the contract does not publish it. |
-| AMM | Automated market maker that swaps supported ERC20 pairs through a constant-product pool. |
+| AMM | Automated market maker. pledge.cash uses canonical Uniswap v4 PoolKeys for exchange execution rather than owning a separate reserve ledger. |
 | Boardroom | Canonical onchain project account and permanent asset-holding execution gateway whose kernel routes protocol functions through the active facet release. |
 | BoardroomFactory | Deployment root that creates and recognizes canonical Boardrooms. |
 | Boardroom owner | Address with direct pre-launch authority and certain lifecycle powers. Ownership does not survive as direct treasury execution after launch. |
@@ -29,10 +29,11 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | Governance epoch | Boardroom version counter that invalidates older controller operations when controller or lifecycle context changes. |
 | Holder | Current grant-right owner for a grant, or a project-share owner in governance/redemption context. Read the surrounding context. |
 | Issuer | Account or Boardroom that escrows tokens into a grant and receives paid-settlement proceeds. |
-| Locked liquidity | Boardroom-owned LP principal held in a canonical locker until wind-down exit rules apply. |
+| P4LP | ERC20 claim issued by a canonical pledge.cash vault, one unit per unit of its full-range Uniswap v4 position liquidity. |
+| Protocol liquidity | The Boardroom-governed portion of one canonical P4LP vault and PoolId; external P4LP claims remain holder-owned. |
 | Merkle proof | Sibling hashes proving one exact leaf belongs to a published Merkle root. |
 | Migration required | Boardroom state after a storage-version activation but before that individual Boardroom has applied the release-pinned atomic migration; ordinary writes are blocked. |
-| Obligation | Recorded grant, distribution, or locker that must close before Boardroom redemptions open. |
+| Obligation | Recorded grant, distribution, or active liquidity vault that must be resolved before Boardroom redemptions open. |
 | Payment token | ERC20 paid in a sale or paid grant. It is distinct from the delivered grant token in a paid grant. |
 | Pending deployment | Artifact state that deliberately withholds protocol addresses until a current stack is broadcast and verified. |
 | Policy | Contract that authorizes a bounded Boardroom call or module lifecycle operation. |

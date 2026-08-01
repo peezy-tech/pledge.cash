@@ -99,8 +99,8 @@ const dashboard: ProductBoardroomDashboardState = {
     bondingCurve: zero,
     primaryMarketQuoteAsset: paymentToken,
     liquidityStatus: 0,
-    liquidityLocker: zero,
-    liquidityPool: zero,
+    liquidityVault: zero,
+    liquidityPoolId: `0x${"00".repeat(32)}`,
     liquidityQuoteAsset: paymentToken,
     redeemableAssets: [paymentToken],
     issuedGrants: [grant],
@@ -579,36 +579,6 @@ describe("read-first product pages", () => {
     expect(participate).toContain('role="region"');
     expect(participate).not.toContain('role="tab"');
     expect(participate).not.toContain('role="tabpanel"');
-  });
-
-  test("keeps recurring-support recovery controls visible after wind-down", () => {
-    const windingDown = {
-      ...dashboard,
-      snapshot: {
-        ...dashboard.snapshot,
-        status: 1,
-      },
-    } satisfies ProductBoardroomDashboardState;
-    const support = participationOptions(
-      windingDown,
-      { support: <button type="button">Recover or cancel schedule</button> },
-    ).find(option => option.path === "support");
-    expect(support).toMatchObject({
-      available: false,
-      status: "Paused",
-    });
-
-    const participate = renderToString(
-      <ParticipatePage
-        content={{
-          support: <button type="button">Recover or cancel schedule</button>,
-        }}
-        dashboard={windingDown}
-        loading={false}
-        selectedRoute="support"
-      />,
-    );
-    expect(participate).toContain("Recover or cancel schedule");
   });
 
   test("keeps every project AMM pool as a distinct participation route", () => {

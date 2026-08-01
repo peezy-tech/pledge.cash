@@ -15,10 +15,9 @@ import {
   knownMetric,
   notIndexedMarketActivity24h,
   routeLiveness,
-  routeLivenessForAmm,
-  swapExecutionMetrics,
+  routeLivenessForUniswapV4,
   unknownMetric,
-  verifiedAmmSpotPrice,
+  verifiedUniswapV4SpotPrice,
   verifiedSupplyOutsideTreasury,
   verifiedTotalSupply,
   type MetricState,
@@ -38,69 +37,70 @@ const completeCoverage = {
   distributionSet: { complete: true },
   history: { complete: true },
 } as const;
+const Q96 = 1n << 96n;
 
 describe("truthful market data", () => {
-  test("normalizes 6/18 decimal AMM spot and exposes oriented token-unit depth", () => {
-    const token1Project = requireKnown(verifiedAmmSpotPrice({
+  test("normalizes Uniswap v4 slot0 and exposes oriented active-liquidity depth", () => {
+    const token1Project = requireKnown(verifiedUniswapV4SpotPrice({
       pool,
-      token0: quote,
-      token1: project,
-      reserve0: 2_500_000n,
-      reserve1: 5n * 10n ** 18n,
+      currency0: quote,
+      currency1: project,
+      sqrtPriceX96: Q96,
+      liquidity: 5n * 10n ** 18n,
       projectToken: project,
       projectDecimals: 18,
       quoteToken: quote,
-      quoteDecimals: 6,
+      quoteDecimals: 18,
     }));
 
-    expect(token1Project.quotePerBase).toEqual(exactRational(1n, 2n));
+    expect(token1Project.quotePerBase).toEqual(exactRational(1n));
     expect(token1Project.projectDepth.units).toEqual(exactRational(5n));
-    expect(token1Project.quoteDepth.units).toEqual(exactRational(5n, 2n));
+    expect(token1Project.quoteDepth.units).toEqual(exactRational(5n));
 
-    const token0Project = requireKnown(verifiedAmmSpotPrice({
+    const token0Project = requireKnown(verifiedUniswapV4SpotPrice({
       pool,
-      token0: project,
-      token1: quote,
-      reserve0: 5n * 10n ** 18n,
-      reserve1: 2_500_000n,
+      currency0: project,
+      currency1: quote,
+      sqrtPriceX96: Q96,
+      liquidity: 5n * 10n ** 18n,
       projectToken: project,
       projectDecimals: 18,
       quoteToken: quote,
-      quoteDecimals: 6,
+      quoteDecimals: 18,
     }));
     expect(token0Project.quotePerBase).toEqual(token1Project.quotePerBase);
     expect(token0Project.projectDepth.raw).toBe(5n * 10n ** 18n);
-    expect(token0Project.quoteDepth.raw).toBe(2_500_000n);
+    expect(token0Project.quoteDepth.raw).toBe(5n * 10n ** 18n);
   });
 
-  test("does not invent a spot price for zero reserves or mismatched pool tokens", () => {
-    const empty = verifiedAmmSpotPrice({
+  test("does not invent a v4 spot price without active liquidity or for a mismatched PoolKey", () => {
+    const empty = verifiedUniswapV4SpotPrice({
       pool,
-      token0: quote,
-      token1: project,
-      reserve0: 0n,
-      reserve1: 10n ** 18n,
+      currency0: quote,
+      currency1: project,
+      sqrtPriceX96: Q96,
+      liquidity: 0n,
       projectToken: project,
       projectDecimals: 18,
       quoteToken: quote,
-      quoteDecimals: 6,
+      quoteDecimals: 18,
     });
     expect(empty.status).toBe("unavailable");
-    expect(requireIssue(empty).reason).toContain("no two-sided liquidity");
+    expect(requireIssue(empty).reason).toContain("no active liquidity");
 
-    const mismatch = verifiedAmmSpotPrice({
+    const mismatch = verifiedUniswapV4SpotPrice({
       pool,
-      token0: quote,
-      token1: foreign,
-      reserve0: 1_000_000n,
-      reserve1: 10n ** 18n,
+      currency0: quote,
+      currency1: foreign,
+      sqrtPriceX96: Q96,
+      liquidity: 10n ** 18n,
       projectToken: project,
       projectDecimals: 18,
       quoteToken: quote,
-      quoteDecimals: 6,
+      quoteDecimals: 18,
     });
     expect(mismatch.status).toBe("unavailable");
-    expect(requireIssue(mismatch).reason).toContain("does not match");
+    expect(requireIssue(mismatch).reason).toContain("do not match");
   });
 
   test("keeps fixed-sale, Dutch-auction, and exact curve quotes as route prices, not AMM spot", () => {
@@ -331,16 +331,16 @@ describe("truthful market data", () => {
   });
 
   test("keeps market cap and FDV independent and uses AMM spot only", () => {
-    const spot = verifiedAmmSpotPrice({
+    const spot = verifiedUniswapV4SpotPrice({
       pool,
-      token0: quote,
-      token1: project,
-      reserve0: 500_000_000n,
-      reserve1: 1_000n * 10n ** 18n,
+      currency0: quote,
+      currency1: project,
+      sqrtPriceX96: Q96,
+      liquidity: 1_000n * 10n ** 18n,
       projectToken: project,
       projectDecimals: 18,
       quoteToken: quote,
-      quoteDecimals: 6,
+      quoteDecimals: 18,
     });
     const distributedUnknown = unknownMetric<ReturnType<typeof exactTokenAmount>>("Distribution history is partial.");
     const totalSupply = verifiedTotalSupply(project, 1_000n * 10n ** 18n, 18);
@@ -349,13 +349,13 @@ describe("truthful market data", () => {
     expect(independent.marketCap.status).toBe("unknown");
     expect(requireIssue(independent.marketCap).reason).toBe("Distribution history is partial.");
     const fdv = requireKnown(independent.fullyDilutedValue);
-    expect(fdv.units).toEqual(exactRational(500n));
-    expect(fdv.raw).toEqual(exactRational(500_000_000n));
+    expect(fdv.units).toEqual(exactRational(1_000n));
+    expect(fdv.raw).toEqual(exactRational(1_000n * 10n ** 18n));
 
     const distributed = knownMetric(exactTokenAmount(project, 100n * 10n ** 18n, 18));
     const complete = deriveMarketValuation({ spotPrice: spot, currentSupplyOutsideTreasury: distributed, totalSupply });
-    expect(requireKnown(complete.marketCap).units).toEqual(exactRational(50n));
-    expect(requireKnown(complete.fullyDilutedValue).units).toEqual(exactRational(500n));
+    expect(requireKnown(complete.marketCap).units).toEqual(exactRational(100n));
+    expect(requireKnown(complete.fullyDilutedValue).units).toEqual(exactRational(1_000n));
 
     const salePrice = fixedSaleUnitPrice({
       sale,
@@ -370,43 +370,15 @@ describe("truthful market data", () => {
     expect(requireIssue(saleValuation.marketCap).reason).toContain("sale and curve route prices are not market spot");
   });
 
-  test("computes exact fee-inclusive buy and sell execution impact separately from slippage", () => {
-    const buy = swapExecutionMetrics({
-      tokenIn: quote,
-      tokenInDecimals: 6,
-      tokenOut: project,
-      tokenOutDecimals: 18,
-      amountIn: 100_000_000n,
-      amountOut: 181n * 10n ** 18n,
-      reserveIn: 1_000_000_000n,
-      reserveOut: 2_000n * 10n ** 18n,
-    });
-    expect(requireKnown(buy.effectiveExecutionPrice).quotePerBase).toEqual(exactRational(181n, 100n));
-    expect(requireKnown(buy.feeInclusivePriceImpact)).toEqual(exactRational(19n, 200n));
-
-    const sell = swapExecutionMetrics({
-      tokenIn: project,
-      tokenInDecimals: 18,
-      tokenOut: quote,
-      tokenOutDecimals: 6,
-      amountIn: 100n * 10n ** 18n,
-      amountOut: 45_000_000n,
-      reserveIn: 2_000n * 10n ** 18n,
-      reserveOut: 1_000_000_000n,
-    });
-    expect(requireKnown(sell.effectiveExecutionPrice).quotePerBase).toEqual(exactRational(9n, 20n));
-    expect(requireKnown(sell.feeInclusivePriceImpact)).toEqual(exactRational(1n, 10n));
-  });
-
   test("represents route liveness and unavailable 24h indexing explicitly", () => {
     expect(routeLiveness("checking")).toEqual({ status: "checking" });
     expect(routeLiveness("deployment-pending", "waiting for migration")).toEqual({
       status: "deployment-pending",
       reason: "waiting for migration",
     });
-    expect(routeLivenessForAmm({ tokenPairVerified: true, reserve0: 0n, reserve1: 1n }).status).toBe("no-liquidity");
-    expect(routeLivenessForAmm({ tokenPairVerified: true }).status).toBe("unknown");
-    expect(routeLivenessForAmm({ tokenPairVerified: false, reserve0: 1n, reserve1: 1n }).status).toBe("unavailable");
+    expect(routeLivenessForUniswapV4({ tokenPairVerified: true, sqrtPriceX96: Q96, liquidity: 0n }).status).toBe("no-liquidity");
+    expect(routeLivenessForUniswapV4({ tokenPairVerified: true }).status).toBe("unknown");
+    expect(routeLivenessForUniswapV4({ tokenPairVerified: false, sqrtPriceX96: Q96, liquidity: 1n }).status).toBe("unavailable");
 
     const activity = notIndexedMarketActivity24h();
     expect(activity.priceChange.status).toBe("not-indexed");

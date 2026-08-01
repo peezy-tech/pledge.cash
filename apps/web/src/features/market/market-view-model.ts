@@ -14,10 +14,10 @@ import {
   notApplicableMetric,
   notIndexedMarketActivity24h,
   routeLiveness,
-  routeLivenessForAmm,
+  routeLivenessForUniswapV4,
   unavailableMetric,
   unknownMetric,
-  verifiedAmmSpotPrice,
+  verifiedUniswapV4SpotPrice,
   verifiedSupplyOutsideTreasury,
   verifiedTotalSupply,
   type ExactQuoteValue,
@@ -253,12 +253,12 @@ function marketMetrics(input: {
     {
       label: "Market cap · supply outside treasury",
       value: marketCap.value,
-      detail: marketCap.detail ?? "Verified AMM spot × exact current project-token supply outside the Boardroom treasury, including holder, settled-grant, and migrated-liquidity balances.",
+      detail: marketCap.detail ?? "Verified Uniswap v4 spot × exact current project-token supply outside the Boardroom treasury, including holder, settled-grant, and migrated-liquidity balances.",
     },
     {
       label: "Fully diluted value",
       value: fdv.value,
-      detail: fdv.detail ?? "Verified AMM spot × verified ERC-20 total supply.",
+      detail: fdv.detail ?? "Verified Uniswap v4 spot × verified ERC-20 total supply.",
     },
     {
       label: "Liquidity depth",
@@ -275,20 +275,20 @@ function marketMetrics(input: {
 
 function catalogRoutePrice(project: ProductBoardroomCatalogEntry): RoutePriceState {
   if (project.pool) {
-    if (!project.shareToken) return unknownMetric("The AMM project token is unavailable in this directory row.");
-    if (!project.cashToken) return unknownMetric("The AMM quote token is unavailable in this directory row.");
+    if (!project.shareToken) return unknownMetric("The Uniswap v4 project token is unavailable in this directory row.");
+    if (!project.cashToken) return unknownMetric("The Uniswap v4 quote token is unavailable in this directory row.");
     if (project.shareTokenDecimals === undefined || project.cashTokenDecimals === undefined) {
-      return unknownMetric("Token decimals are required to normalize the AMM spot price.");
+      return unknownMetric("Token decimals are required to normalize the Uniswap v4 spot price.");
     }
-    if (!project.poolToken0 || !project.poolToken1 || project.poolReserve0 === undefined || project.poolReserve1 === undefined) {
-      return unknownMetric(project.poolError ?? "Current AMM tokens and reserves have not been verified for this directory row.");
+    if (!project.poolToken0 || !project.poolToken1 || project.poolSqrtPriceX96 === undefined || project.poolLiquidity === undefined) {
+      return unknownMetric(project.poolError ?? "Current Uniswap v4 PoolKey, slot0, and active liquidity have not been verified for this directory row.");
     }
-    return verifiedAmmSpotPrice({
+    return verifiedUniswapV4SpotPrice({
       pool: project.pool,
-      token0: project.poolToken0,
-      token1: project.poolToken1,
-      reserve0: project.poolReserve0,
-      reserve1: project.poolReserve1,
+      currency0: project.poolToken0,
+      currency1: project.poolToken1,
+      sqrtPriceX96: project.poolSqrtPriceX96,
+      liquidity: project.poolLiquidity,
       projectToken: project.shareToken,
       projectDecimals: project.shareTokenDecimals,
       quoteToken: project.cashToken,
@@ -329,12 +329,12 @@ function dashboardRoute(
     );
     const liveness = catalog.poolError
       ? routeLiveness("unknown", catalog.poolError)
-      : routeLivenessForAmm({
+      : routeLivenessForUniswapV4({
           tokenPairVerified,
-          reserve0: catalog.poolReserve0,
-          reserve1: catalog.poolReserve1,
+          liquidity: catalog.poolLiquidity,
+          sqrtPriceX96: catalog.poolSqrtPriceX96,
         });
-    const poolLabel = `AMM market · ${shortAddress(catalog.pool)}`;
+    const poolLabel = `Uniswap v4 · ${shortAddress(catalog.pool)}`;
     return { liveness, price, routeLabel: poolLabel, routeSource: routePriceSource(price, poolLabel), tradeable: true };
   }
 
@@ -572,7 +572,7 @@ function catalogSupplyOutsideTreasury(project: ProductBoardroomCatalogEntry): Me
 function quoteLiquidity(price: RoutePriceState): MetricState<ExactTokenAmount> {
   if (price.status !== "known") return copyIssue(price);
   if (price.value.source !== "amm-spot") {
-    return notApplicableMetric("Liquidity depth is shown only for a verified AMM reserve pair.");
+    return notApplicableMetric("Liquidity depth is shown only for a verified Uniswap v4 pool.");
   }
   return knownMetric(price.value.quoteDepth);
 }
@@ -702,9 +702,9 @@ function dashboardPoolBelongsToSelectedRoute(
   if (
     distribution?.state
     && "quoteToken" in distribution.state
-    && "pool" in distribution.state
-    && !isZeroAddress(distribution.state.pool)
-  ) return sameAddress(distribution.state.pool, catalog.pool);
+    && "liquidityVault" in distribution.state
+    && !isZeroAddress(distribution.state.liquidityVault)
+  ) return sameAddress(distribution.state.liquidityVault, catalog.pool);
   return Boolean((dashboard.histories ?? []).some((history) =>
     history.distribution
     && (!catalog.distribution || sameAddress(history.distribution, catalog.distribution))
@@ -719,13 +719,13 @@ function dashboardHasPoolHistoryMismatch(
   if (!catalog?.distribution) return false;
   const distribution = dashboard.snapshot.distributionSummaries.find((candidate) =>
     sameAddress(candidate.address, catalog.distribution));
-  if (!distribution?.state || !("quoteToken" in distribution.state) || !("pool" in distribution.state) || isZeroAddress(distribution.state.pool)) {
+  if (!distribution?.state || !("quoteToken" in distribution.state) || !("liquidityVault" in distribution.state) || isZeroAddress(distribution.state.liquidityVault)) {
     return false;
   }
   const history = (dashboard.histories ?? []).find((candidate) =>
     sameAddress(candidate.distribution, distribution.address));
   const historicalPool = history?.curve?.migration?.pool ?? history?.pool;
-  return historicalPool !== undefined && !sameAddress(distribution.state.pool, historicalPool);
+  return historicalPool !== undefined && !sameAddress(distribution.state.liquidityVault, historicalPool);
 }
 
 function selectedDistribution(
@@ -740,7 +740,7 @@ function selectedDistribution(
     preferredDistribution
     && (
       dashboardExecutableRoute(dashboard, preferredDistribution, now)?.liveness.status === "live"
-      || Boolean(preferredDistribution.state && "quoteToken" in preferredDistribution.state && "pool" in preferredDistribution.state && preferredDistribution.state.pool)
+      || Boolean(preferredDistribution.state && "quoteToken" in preferredDistribution.state && "liquidityVault" in preferredDistribution.state && !isZeroAddress(preferredDistribution.state.liquidityVault))
       || Boolean(preferredDistribution.kind === "bond-market" && preferredDistribution.state && "live" in preferredDistribution.state && preferredDistribution.state.live)
     )
   ) return preferredDistribution;
@@ -751,7 +751,7 @@ function selectedDistribution(
     const executable = dashboardExecutableRoute(dashboard, distribution, now);
     return executable?.liveness.status === "live";
   })
-    ?? dashboard.snapshot.distributionSummaries.find((distribution) => Boolean(distribution.state && "quoteToken" in distribution.state && "pool" in distribution.state && distribution.state.pool))
+    ?? dashboard.snapshot.distributionSummaries.find((distribution) => Boolean(distribution.state && "quoteToken" in distribution.state && "liquidityVault" in distribution.state && !isZeroAddress(distribution.state.liquidityVault)))
     ?? preferredDistribution
     ?? dashboard.snapshot.distributionSummaries[0];
 }
@@ -834,13 +834,13 @@ function tokenLabel(metadata: TokenMetadata | undefined, fallback: Address): str
 
 function liquidityDetail(price: RoutePriceState, projectMetadata: TokenMetadata | undefined): string | undefined {
   if (price.status !== "known" || price.value.source !== "amm-spot") return undefined;
-  return `${formatTokenAmount(price.value.projectDepth.raw, metadataForAmount(price.value.projectDepth, projectMetadata))} project-side reserve in pool ${shortAddress(price.value.pool)}.`;
+  return `${formatTokenAmount(price.value.projectDepth.raw, metadataForAmount(price.value.projectDepth, projectMetadata))} project-side active-liquidity virtual depth in pool ${shortAddress(price.value.pool)}.`;
 }
 
 function priceDetail(price: RoutePriceState): string | undefined {
   if (price.status !== "known") return undefined;
   if (price.value.source === "amm-spot") {
-    return `Current reserve ratio from pool ${shortAddress(price.value.pool)}; not a 24-hour average or external price feed.`;
+    return `Current Uniswap v4 sqrt price from pool ${shortAddress(price.value.pool)}; not a 24-hour average or external price feed.`;
   }
   if (price.value.source === "fixed-sale") return "Current contract sale price, denominated in the route quote token.";
   if (price.value.source === "dutch-auction") return "Current onchain Dutch-auction price; it continues descending until the purchase executes.";
@@ -869,7 +869,7 @@ function livenessReason(liveness: RouteLiveness): string | undefined {
 
 function routePriceSource(price: RoutePriceState, fallback: string): string {
   if (price.status !== "known") return fallback;
-  if (price.value.source === "amm-spot") return `AMM spot · ${shortAddress(price.value.pool)}`;
+  if (price.value.source === "amm-spot") return `Uniswap v4 spot · ${shortAddress(price.value.pool)}`;
   if (price.value.source === "fixed-sale") return "Fixed sale";
   if (price.value.source === "dutch-auction") return "Dutch auction";
   if (price.value.source === "bond-market") return `Bond market · ${shortAddress(price.value.market)}`;
@@ -880,7 +880,7 @@ function routePriceSource(price: RoutePriceState, fallback: string): string {
 }
 
 function catalogRouteLabel(project: ProductBoardroomCatalogEntry, now: bigint): string {
-  if (project.pool) return `AMM market · ${shortAddress(project.pool)}`;
+  if (project.pool) return `Uniswap v4 · ${shortAddress(project.pool)}`;
   if (catalogExecutableRoute(project, now)?.mode === "sell-only") return "Bonding curve · sell only";
   return distributionKindLabel(project.distributionKind);
 }

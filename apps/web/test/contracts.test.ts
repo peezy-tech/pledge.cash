@@ -24,24 +24,15 @@ describe("web network profiles", () => {
     expect(walletRpcUrl(local)).toBe(local.rpcUrl);
   });
 
-  test("keeps HyperEVM, Monad, and local selectable", () => {
-    expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([998, 10143, 31337]);
-  });
-
-  test("uses the built-in HyperEVM RPC when the optional override is empty", () => {
-    const hyperEvm = createPledgeCashNetworks({
-      VITE_PLEDGE_CASH_HYPEREVM_RPC_URL: "",
-    }).find((network) => network.chainId === 998);
-
-    expect(hyperEvm?.rpcUrl).toBe("https://rpc.hyperliquid-testnet.xyz/evm");
-    expect(hyperEvm?.chain.rpcUrls.default.http).toEqual(["https://rpc.hyperliquid-testnet.xyz/evm"]);
+  test("keeps Monad and local selectable", () => {
+    expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([10143, 31337]);
   });
 
   test("identifies unseeded Local, Testnet, and Custom environments truthfully", () => {
     const local = networkEnvironmentIdentity(networkForChainId(LOCAL_ANVIL_CHAIN_ID));
     const localByChainId = networkEnvironmentIdentity({ chainId: LOCAL_ANVIL_CHAIN_ID, key: "custom" });
     const localByProfileKey = networkEnvironmentIdentity({ chainId: 42_424, key: "local-anvil" });
-    const testnet = networkEnvironmentIdentity(networkForChainId(998));
+    const testnet = networkEnvironmentIdentity(networkForChainId(10143));
     const customNetwork = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_CHAIN_ID: "424242",
       VITE_PLEDGE_CASH_CHAIN_NAME: "Partner chain",
@@ -75,7 +66,7 @@ describe("web network profiles", () => {
     });
     const custom = networks.find((network) => network.chainId === 424242);
 
-    expect(networks.map((network) => network.chainId)).toEqual([998, 10143, 31337, 424242]);
+    expect(networks.map((network) => network.chainId)).toEqual([10143, 31337, 424242]);
     expect(custom?.key).toBe("custom");
     expect(custom?.name).toBe("Custom Testnet");
     expect(custom?.rpcUrl).toBe("https://rpc.custom.test");
@@ -88,17 +79,17 @@ describe("web network profiles", () => {
   });
 
   test("preserves blank legacy explorer overrides as disabled links", () => {
-    const hyperEvm = createPledgeCashNetworks({
+    const monad = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_EXPLORER_URL: "",
-    }).find((network) => network.chainId === 998);
+    }).find((network) => network.chainId === 10143);
     const custom = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_CHAIN_ID: "424242",
       VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
       VITE_PLEDGE_CASH_EXPLORER_URL: "",
     }).find((network) => network.chainId === 424242);
 
-    expect(hyperEvm?.explorerUrl).toBe("");
-    expect(hyperEvm?.chain.blockExplorers).toBeUndefined();
+    expect(monad?.explorerUrl).toBe("");
+    expect(monad?.chain.blockExplorers).toBeUndefined();
     expect(custom?.explorerUrl).toBe("");
     expect(custom?.chain.blockExplorers).toBeUndefined();
   });
@@ -106,10 +97,10 @@ describe("web network profiles", () => {
   test("can resolve transaction links against the originating chain", () => {
     const hash = "0x00000000000000000000000000000000000000000000000000000000000000aa";
     const address = "0x1000000000000000000000000000000000000000";
-    const hyperEvm = networkForChainId(998);
+    const monad = networkForChainId(10143);
 
-    expect(transactionUrl(hash, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/tx/${hash}`);
-    expect(addressUrl(address, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/address/${address}`);
+    expect(transactionUrl(hash, monad.chainId)).toBe(`${monad.explorerUrl}/tx/${hash}`);
+    expect(addressUrl(address, monad.chainId)).toBe(`${monad.explorerUrl}/address/${address}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
     expect(addressUrl(address, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
     expect(transactionUrl(hash, 999_999)).toBeUndefined();
@@ -134,7 +125,7 @@ describe("web network profiles", () => {
 
     try {
       expect(() => persistSelectedNetwork(LOCAL_ANVIL_CHAIN_ID)).not.toThrow();
-      expect(initialSelectedNetwork().chainId).toBe(998);
+      expect(initialSelectedNetwork().chainId).toBe(10143);
     } finally {
       if (previousWindow) {
         Object.defineProperty(globalThis, "window", previousWindow);

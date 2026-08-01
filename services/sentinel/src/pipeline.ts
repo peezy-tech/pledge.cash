@@ -149,12 +149,12 @@ function evaluatePipelineRisk(event: WatcherPipelineEvent, boardroom: BoardroomR
       ? {}
       : { distributionFactory: deployment.distributionFactory }),
     evaluatedAt: new Date(),
-    ...(boardroom?.liquidityLocker === null || boardroom?.liquidityLocker === undefined
+    ...(boardroom?.liquidityVault === null || boardroom?.liquidityVault === undefined
       ? {}
-      : { liquidityLocker: boardroom.liquidityLocker }),
-    ...(deployment?.lockedLiquidityFactory === undefined
+      : { liquidityVault: boardroom.liquidityVault }),
+    ...(deployment?.pledgeV4LiquidityFactory === undefined
       ? {}
-      : { lockedLiquidityFactory: deployment.lockedLiquidityFactory }),
+      : { pledgeV4LiquidityFactory: deployment.pledgeV4LiquidityFactory }),
     ...(deployment?.boardroomPolicyRegistry === undefined
       ? {}
       : { policyRegistry: deployment.boardroomPolicyRegistry })

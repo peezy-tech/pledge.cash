@@ -8,6 +8,7 @@ import {
   buildBoardroomSelfCall,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomCall,
+  buildUniswapV4SwapExactInputSingleTransaction,
   tokenGrantAbi,
   type Address,
   type Hex,
@@ -209,8 +210,8 @@ describe("transaction review", () => {
     "buy",
     "sell",
     "addLiquidity",
-    "removeLiquidity",
-    "swapExactTokensForTokens",
+    "depositLiquidityForClaims",
+    "redeemClaims",
     "settle",
     "transfer",
   ])("marks non-irreversible asset or authority call %s as important", (functionName) => {
@@ -227,6 +228,29 @@ describe("transaction review", () => {
       functionName,
     });
 
+    expect(review.risk).toBe("important");
+  });
+
+  test("does not interpret Universal Router execute calldata as a Boardroom call", () => {
+    const request = buildUniswapV4SwapExactInputSingleTransaction({
+      universalRouter: factory,
+      poolKey: {
+        currency0: target,
+        currency1: holder,
+        fee: 3_000,
+        tickSpacing: 60,
+        hooks: assetPolicy,
+      },
+      currencyIn: target,
+      amountIn: 1_000n,
+      amountOutMin: 900n,
+      recipient: holder,
+      deadline: 2_000_000_000n,
+    });
+    const review = contractCallReview("Swap through Uniswap v4", request);
+
+    expect(review.functionName).toBe("execute");
+    expect(review.boardroomCalls).toBeUndefined();
     expect(review.risk).toBe("important");
   });
 

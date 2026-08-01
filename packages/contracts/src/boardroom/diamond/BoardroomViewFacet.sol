@@ -248,12 +248,12 @@ contract BoardroomViewFacet is BoardroomFacetBase {
         return BoardroomLiquidityStorage.layout().status;
     }
 
-    function liquidityLocker() external view returns (address) {
-        return _liquidityLocker();
+    function liquidityVault() external view returns (address) {
+        return _liquidityVault();
     }
 
-    function liquidityPool() external view returns (address) {
-        return BoardroomLiquidityStorage.layout().pool;
+    function liquidityPoolId() external view returns (bytes32) {
+        return BoardroomLiquidityStorage.layout().poolId;
     }
 
     function liquidityQuoteAsset() external view returns (address) {
@@ -263,18 +263,17 @@ contract BoardroomViewFacet is BoardroomFacetBase {
     function liquidityReservation()
         external
         view
-        returns (address curve, address expectedLocker, bytes32 pairKey, bytes32 salt, uint256 expiresAt)
+        returns (address curve, address expectedVault, bytes32 expectedPoolId, bytes32 salt, uint256 expiresAt)
     {
         BoardroomLiquidityStorage.MigrationReservation storage reservation =
         BoardroomLiquidityStorage.layout().pendingMigration;
-        return
-            (
-                reservation.curve,
-                reservation.expectedLocker,
-                reservation.pairKey,
-                reservation.salt,
-                reservation.expiresAt
-            );
+        return (
+            reservation.curve,
+            reservation.expectedVault,
+            reservation.expectedPoolId,
+            reservation.salt,
+            reservation.expiresAt
+        );
     }
 
     function lockedLiquidityExitAllowed() external view returns (bool) {

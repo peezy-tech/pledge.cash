@@ -13,7 +13,7 @@
     "dev:local": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && VITE_BASE_PATH=/pledge-cash/ VITE_PLEDGE_CASH_CHAIN_ID=31337 VITE_PLEDGE_CASH_CHAIN_NAME='pledge.cash local' VITE_PLEDGE_CASH_LOCAL_RPC_URL=/pledge-cash/rpc VITE_PLEDGE_CASH_EXPLORER_URL= VITE_PLEDGE_CASH_EXPLORER_NAME=Local vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
     "preview:local": "vite preview --host 127.0.0.1 --base /pledge-cash/ --outDir dist-local",
-    "smoke:amm:local": "bun scripts/amm-write-smoke.ts",
+    "smoke:v4:local": "bun scripts/v4-write-smoke.ts",
     "test": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -22,9 +22,6 @@
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-scroll-area": "^1.2.14",
     "@tanstack/react-query": "^5.101.2",
-    "@x402/core": "2.19.0",
-    "@x402/extensions": "2.19.0",
-    "@x402/fetch": "2.19.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
@@ -33,8 +30,7 @@
     "tailwind-merge": "^2.5.5",
     "vaul": "^1.1.2",
     "viem": "catalog:",
-    "wagmi": "^3.7.0",
-    "x402-hl": "github:peezy-tech/x402-hl#131aff37cf87c48036ab0e347f008e77bf446150"
+    "wagmi": "^3.7.0"
   },
   "devDependencies": {
     "@pledge.cash/sentinel": "workspace:*",

@@ -21,13 +21,13 @@ interface IBoardroomMarketCanonicalLiquidity {
 
     function tokenB() external view returns (address);
 
-    function pool() external view returns (address);
+    function poolId() external view returns (bytes32);
 
     function isClosed() external view returns (bool);
 }
 
 interface IBoardroomMarketCanonicalCurve {
-    function lockedLiquidityFactory() external view returns (address);
+    function liquidityFactory() external view returns (address);
 }
 
 contract BoardroomMarketLogic {
@@ -42,15 +42,15 @@ contract BoardroomMarketLogic {
     event BondingCurvePrecommitted(address indexed curve, address indexed quoteAsset, uint256 fundingAmount);
     event PrimaryMarketModeChanged(BoardroomPrimaryMarketStorage.Mode indexed mode);
     event ProtocolLiquidityActivated(
-        address indexed locker, address indexed pool, address indexed quoteAsset, address curve
+        address indexed vault, bytes32 indexed poolId, address indexed quoteAsset, address curve
     );
-    event ProtocolLiquidityClosed(address indexed locker, address indexed pool, address indexed quoteAsset);
-    event ProtocolLiquidityReservationReleased(address indexed curve, address indexed expectedLocker, bytes32 salt);
+    event ProtocolLiquidityClosed(address indexed vault, bytes32 indexed poolId, address indexed quoteAsset);
+    event ProtocolLiquidityReservationReleased(address indexed curve, address indexed expectedVault, bytes32 salt);
     event ProtocolLiquidityReserved(
-        address indexed expectedLocker,
+        address indexed expectedVault,
+        bytes32 indexed expectedPoolId,
         address indexed quoteAsset,
-        address indexed curve,
-        bytes32 pairKey,
+        address curve,
         bytes32 salt,
         uint256 expiresAt
     );
@@ -147,18 +147,18 @@ contract BoardroomMarketLogic {
     function precommitProtocolLiquidity(
         address policyRegistry,
         address shareToken,
-        address expectedLocker,
+        address expectedVault,
+        bytes32 expectedPoolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt,
         uint64 expiresAt
     ) external {
         BoardroomCoreStorage.Layout storage core = BoardroomCoreStorage.layout();
         if (
             core.status != BoardroomCoreStorage.Status.Active || !core.executionActive
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(msg.sender) || expectedLocker == address(0)
-                || expectedLocker.code.length != 0 || pairKey == bytes32(0)
+                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(msg.sender) || expectedVault == address(0)
+                || expectedVault.code.length != 0 || expectedPoolId == bytes32(0)
         ) revert InvalidExecutionContext();
 
         BoardroomPrimaryMarketStorage.Layout storage market = BoardroomPrimaryMarketStorage.layout();
@@ -182,8 +182,8 @@ contract BoardroomMarketLogic {
 
         BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
         if (
-            liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured || liquidity.locker != address(0)
-                || liquidity.pool != address(0) || liquidity.pendingMigration.expectedLocker != address(0)
+            liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured || liquidity.vault != address(0)
+                || liquidity.poolId != bytes32(0) || liquidity.pendingMigration.expectedVault != address(0)
         ) revert InvalidLiquidityTransition();
         if (liquidity.quoteAsset != address(0) && liquidity.quoteAsset != quoteAsset) {
             revert InvalidLiquidityTransition();
@@ -192,37 +192,36 @@ contract BoardroomMarketLogic {
         market.quoteAsset = quoteAsset;
         liquidity.quoteAsset = quoteAsset;
         liquidity.pendingMigration = BoardroomLiquidityStorage.MigrationReservation({
-            curve: curve, expectedLocker: expectedLocker, pairKey: pairKey, salt: salt, expiresAt: expiresAt
+            curve: curve, expectedVault: expectedVault, expectedPoolId: expectedPoolId, salt: salt, expiresAt: expiresAt
         });
-        emit ProtocolLiquidityReserved(expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt);
+        emit ProtocolLiquidityReserved(expectedVault, expectedPoolId, quoteAsset, curve, salt, expiresAt);
     }
 
     function activateProtocolLiquidity(
         address policyRegistry,
-        address locker,
-        address pool,
+        address vault,
+        bytes32 poolId,
         address quoteAsset,
         address curve,
-        bytes32 pairKey,
         bytes32 salt
     ) external {
         BoardroomCoreStorage.Layout storage core = BoardroomCoreStorage.layout();
         if (
             core.status != BoardroomCoreStorage.Status.Active
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(msg.sender) || locker == address(0)
-                || pool == address(0) || pool.code.length == 0
+                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(msg.sender) || vault == address(0)
+                || poolId == bytes32(0)
         ) revert InvalidExecutionContext();
         BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
         BoardroomLiquidityStorage.MigrationReservation memory reservation = liquidity.pendingMigration;
         if (
-            liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured || reservation.expectedLocker != locker
-                || reservation.curve != curve || reservation.pairKey != pairKey || reservation.salt != salt
+            liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured || reservation.expectedVault != vault
+                || reservation.expectedPoolId != poolId || reservation.curve != curve || reservation.salt != salt
                 || liquidity.quoteAsset != quoteAsset
         ) revert InvalidLiquidityTransition();
 
-        IBoardroomMarketCanonicalLiquidity canonical = IBoardroomMarketCanonicalLiquidity(locker);
+        IBoardroomMarketCanonicalLiquidity canonical = IBoardroomMarketCanonicalLiquidity(vault);
         if (
-            canonical.factory() != msg.sender || canonical.boardroom() != address(this) || canonical.pool() != pool
+            canonical.factory() != msg.sender || canonical.boardroom() != address(this) || canonical.poolId() != poolId
                 || (canonical.tokenA() != quoteAsset && canonical.tokenB() != quoteAsset)
         ) revert InvalidLiquidityTransition();
         if (curve == address(0)) {
@@ -246,15 +245,18 @@ contract BoardroomMarketLogic {
         }
 
         liquidity.status = BoardroomLiquidityStorage.Status.Active;
-        liquidity.locker = locker;
-        liquidity.pool = pool;
+        liquidity.vault = vault;
+        liquidity.poolId = poolId;
         delete liquidity.pendingMigration;
-        emit ProtocolLiquidityActivated(locker, pool, quoteAsset, curve);
+        emit ProtocolLiquidityActivated(vault, poolId, quoteAsset, curve);
     }
 
-    function releaseProtocolLiquidityReservation(address policyRegistry, address curve, bytes32 pairKey, bytes32 salt)
-        external
-    {
+    function releaseProtocolLiquidityReservation(
+        address policyRegistry,
+        address curve,
+        bytes32 expectedPoolId,
+        bytes32 salt
+    ) external {
         BoardroomCoreStorage.Layout storage core = BoardroomCoreStorage.layout();
         if (
             uint8(core.status) > uint8(BoardroomCoreStorage.Status.WindingDown)
@@ -265,12 +267,12 @@ contract BoardroomMarketLogic {
         BoardroomLiquidityStorage.MigrationReservation memory reservation = liquidity.pendingMigration;
         if (
             liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured || reservation.curve != curve
-                || reservation.pairKey != pairKey || reservation.salt != salt || market.curve != curve
+                || reservation.expectedPoolId != expectedPoolId || reservation.salt != salt || market.curve != curve
                 || !BoardroomObligationStorage.layout().obligationOf[curve].active
-                || IBoardroomMarketCanonicalCurve(curve).lockedLiquidityFactory() != msg.sender
+                || IBoardroomMarketCanonicalCurve(curve).liquidityFactory() != msg.sender
         ) revert InvalidLiquidityTransition();
         delete liquidity.pendingMigration;
-        emit ProtocolLiquidityReservationReleased(curve, reservation.expectedLocker, salt);
+        emit ProtocolLiquidityReservationReleased(curve, reservation.expectedVault, salt);
     }
 
     function settleBondingCurve() external {
@@ -278,7 +280,7 @@ contract BoardroomMarketLogic {
         BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
         if (
             market.curve != msg.sender || market.authorizedBoardroomFunding != 0
-                || liquidity.pendingMigration.expectedLocker != address(0)
+                || liquidity.pendingMigration.expectedVault != address(0)
         ) revert InvalidExecutionContext();
         if (market.mode == BoardroomPrimaryMarketStorage.Mode.BondingCurve) {
             if (liquidity.status != BoardroomLiquidityStorage.Status.Unconfigured) revert InvalidExecutionContext();
@@ -293,32 +295,32 @@ contract BoardroomMarketLogic {
         market.migrationCustody = address(0);
     }
 
-    function closeProtocolLiquidity(address policyRegistry, address locker) external {
+    function closeProtocolLiquidity(address policyRegistry, address vault) external {
         BoardroomCoreStorage.Layout storage core = BoardroomCoreStorage.layout();
         if (
             !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(msg.sender)
                 || core.status != BoardroomCoreStorage.Status.Active || !core.executionActive
                 || core.executionTarget != msg.sender || core.executionPolicy != msg.sender
         ) revert InvalidExecutionContext();
-        _closeProtocolLiquidity(locker);
+        _closeProtocolLiquidity(vault);
     }
 
-    function closeProtocolLiquidityForWindDown(address locker) external {
+    function closeProtocolLiquidityForWindDown(address vault) external {
         if (BoardroomCoreStorage.layout().status != BoardroomCoreStorage.Status.WindingDown) {
             revert InvalidExecutionContext();
         }
-        _closeProtocolLiquidity(locker);
+        _closeProtocolLiquidity(vault);
     }
 
-    function _closeProtocolLiquidity(address locker) internal {
+    function _closeProtocolLiquidity(address vault) internal {
         BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
         if (
-            liquidity.status != BoardroomLiquidityStorage.Status.Active || liquidity.locker != locker
-                || liquidity.pendingMigration.expectedLocker != address(0)
-                || !IBoardroomMarketCanonicalLiquidity(locker).isClosed()
+            liquidity.status != BoardroomLiquidityStorage.Status.Active || liquidity.vault != vault
+                || liquidity.pendingMigration.expectedVault != address(0)
+                || !IBoardroomMarketCanonicalLiquidity(vault).isClosed()
         ) revert InvalidLiquidityTransition();
         liquidity.status = BoardroomLiquidityStorage.Status.Closed;
-        emit ProtocolLiquidityClosed(locker, liquidity.pool, liquidity.quoteAsset);
+        emit ProtocolLiquidityClosed(vault, liquidity.poolId, liquidity.quoteAsset);
     }
 
     function _registerAsset(address shareToken, address asset) internal {

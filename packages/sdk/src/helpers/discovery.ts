@@ -1,9 +1,8 @@
 import { getAbiItem, isHex, type Address, type Hex } from "viem";
 import {
-  ammFactoryAbi,
   boardroomFactoryAbi,
   distributionFactoryAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import { pledgeCashErrorMessage } from "./errors";
@@ -12,7 +11,7 @@ import {
   readDutchAuctionState,
   readFixedPriceSaleState,
   readGrantState,
-  readLockedLiquidityState,
+  readProtocolLiquidityVaultState,
   readMerkleAirdropState,
   readMigratingBondingCurveState,
 } from "./readers";
@@ -21,8 +20,7 @@ import type {
   DiscoveredBoardroom,
   DiscoveredDistribution,
   DiscoveredGrant,
-  DiscoveredLockedLiquidity,
-  DiscoveredPool,
+  DiscoveredProtocolLiquidity,
   DiscoveryError,
   DiscoveryRange,
   DiscoveryResult,
@@ -31,7 +29,7 @@ import type {
   DutchAuctionState,
   GrantDiscoveryRange,
   GrantState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState,
   MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashBlockReadClient,
@@ -56,8 +54,7 @@ const boardroomCreatedEvent = getAbiItem({
   name: "BoardroomCreated",
 });
 const distributionCreatedEvent = getAbiItem({ abi: distributionFactoryAbi, name: "DistributionCreated" });
-const lockedLiquidityCreatedEvent = getAbiItem({ abi: lockedLiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
-const poolCreatedEvent = getAbiItem({ abi: ammFactoryAbi, name: "PoolCreated" });
+const protocolLiquidityCreatedEvent = getAbiItem({ abi: pledgeV4LiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
 
 export async function queryGrantHistory(
   client: PledgeCashLogClient,
@@ -231,31 +228,33 @@ export async function discoverBoardroomDistributions(
   );
 }
 
-export async function discoverBoardroomLockedLiquidity(
+export async function discoverBoardroomProtocolLiquidity(
   client: PledgeCashLogClient,
   input: DiscoveryRange & { factory: Address; boardroom?: Address },
-): Promise<DiscoveryResult<DiscoveredLockedLiquidity>> {
-  const result = await getLogs(client, input, input.factory, lockedLiquidityCreatedEvent);
-  const lockers = new Map<string, DiscoveredLockedLiquidity>();
+): Promise<DiscoveryResult<DiscoveredProtocolLiquidity>> {
+  const result = await getLogs(client, input, input.factory, protocolLiquidityCreatedEvent);
+  const vaults = new Map<string, DiscoveredProtocolLiquidity>();
 
   for (const log of [...result.logs].sort(compareLogs)) {
     const args = log.args ?? {};
-    const locker = addressArg(args, "locker");
+    const vault = addressArg(args, "vault");
     const boardroom = addressArg(args, "boardroom");
-    if (!locker || !boardroom) continue;
+    const poolId = hexArg(args, "poolId");
+    if (!vault || !boardroom || !poolId) continue;
     if (input.boardroom && !sameAddress(boardroom, input.boardroom)) continue;
 
-    lockers.set(addressKey(locker), {
-      locker,
+    vaults.set(addressKey(vault), {
+      vault,
       boardroom,
       factory: input.factory,
-      pool: addressArg(args, "pool") ?? ZERO_ADDRESS,
-      tokenA: addressArg(args, "tokenA") ?? ZERO_ADDRESS,
-      tokenB: addressArg(args, "tokenB") ?? ZERO_ADDRESS,
+      poolId,
+      quoteAsset: addressArg(args, "quoteAsset") ?? ZERO_ADDRESS,
       amountA: bigintArg(args, "amountA") ?? 0n,
       amountB: bigintArg(args, "amountB") ?? 0n,
       liquidity: bigintArg(args, "liquidity") ?? 0n,
+      sqrtPriceX96: bigintArg(args, "sqrtPriceX96") ?? 0n,
       salt: hexArg(args, "salt") ?? "0x",
+      curve: addressArg(args, "curve") ?? ZERO_ADDRESS,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -263,40 +262,7 @@ export async function discoverBoardroomLockedLiquidity(
 
   return discoveryResult(
     input,
-    [...lockers.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
-    [result],
-  );
-}
-
-export async function discoverPools(
-  client: PledgeCashLogClient,
-  input: DiscoveryRange & { factory: Address; token?: Address },
-): Promise<DiscoveryResult<DiscoveredPool>> {
-  const result = await getLogs(client, input, input.factory, poolCreatedEvent);
-  const pools = new Map<string, DiscoveredPool>();
-
-  for (const log of [...result.logs].sort(compareLogs)) {
-    const args = log.args ?? {};
-    const pool = addressArg(args, "pool");
-    const token0 = addressArg(args, "token0");
-    const token1 = addressArg(args, "token1");
-    if (!pool || !token0 || !token1) continue;
-    if (input.token && !sameAddress(token0, input.token) && !sameAddress(token1, input.token)) continue;
-
-    pools.set(addressKey(pool), {
-      pool,
-      factory: input.factory,
-      token0,
-      token1,
-      poolCount: bigintArg(args, "poolCount") ?? 0n,
-      createdAtBlock: log.blockNumber ?? 0n,
-      transactionHash: log.transactionHash ?? "0x",
-    });
-  }
-
-  return discoveryResult(
-    input,
-    [...pools.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
+    [...vaults.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
     [result],
   );
 }
@@ -367,16 +333,16 @@ export async function enrichDiscoveredDistributions(
   );
 }
 
-export async function enrichDiscoveredLockedLiquidity(
+export async function enrichDiscoveredProtocolLiquidity(
   client: PledgeCashReadClient,
-  lockers: readonly DiscoveredLockedLiquidity[],
-): Promise<EnrichedDiscovery<DiscoveredLockedLiquidity, LockedLiquidityState>[]> {
+  vaults: readonly DiscoveredProtocolLiquidity[],
+): Promise<EnrichedDiscovery<DiscoveredProtocolLiquidity, ProtocolLiquidityVaultState>[]> {
   return await Promise.all(
-    lockers.map(async (locker) => {
+    vaults.map(async (vault) => {
       try {
-        return { ...locker, state: await readLockedLiquidityState(client, locker.locker), stale: false };
+        return { ...vault, state: await readProtocolLiquidityVaultState(client, vault.vault), stale: false };
       } catch (error) {
-        return { ...locker, stale: true, error: error instanceof Error ? error.message : String(error) };
+        return { ...vault, stale: true, error: error instanceof Error ? error.message : String(error) };
       }
     }),
   );

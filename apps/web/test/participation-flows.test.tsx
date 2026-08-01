@@ -16,7 +16,6 @@ import {
   ParticipationFlows,
   createParticipationFlowContent,
   findParticipationDistribution,
-  fixedPriceHyperliquidBlocker,
   maximumWithSlippage,
   ClaimTicketVerificationGuard,
   claimTicketVerificationSourceIdentity,
@@ -110,11 +109,11 @@ const curveDistribution: BoardroomDistributionSnapshot = {
     address: curve,
     factory: owner,
     boardroom,
-    lockedLiquidityFactory: owner,
+    liquidityFactory: owner,
     shareToken,
     quoteToken: paymentToken,
-    locker: zeroAddress,
-    pool: zeroAddress,
+    liquidityVault: zeroAddress,
+    liquidityPoolId: zeroHash,
     saleSupply: 10_000_000_000_000_000_000n,
     migrationSupply: 2_000_000_000_000_000_000n,
     remainingSaleShares: 8_000_000_000_000_000_000n,
@@ -616,66 +615,13 @@ describe("participation bounds and proof parsing", () => {
       expectedAction: "trade",
       intent: bondingCurveIntent(state),
       async readBuyQuote() {
-        return bondingCurveBuyQuote({ ...state, lockedLiquidityFactory: sale });
+        return bondingCurveBuyQuote({ ...state, liquidityFactory: sale });
       },
     })).rejects.toThrow("does not match this wallet, curve, direction, or exact trade amount");
   });
 });
 
 describe("participation flow composition", () => {
-  test("shows the configured Hyperliquid rail but fails closed for capped sales", () => {
-    const html = renderToString(
-      <ParticipationFlows
-        {...context}
-        chainId={998}
-        hyperliquid={{
-          config: {
-            application: "api.pledge.cash/x402-router/v1/execute",
-            baseUrl: "https://x402.example",
-            gateway: owner,
-            hyperevmUsdc: paymentToken,
-          },
-          walletClient: () => {
-            throw new Error("not invoked while rendering");
-          },
-        }}
-        path="fixed-price-sale"
-      />,
-    );
-    expect(html).toContain("Pay from Hyperliquid");
-    expect(html).toContain("Buyer-capped fixed-price sales are not supported");
-
-    const state = fixedSaleDistribution.state as FixedPriceSaleState;
-    expect(fixedPriceHyperliquidBlocker({
-      account: owner,
-      amount: 1n,
-      amountError: undefined,
-      boardroomStatus: 0,
-      chainId: 998,
-      destinationUsdc: paymentToken,
-      distributionError: undefined,
-      recipient: owner,
-      recipientError: undefined,
-      slippageBps: 100n,
-      slippageError: undefined,
-      state: { ...state, maxPerBuyer: 0n },
-    })).toBeUndefined();
-    expect(fixedPriceHyperliquidBlocker({
-      account: owner,
-      amount: 1n,
-      amountError: undefined,
-      boardroomStatus: 0,
-      chainId: 998,
-      destinationUsdc: owner,
-      distributionError: undefined,
-      recipient: owner,
-      recipientError: undefined,
-      slippageBps: 100n,
-      slippageError: undefined,
-      state: { ...state, maxPerBuyer: 0n },
-    })).toContain("configured HyperEVM USDC payment token");
-  });
-
   test("prefers a live distribution over older closed deployments", () => {
     const closed: BoardroomDistributionSnapshot = {
       ...fixedSaleDistribution,
@@ -759,9 +705,7 @@ describe("participation flow composition", () => {
           addLiquidity={noop}
           approveLiquidityTokenA={noop}
           approveLiquidityTokenB={noop}
-          approveLpToken={noop}
           approveInput={noop}
-          claimAmmFees={noop}
           executeSwap={noop}
           refreshLiquidityQuote={noop}
           refreshPosition={noop}
@@ -939,7 +883,7 @@ function bondingCurveIntent(state: MigratingBondingCurveState) {
     curve: state.address,
     deadlineMinutes: "20",
     factory: state.factory,
-    lockedLiquidityFactory: state.lockedLiquidityFactory,
+    liquidityFactory: state.liquidityFactory,
     mode: "buy",
     quoteToken: state.quoteToken,
     recipient: owner,

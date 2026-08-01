@@ -77,9 +77,9 @@ price, not the average paid price or the scheduled floor; it is zero when no pur
 only before the scheduled start and before any purchase. Early closure is available only through Boardroom wind-down.
 
 Post-auction liquidity is a separate, optional Boardroom decision. The auction neither reserves liquidity nor commits
-proceeds. For a new canonical pool, the settlement price is the reference ratio for the operator's explicit
-locked-liquidity transaction. If that canonical pool already exists, additions use its live reserve ratio. The UI
-intentionally supplies no default proceeds percentage, and all amounts and minimums remain explicit.
+proceeds. For a new canonical PoolId, the Boardroom action supplies an explicit initial `sqrtPriceX96`; if the canonical
+vault already exists, additions use its fixed PoolKey and live v4 state. The UI intentionally supplies no default
+proceeds percentage, and all amounts, minimums, and deadlines remain explicit.
 
 ## Merkle airdrop
 
@@ -167,11 +167,12 @@ The explicit phases are `Selling`, `Graduated`, `Unwinding`, `Migrated`, `Settle
 
 ## Singleton liquidity reservation
 
-Curve creation reserves the Boardroom's one predicted locker and canonical pool initialization. The reservation binds
-Boardroom, curve, share token, permanent quote asset, pair key, and salt. An attacker-preseeded pool is rejected both at
-reservation and immediately before initial funding by checking AMM reserves and raw token balances.
+Curve creation reserves the Boardroom's one predicted vault and canonical PoolId initialization. The reservation binds
+Boardroom, curve, share token, permanent quote asset, full PoolKey, PoolId, and salt. The `beforeInitialize` hook rejects
+any initializer other than the factory's currently authorized reservation, and reservation/funding also reject an
+already initialized PoolId.
 
-A successful migration must consume that exact reservation and activate the first and only canonical locker/pool.
+A successful migration must consume that exact reservation and activate the first and only canonical vault/PoolId.
 Reservation release never clears the Boardroom's quote identity.
 
 ## Migration price continuity
@@ -183,9 +184,9 @@ terminalPrice = basePrice + floor(slope * soldShares / 1e18)
 ```
 
 Migration selects quote first from the recorded reserve according to `quoteToLpBps`, then derives share inventory as
-`floor(quoteToLiquidity * 1e18 / terminalPrice)`. Unused reserved shares and quote return to the Boardroom. Actual AMM
-funding must satisfy caller minimums of at least 95% of the protocol-derived amounts, and the realized reserve price may
-deviate from the terminal price by at most 50 basis points. These conventions are simulated across edge and fuzzed
+`floor(quoteToLiquidity * 1e18 / terminalPrice)`. Unused reserved shares and quote return to the Boardroom. Actual v4
+funding must satisfy caller minimums of at least 95% of the protocol-derived amounts, and the supplied initialization
+price may deviate from the terminal price by at most 50 basis points. These conventions are simulated across edge and fuzzed
 parameter grids in `BondingCurveEconomicSimulation.t.sol`.
 
 ## Quarantined quote
@@ -202,7 +203,7 @@ snapshot rule.
 
 ## Safety invariants
 
-- A Boardroom has at most one permanent curve, quote asset, locker, and pool.
+- A Boardroom has at most one permanent curve, quote asset, P4LP vault, and PoolId.
 - A curve cannot be created after launch or after any other canonical transferable-share release.
 - Curve funding cannot be redirected or repeated.
 - Old allowances cannot bypass the token-level primary-market guard.

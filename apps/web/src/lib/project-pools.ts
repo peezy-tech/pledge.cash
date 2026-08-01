@@ -12,7 +12,7 @@ export function projectPoolAddresses(dashboard: ProductBoardroomDashboardState |
   if (!dashboard) return [];
   const candidates = [
     ...(dashboard.histories ?? []).map((history) => history.pool),
-    ...dashboard.snapshot.lockedLiquiditySummaries.map((locker) => locker.state?.pool),
+    ...dashboard.snapshot.lockedLiquiditySummaries.map((locker) => locker.address),
     dashboard.history?.pool,
     dashboard.catalog.find((entry) => sameAddress(entry.address, dashboard.address))?.pool,
   ];
@@ -60,10 +60,10 @@ export function assertProjectPoolAllowed(
   label: string,
 ): asserts pool is PoolIdentity {
   if (!pool || pool.exists === false) {
-    throw new Error(`${label} requires an existing project AMM pool.`);
+    throw new Error(`${label} requires an existing canonical project Uniswap v4 pool.`);
   }
   if (!allowedPools.some((allowed) => sameAddress(allowed, pool.address))) {
-    throw new Error(`${label} is not scoped to an AMM pool owned by this project.`);
+    throw new Error(`${label} is not scoped to a canonical v4 vault owned by this project.`);
   }
 }
 

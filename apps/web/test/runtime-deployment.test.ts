@@ -179,35 +179,33 @@ describe("runtime deployment artifacts", () => {
     expect(availability.reason).toContain("not chain 10143");
   });
 
-  test("preserves permanent module-policy identity fields", () => {
+  test("preserves Uniswap v4 execution roots and protocol-liquidity identity", () => {
     const deployment = parseDeployment(`{
       "chainId": 998,
-      "tokenGrantModulePolicy": true,
-      "distributionModulePolicy": false,
-      "boardroomRewardsModulePolicy": true,
-      "bondMarketModulePolicy": true,
-      "lockedLiquidityModulePolicy": true
+      "uniswapV4PoolManager": "0x1000000000000000000000000000000000000001",
+      "uniswapUniversalRouter": "0x1000000000000000000000000000000000000002",
+      "uniswapV4Quoter": "0x1000000000000000000000000000000000000003",
+      "uniswapV4StateView": "0x1000000000000000000000000000000000000004",
+      "permit2": "0x1000000000000000000000000000000000000005",
+      "pledgeV4LiquidityFactory": "0x1000000000000000000000000000000000000006"
     }`);
 
-    expect(deployment.tokenGrantModulePolicy).toBe(true);
-    expect(deployment.distributionModulePolicy).toBe(false);
-    expect(deployment.boardroomRewardsModulePolicy).toBe(true);
-    expect(deployment.bondMarketModulePolicy).toBe(true);
-    expect(deployment.lockedLiquidityModulePolicy).toBe(true);
+    expect(deployment.uniswapV4PoolManager).toBe("0x1000000000000000000000000000000000000001");
+    expect(deployment.uniswapUniversalRouter).toBe("0x1000000000000000000000000000000000000002");
+    expect(deployment.uniswapV4Quoter).toBe("0x1000000000000000000000000000000000000003");
+    expect(deployment.uniswapV4StateView).toBe("0x1000000000000000000000000000000000000004");
+    expect(deployment.permit2).toBe("0x1000000000000000000000000000000000000005");
+    expect(deployment.pledgeV4LiquidityFactory).toBe("0x1000000000000000000000000000000000000006");
   });
 
   test("preserves Boardroom reward deployment roots and attestations", () => {
     const deployment = parseDeployment(`{
       "chainId": 998,
       "boardroomRewardsFactory": "0x1000000000000000000000000000000000000004",
-      "boardroomRewardsPolicyAllowed": true,
-      "assetBoardroomRewardsSpenderAllowed": true,
       "boardroomRewardsFactoryCodeHash": "0xabc456"
     }`);
 
     expect(deployment.boardroomRewardsFactory).toBe("0x1000000000000000000000000000000000000004");
-    expect(deployment.boardroomRewardsPolicyAllowed).toBe(true);
-    expect(deployment.assetBoardroomRewardsSpenderAllowed).toBe(true);
     expect(deployment.boardroomRewardsFactoryCodeHash).toBe("0xabc456");
   });
 
@@ -216,13 +214,11 @@ describe("runtime deployment artifacts", () => {
       "chainId": 998,
       "bondMarketFactory": "0x1000000000000000000000000000000000000001",
       "bondMarketLogic": "0x1000000000000000000000000000000000000002",
-      "assetBondMarketSpenderAllowed": true,
       "bondMarketFactoryCodeHash": "0xabc123"
     }`);
 
     expect(deployment.bondMarketFactory).toBe("0x1000000000000000000000000000000000000001");
     expect(deployment.bondMarketLogic).toBe("0x1000000000000000000000000000000000000002");
-    expect(deployment.assetBondMarketSpenderAllowed).toBe(true);
     expect(deployment.bondMarketFactoryCodeHash).toBe("0xabc123");
   });
 
@@ -246,14 +242,14 @@ describe("runtime deployment artifacts", () => {
       chainId: 998,
       boardroomFactory: "0x1000000000000000000000000000000000000001" as const,
       tokenGrantFactory: "0x1000000000000000000000000000000000000002" as const,
-      ammRouter: "0x1000000000000000000000000000000000000003" as const,
+      uniswapUniversalRouter: "0x1000000000000000000000000000000000000003" as const,
       assetPolicy: "0x1000000000000000000000000000000000000004" as const,
       wrappedNative: "0x1000000000000000000000000000000000000005" as const,
       creationFee: 1n,
     };
     const identity = deploymentRuntimeIdentity(base);
 
-    expect(deploymentRuntimeIdentity({ ...base, ammRouter: "0x2000000000000000000000000000000000000003" })).not.toBe(identity);
+    expect(deploymentRuntimeIdentity({ ...base, uniswapUniversalRouter: "0x2000000000000000000000000000000000000003" })).not.toBe(identity);
     expect(deploymentRuntimeIdentity({ ...base, assetPolicy: "0x2000000000000000000000000000000000000004" })).not.toBe(identity);
     expect(deploymentRuntimeIdentity({ ...base, wrappedNative: "0x2000000000000000000000000000000000000005" })).not.toBe(identity);
     expect(deploymentRuntimeIdentity({ ...base, creationFee: 2n })).not.toBe(identity);
@@ -263,9 +259,9 @@ describe("runtime deployment artifacts", () => {
     expect(deploymentRuntimeIdentity({
       chainId: 998,
       creationFee: 5n,
-      ammRouter: "0x1000000000000000000000000000000000000003",
+      uniswapUniversalRouter: "0x1000000000000000000000000000000000000003",
     })).toBe(deploymentRuntimeIdentity({
-      ammRouter: "0x1000000000000000000000000000000000000003",
+      uniswapUniversalRouter: "0x1000000000000000000000000000000000000003",
       creationFee: 5n,
       chainId: 998,
     }));
@@ -280,7 +276,7 @@ describe("runtime deployment artifacts", () => {
       "deterministicDeploymentVersion": "v2",
       "deterministicDeployer": "0x1000000000000000000000000000000000000001",
       "create2Factory": "0x1000000000000000000000000000000000000002",
-      "ammRouterCodeHash": "0xabc123"
+      "uniswapUniversalRouterCodeHash": "0xabc123"
     }`);
 
     expect(deployment.sourceCommit).toBe("fd145b60a72fcd949d8c4000ad3f24311eec73c8");
@@ -289,7 +285,7 @@ describe("runtime deployment artifacts", () => {
     expect(deployment.deterministicDeploymentVersion).toBe("v2");
     expect(deployment.deterministicDeployer).toBe("0x1000000000000000000000000000000000000001");
     expect(deployment.create2Factory).toBe("0x1000000000000000000000000000000000000002");
-    expect(deployment.ammRouterCodeHash).toBe("0xabc123");
+    expect(deployment.uniswapUniversalRouterCodeHash).toBe("0xabc123");
   });
 });
 

@@ -10,11 +10,10 @@ There is no parallel Boardroom deployment path in this unreleased repository.
 
 | Network | Chain id | Default RPC | Wrapped native | Checked-in artifact |
 | --- | ---: | --- | --- | --- |
-| HyperEVM testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `998.json`: **pending** |
 | Monad testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `10143.json`: **pending** |
 | Local Anvil | `31337` | `http://127.0.0.1:8547` | locally deployed | ignored local artifacts |
 
-Neither target testnet has a canonical protocol-v1 broadcast. Testnet
+The target testnet does not have a canonical protocol-v1 broadcast. Testnet
 deployment is the next operational step after the final local acceptance and
 review gates, but this repository state does not authorize or evidence that
 broadcast. Mainnet remains unsupported.
@@ -28,15 +27,19 @@ artifact and receipt evidence agree with live code.
 
 `Deploy.s.sol` deploys the complete protocol, publishes and activates
 Boardroom release A, configures module policies and fee routes, transfers the
-governed roots, and then attests the resulting graph. It deploys 21 protocol
-roots through `PledgeCashDeterministicDeployer`:
+governed roots, and then attests the resulting graph. It deploys 19 protocol
+roots through `PledgeCashDeterministicDeployer`, plus the deterministic deployer itself and a permission-bit-compatible
+CREATE2 hook:
 
 - `ProtocolFacetRegistry`, `BoardroomKernel`, `BoardroomFactory`, the policy
   registry, three immutable Boardroom helper roots, and the five release-A
   facets;
 - asset policy and protocol fee router;
-- token-grant, AMM, distribution, locked-liquidity, rewards, and bond-market
-  roots.
+- token-grant, Pledge v4 liquidity, distribution, rewards, and bond-market roots;
+- a `beforeInitialize`-only `PledgeV4Hook` mined and deployed after the liquidity factory address is known.
+
+PoolManager, Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and wrapped native are external inputs.
+The script requires code at every address and records each address and runtime code hash in the artifact.
 
 The factory creates its bound controller factory and controller
 implementation. Child implementations created by module factories are also
@@ -57,8 +60,7 @@ transfers these owners to `PLEDGE_CASH_PROTOCOL_GOVERNANCE`:
 - `BoardroomPolicyRegistry`;
 - `AssetPolicy`;
 - `ProtocolFeeRouter`;
-- `TokenGrantFactory`;
-- `AmmFactory`.
+- `TokenGrantFactory`.
 
 This is the genesis ceremony configuration, not a permanent owner pin.
 `protocolGovernance` records the configured genesis role, while
@@ -80,7 +82,6 @@ The other configured roles are:
 
 - `PLEDGE_CASH_PROTOCOL_TREASURY`, the recipient behind
   `ProtocolFeeRouter`;
-- `PLEDGE_CASH_AMM_FEE_MANAGER`, the bounded AMM operational authority;
 - `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`, which must be the broadcaster
   for the current deployment flow.
 
@@ -203,15 +204,12 @@ The target wrappers load their chain-specific environment, pin chain id, and
 refuse any dirty source worktree:
 
 ```sh
-script/hyperevm-testnet/registry-release.sh preflight /absolute/path/release.json
 script/monad-testnet/registry-release.sh preflight /absolute/path/release.json
 ```
 
-Their target-specific variables are
-`HYPEREVM_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
-and the equivalent `MONAD_TESTNET_...` names. Common generic names remain
-available as explicit fallbacks. HyperEVM sends legacy transactions only after
-the same broadcast confirmation gate.
+Its target-specific variables use the
+`MONAD_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
+names. Common generic names remain available as explicit fallbacks.
 
 The active live inventory can be verified without a manifest or mutation:
 
@@ -261,14 +259,12 @@ Start from `.env.example` and provide:
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0x...
 PLEDGE_CASH_PROTOCOL_TREASURY=0x...
-PLEDGE_CASH_AMM_FEE_MANAGER=0x...
-```
-
-HyperEVM dry runs and broadcasts also require:
-
-```sh
-HYPEREVM_TESTNET_PRIVATE_KEY=...
-HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
+UNISWAP_V4_POOL_MANAGER=0x...
+UNISWAP_UNIVERSAL_ROUTER=0x...
+UNISWAP_V4_QUOTER=0x...
+UNISWAP_V4_STATE_VIEW=0x...
+UNISWAP_V4_POSITION_MANAGER=0x...
+PERMIT2_ADDRESS=0x...
 ```
 
 Monad dry runs and broadcasts require:
@@ -280,7 +276,6 @@ MONAD_TESTNET_PRIVATE_KEY=...
 Optional overrides include:
 
 ```sh
-HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
 MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=0
@@ -298,7 +293,6 @@ Dry runs send no target-chain transaction and do not rewrite deployment
 artifacts:
 
 ```sh
-bun run simulate:hyperevm-testnet
 bun run simulate:monad-testnet
 bun run simulate:testnets
 ```
@@ -312,7 +306,6 @@ The following commands are state-changing and require deliberate operator
 authorization:
 
 ```sh
-bun run deploy:hyperevm-testnet
 bun run deploy:monad-testnet
 ```
 
@@ -337,8 +330,7 @@ registry owner and active release must still equal the artifact's genesis
 ceremony state, so a candidate cannot pass after an intervening ownership
 handoff or release activation.
 
-HyperEVM may require the deployment account to use big blocks during the
-broadcast. Monad uses its network-specific Foundry toolchain. Those operational
+Monad uses its network-specific Foundry toolchain. Those operational
 preconditions must be rehearsed again before the first testnet transaction;
 the current pending artifacts do not prove them.
 
@@ -355,10 +347,9 @@ A promoted protocol-v1 artifact must bind at least:
   code hashes;
 - `activeFacetSetHash`, release number, required storage version/layout,
   manifest hash, kernel-selector-set hash, and selector count;
-- every module factory/implementation, wrapped-native token, fee routes, and
-  runtime code hash;
-- explicit governed-root owners, protocol governance, treasury, and AMM fee
-  manager.
+- every module factory/implementation, wrapped-native token, fee route, Pledge v4 hook, external Uniswap/Permit2
+  dependency, and runtime code hash;
+- explicit governed-root owners, protocol governance, and treasury.
 
 The verifier independently reconstructs release A from locally compiled
 facets, checks the canonical kernel-reserved selector set, and proves that the
@@ -388,8 +379,8 @@ deployment rehearsal:
 anvil --port 8547 --chain-id 31337
 ```
 
-With a deployed local wrapped-native contract and the four development roles
-configured, run `Deploy.s.sol`:
+With a deployed local wrapped-native contract, local v4 infrastructure, and the three deployment roles configured, run
+`Deploy.s.sol`:
 
 ```sh
 cd packages/contracts
@@ -397,8 +388,13 @@ PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 PLEDGE_CASH_PROTOCOL_TREASURY=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
-PLEDGE_CASH_AMM_FEE_MANAGER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 WRAPPED_NATIVE_ADDRESS=0x... \
+UNISWAP_V4_POOL_MANAGER=0x... \
+UNISWAP_UNIVERSAL_ROUTER=0x... \
+UNISWAP_V4_QUOTER=0x... \
+UNISWAP_V4_STATE_VIEW=0x... \
+UNISWAP_V4_POSITION_MANAGER=0x... \
+PERMIT2_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
   --rpc-url http://127.0.0.1:8547 \
@@ -412,6 +408,27 @@ forge script script/Deploy.s.sol:Deploy \
 Re-running the same command is the idempotence check: existing roots must be
 accepted only when their init-code commitments and live configuration match.
 The ignored `deployments/31337.json` is local evidence, not a public identity.
+
+### Sepolia fork deployment proof
+
+The isolated Sepolia-fork gate deploys the complete protocol against the live
+canonical Sepolia PoolManager, Universal Router, Quoter, StateView,
+PositionManager, Permit2, wrapped-native token, and CREATE2 factory. It verifies
+that every external dependency has code, records and checks the first broadcast
+receipt-by-receipt, reconstructs every deterministic address and release hash,
+reruns the deployment, and verifies that the canonical identity and live wiring
+remain unchanged.
+
+```sh
+bun run test:sepolia-fork:deployment
+```
+
+The command requires Foundry v1.7.1 and a clean committed worktree. It defaults
+to a public Sepolia RPC; set `SEPOLIA_RPC_URL` when a private or higher-capacity
+endpoint is preferable. Set `SEPOLIA_FORK_BLOCK` to repeat an exact historical
+fork. The child Anvil chain uses id `31337`, never broadcasts to Sepolia, keeps
+all logs, candidate artifacts, and receipt evidence in a printed temporary
+directory, and does not overwrite the normal local deployment artifact.
 
 The canonical Boardroom lifecycle proof uses a separate fresh Anvil state:
 

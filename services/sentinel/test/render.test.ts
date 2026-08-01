@@ -5,7 +5,7 @@ import { buildLinks, renderNotification, type RenderableOutboxRow } from "../src
 describe("notification rendering", () => {
   test("renders Telegram HTML with veto instructions and explorer links", () => {
     const rendered = renderNotification(makeRow("telegram"), {
-      chainNames: { 998: "HyperEVM testnet" },
+      chainNames: { 998: "Test chain" },
       explorerUrls: { 998: "https://explorer.example" },
       now: new Date("2026-07-09T12:00:00.000Z"),
       webOrigin: "https://sentinel.example"
@@ -25,7 +25,7 @@ describe("notification rendering", () => {
 
   test("renders Twitter alerts within 280 characters", () => {
     const rendered = renderNotification(makeRow("twitter"), {
-      chainNames: { 998: "HyperEVM testnet" },
+      chainNames: { 998: "Test chain" },
       now: new Date("2026-07-09T12:00:00.000Z"),
       webOrigin: "https://sentinel.example"
     });
@@ -39,7 +39,7 @@ describe("notification rendering", () => {
 
   test("renders policy-admin updates with the admin label", () => {
     const rendered = renderNotification(makeRow("telegram", "policy-admin"), {
-      chainNames: { 998: "HyperEVM testnet" },
+      chainNames: { 998: "Test chain" },
       now: new Date("2026-07-09T12:00:00.000Z"),
       webOrigin: "https://sentinel.example"
     });

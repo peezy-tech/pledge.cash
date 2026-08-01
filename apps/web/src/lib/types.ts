@@ -5,12 +5,11 @@ import type {
   DiscoveredBoardroom,
   DiscoveredDistribution,
   DiscoveredGrant,
-  DiscoveredLockedLiquidity,
-  DiscoveredPool,
+  DiscoveredProtocolLiquidity as DiscoveredLockedLiquidity,
   DutchAuctionState,
   FixedPriceSaleState,
   GrantState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState as LockedLiquidityState,
   MerkleAirdropState,
   MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
@@ -194,6 +193,7 @@ export type LockedLiquidityForm = {
   quoteAmountDesired: string;
   shareAmountMin: string;
   quoteAmountMin: string;
+  sqrtPriceX96: string;
   deadline: string;
   salt: string;
   shareTokenSide: "tokenA" | "tokenB";
@@ -250,5 +250,4 @@ export type DiscoverySnapshot = {
   grantsByAddress: Record<string, DiscoveredGrant>;
   distributionsByAddress: Record<string, DiscoveredDistribution>;
   lockersByAddress: Record<string, DiscoveredLockedLiquidity>;
-  poolsByAddress: Record<string, DiscoveredPool>;
 };

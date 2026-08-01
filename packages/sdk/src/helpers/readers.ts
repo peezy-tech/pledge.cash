@@ -1,6 +1,5 @@
 import type { Address, Hex } from "viem";
 import {
-  ammFactoryAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
@@ -13,8 +12,8 @@ import {
   dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
+  pledgeV4LiquidityFactoryAbi,
+  pledgeV4LiquidityVaultAbi,
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
@@ -36,7 +35,7 @@ import type {
   DutchAuctionState,
   GrantSettlementQuote,
   GrantState,
-  LockedLiquidityState,
+  ProtocolLiquidityVaultState,
   MerkleAirdropClaimState,
   MerkleAirdropState,
   MigratingBondingCurveBuyQuote,
@@ -246,8 +245,8 @@ export async function readBoardroomState(
     bondingCurve,
     primaryMarketQuoteAsset,
     liquidityStatus,
-    liquidityLocker,
-    liquidityPool,
+    liquidityVault,
+    liquidityPoolId,
     liquidityQuoteAsset,
   ] =
     await Promise.all([
@@ -281,8 +280,8 @@ export async function readBoardroomState(
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "bondingCurve" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "primaryMarketQuoteAsset" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityStatus" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityLocker" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityPool" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityVault" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityPoolId" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityQuoteAsset" }),
     ]);
   const [governanceEligibleSupply, controllerState] = await Promise.all([
@@ -337,8 +336,8 @@ export async function readBoardroomState(
     bondingCurve: bondingCurve as Address,
     primaryMarketQuoteAsset: primaryMarketQuoteAsset as Address,
     liquidityStatus: Number(liquidityStatus),
-    liquidityLocker: liquidityLocker as Address,
-    liquidityPool: liquidityPool as Address,
+    liquidityVault: liquidityVault as Address,
+    liquidityPoolId: liquidityPoolId as Hex,
     liquidityQuoteAsset: liquidityQuoteAsset as Address,
   };
 }
@@ -867,26 +866,26 @@ export async function predictMerkleAirdropAddress(
   })) as Address;
 }
 
-export async function predictAmmPoolAddress(
+export async function readProtocolLiquidityPoolId(
   client: PledgeCashReadClient,
   input: { factory: Address; tokenA: Address; tokenB: Address },
-): Promise<Address> {
+): Promise<Hex> {
   return (await client.readContract({
     address: input.factory,
-    abi: ammFactoryAbi,
-    functionName: "predictPoolAddress",
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "poolIdFor",
     args: [input.tokenA, input.tokenB],
-  })) as Address;
+  })) as Hex;
 }
 
-export async function predictLockedLiquidityAddress(
+export async function predictProtocolLiquidityVaultAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; boardroom: Address; salt: Hex },
 ): Promise<Address> {
   return (await client.readContract({
     address: input.factory,
-    abi: lockedLiquidityFactoryAbi,
-    functionName: "predictLockedLiquidityAddress",
+    abi: pledgeV4LiquidityFactoryAbi,
+    functionName: "predictLiquidityVaultAddress",
     args: [input.boardroom, input.salt],
   })) as Address;
 }
@@ -1110,11 +1109,11 @@ export async function readMigratingBondingCurveState(
   const [
     factory,
     boardroom,
-    lockedLiquidityFactory,
+    liquidityFactory,
     shareToken,
     quoteToken,
-    locker,
-    pool,
+    liquidityVault,
+    liquidityPoolId,
     saleSupply,
     migrationSupply,
     remainingSaleShares,
@@ -1148,11 +1147,11 @@ export async function readMigratingBondingCurveState(
   ] = await Promise.all([
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "factory" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "boardroom" }),
-    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "lockedLiquidityFactory" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "liquidityFactory" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "shareToken" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteToken" }),
-    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "locker" }),
-    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "pool" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "liquidityVault" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "liquidityPoolId" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "saleSupply" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationSupply" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "remainingSaleShares" }),
@@ -1193,11 +1192,11 @@ export async function readMigratingBondingCurveState(
     address: curve,
     factory: factory as Address,
     boardroom: boardroom as Address,
-    lockedLiquidityFactory: lockedLiquidityFactory as Address,
+    liquidityFactory: liquidityFactory as Address,
     shareToken: shareToken as Address,
     quoteToken: quoteToken as Address,
-    locker: locker as Address,
-    pool: pool as Address,
+    liquidityVault: liquidityVault as Address,
+    liquidityPoolId: liquidityPoolId as Hex,
     saleSupply: saleSupply as bigint,
     migrationSupply: migrationSupply as bigint,
     remainingSaleShares: remainingSaleShares as bigint,
@@ -1379,40 +1378,70 @@ export async function readMerkleAirdropClaimState(
   return { airdrop: input.airdrop, index: input.index, claimed: claimed as boolean };
 }
 
-export async function readLockedLiquidityState(
+export async function readProtocolLiquidityVaultState(
   client: PledgeCashReadClient,
-  locker: Address,
-): Promise<LockedLiquidityState> {
+  vault: Address,
+): Promise<ProtocolLiquidityVaultState> {
   const [
     factory,
     boardroom,
-    router,
+    poolManager,
+    protocolFeeRecipient,
     tokenA,
     tokenB,
-    pool,
+    currency0,
+    currency1,
+    hook,
+    poolId,
+    positionSalt,
+    tickLower,
+    tickUpper,
+    poolFee,
+    tickSpacing,
     liquidityState,
-    lockedLiquidity,
+    positionLiquidity,
+    totalSupply,
   ] = await Promise.all([
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "factory" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "boardroom" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "router" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "tokenA" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "tokenB" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "pool" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "liquidityState" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "lockedLiquidity" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "factory" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "boardroom" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "poolManager" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "protocolFeeRecipient" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "tokenA" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "tokenB" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "currency0" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "currency1" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "hook" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "poolId" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "positionSalt" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "tickLower" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "tickUpper" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "poolFee" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "tickSpacing" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "liquidityState" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "positionLiquidity" }),
+    client.readContract({ address: vault, abi: pledgeV4LiquidityVaultAbi, functionName: "totalSupply" }),
   ]);
 
   return {
-    address: locker,
+    address: vault,
     factory: factory as Address,
     boardroom: boardroom as Address,
-    router: router as Address,
+    poolManager: poolManager as Address,
+    protocolFeeRecipient: protocolFeeRecipient as Address,
     tokenA: tokenA as Address,
     tokenB: tokenB as Address,
-    pool: pool as Address,
+    currency0: currency0 as Address,
+    currency1: currency1 as Address,
+    hook: hook as Address,
+    poolId: poolId as Hex,
+    positionSalt: positionSalt as Hex,
+    tickLower: Number(tickLower),
+    tickUpper: Number(tickUpper),
+    poolFee: Number(poolFee),
+    tickSpacing: Number(tickSpacing),
     liquidityState: Number(liquidityState),
-    lockedLiquidity: lockedLiquidity as bigint,
+    positionLiquidity: positionLiquidity as bigint,
+    totalSupply: totalSupply as bigint,
   };
 }
 

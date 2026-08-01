@@ -10,12 +10,12 @@ type DeploymentPanelProps = {
   creationFee: bigint;
   deployment: PledgeCashDeployment | undefined;
   factorySnapshot: FactorySnapshot;
-  localAmmProtocolFeeRecipient?: Address | undefined;
+  localProtocolFeeRecipient?: Address | undefined;
 };
 
 type DeploymentSummary = {
-  ammProtocolFeeRecipient: Address | undefined;
-  ammState: string;
+  protocolFeeRecipient: Address | undefined;
+  liquidityState: string;
   boardroomState: string;
   factoryOwner: Address | undefined;
   hasTokenGrantFactory: boolean;
@@ -29,12 +29,12 @@ export function DeploymentPanel({
   creationFee,
   deployment,
   factorySnapshot,
-  localAmmProtocolFeeRecipient,
+  localProtocolFeeRecipient,
 }: DeploymentPanelProps): React.JSX.Element {
   const summary = summarizeDeployment({
     deployment,
     factorySnapshot,
-    localAmmProtocolFeeRecipient,
+    localProtocolFeeRecipient,
   });
 
   return (
@@ -72,15 +72,15 @@ export function ArtifactPanel({ deployment }: { deployment: PledgeCashDeployment
 function summarizeDeployment({
   deployment,
   factorySnapshot,
-  localAmmProtocolFeeRecipient,
+  localProtocolFeeRecipient,
 }: {
   deployment: PledgeCashDeployment | undefined;
   factorySnapshot: FactorySnapshot;
-  localAmmProtocolFeeRecipient: Address | undefined;
+  localProtocolFeeRecipient: Address | undefined;
 }): DeploymentSummary {
   return {
-    ammProtocolFeeRecipient: deployment?.ammProtocolFeeRecipient ?? localAmmProtocolFeeRecipient,
-    ammState: describeAmmState(deployment),
+    protocolFeeRecipient: deployment?.pledgeV4ProtocolFeeRecipient ?? localProtocolFeeRecipient,
+    liquidityState: describeLiquidityState(deployment),
     boardroomState: describeBoardroomState(deployment),
     factoryOwner: factorySnapshot.owner ?? deployment?.tokenGrantFactoryOwner,
     hasTokenGrantFactory: Boolean(deployment?.tokenGrantFactory),
@@ -114,18 +114,18 @@ function deploymentFacts({
       label: "BoardroomFactory",
       value: addressValue(deployment?.boardroomFactory, deployment?.reason ?? "Not in artifact"),
     },
-    { label: "AMM", value: summary.ammState },
+    { label: "Uniswap v4", value: summary.liquidityState },
     {
-      label: "AmmFactory",
-      value: addressValue(deployment?.ammFactory, "Not in artifact"),
+      label: "PoolManager",
+      value: addressValue(deployment?.uniswapV4PoolManager, "Not in artifact"),
     },
     {
-      label: "AMM protocol fees",
-      value: addressValue(summary.ammProtocolFeeRecipient, "Not configured"),
+      label: "Protocol fee recipient",
+      value: addressValue(summary.protocolFeeRecipient, "Not configured"),
     },
     {
-      label: "LockedLiquidityFactory",
-      value: addressValue(deployment?.lockedLiquidityFactory, "Not in artifact"),
+      label: "PledgeV4LiquidityFactory",
+      value: addressValue(deployment?.pledgeV4LiquidityFactory, "Not in artifact"),
     },
     { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
     {
@@ -147,13 +147,13 @@ function describeBoardroomState(deployment: PledgeCashDeployment | undefined): s
   return "Not in artifact";
 }
 
-function describeAmmState(deployment: PledgeCashDeployment | undefined): string {
-  if (deployment?.ammRouter) {
-    return "Router ready";
+function describeLiquidityState(deployment: PledgeCashDeployment | undefined): string {
+  if (deployment?.uniswapUniversalRouter && deployment.pledgeV4LiquidityFactory) {
+    return "Canonical pool and router ready";
   }
 
-  if (deployment?.ammFactory) {
-    return "Factory only";
+  if (deployment?.uniswapV4PoolManager) {
+    return "PoolManager only";
   }
 
   return "Not in artifact";

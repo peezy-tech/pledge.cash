@@ -6,10 +6,12 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
-import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
+import {PledgeV4LiquidityFactory} from "../uniswap/PledgeV4LiquidityFactory.sol";
 
 interface IMigratingBondingCurveBoardroom {
     function status() external view returns (uint8);
@@ -26,7 +28,6 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     uint256 internal constant WAD = 1e18;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
-    uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
 
     uint256 public constant MAX_CURVE_SUPPLY = type(uint112).max;
     uint256 public constant MAX_CURVE_LIFETIME = 90 days;
@@ -74,16 +75,17 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         uint256 quoteToLiquidity;
         uint256 minShareLiquidity;
         uint256 minQuoteLiquidity;
+        uint160 sqrtPriceX96;
         uint256 deadline;
     }
 
     address public factory;
     address public boardroom;
-    address public lockedLiquidityFactory;
+    address public liquidityFactory;
     address public shareToken;
     address public quoteToken;
-    address public locker;
-    address public pool;
+    address public liquidityVault;
+    bytes32 public liquidityPoolId;
     uint256 public saleSupply;
     uint256 public migrationSupply;
     uint256 public remainingSaleShares;
@@ -158,8 +160,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     event CurveSell(address indexed seller, address indexed recipient, uint256 shares, uint256 quoteReturned);
     event CurvePhaseChanged(CurvePhase indexed phase, SettlementReason indexed reason, uint256 phaseEndsAt);
     event CurveMigrated(
-        address indexed locker,
-        address indexed pool,
+        address indexed vault,
+        bytes32 indexed poolId,
         uint256 sharesToLiquidity,
         uint256 quoteToLiquidity,
         uint256 liquidity,
@@ -187,15 +189,15 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _disableInitializers();
     }
 
-    function initialize(address boardroom_, address lockedLiquidityFactory_, CreateParams calldata params)
+    function initialize(address boardroom_, address liquidityFactory_, CreateParams calldata params)
         external
         initializer
     {
-        _requireValidCreateParams(boardroom_, lockedLiquidityFactory_, params);
+        _requireValidCreateParams(boardroom_, liquidityFactory_, params);
 
         factory = msg.sender;
         boardroom = boardroom_;
-        lockedLiquidityFactory = lockedLiquidityFactory_;
+        liquidityFactory = liquidityFactory_;
         shareToken = params.shareToken;
         quoteToken = params.quoteToken;
         saleSupply = params.saleSupply;
@@ -290,11 +292,12 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         bytes32 expectedFacetSetHash,
         uint256 minShareLiquidity,
         uint256 minQuoteLiquidity,
+        uint160 sqrtPriceX96,
         uint256 deadline
     )
         external
         nonReentrant
-        returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
+        returns (address createdVault, bytes32 createdPoolId, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireActiveBoardroom();
         if (deadline < block.timestamp) revert Expired();
@@ -306,12 +309,14 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
             quoteToLiquidity: 0,
             minShareLiquidity: minShareLiquidity,
             minQuoteLiquidity: minQuoteLiquidity,
+            sqrtPriceX96: sqrtPriceX96,
             deadline: deadline
         });
         uint256 quoteBalance = accountedQuoteReserve;
         uint256 terminalPrice = terminalCurvePrice();
         seed.quoteToLiquidity = _quoteToLiquidity(quoteBalance);
         seed.sharesToLiquidity = FixedPointMathLib.fullMulDiv(seed.quoteToLiquidity, WAD, terminalPrice);
+        _requireMigrationSqrtPrice(seed.sqrtPriceX96, terminalPrice);
         uint256 availableShares = ERC20(shareToken).balanceOf(address(this));
         if (seed.sharesToLiquidity > availableShares) {
             revert InsufficientShares(seed.sharesToLiquidity, availableShares);
@@ -326,11 +331,11 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         outstandingCurveShareLiability = 0;
         accountedQuoteReserve = 0;
 
-        (createdLocker, createdPool, amountA, amountB, liquidity) = _createLockedLiquidity(seed);
+        (createdVault, createdPoolId, amountA, amountB, liquidity) = _createProtocolLiquidity(seed);
         _requireMigrationPrice(amountA, amountB, terminalPrice);
 
-        locker = createdLocker;
-        pool = createdPool;
+        liquidityVault = createdVault;
+        liquidityPoolId = createdPoolId;
         migrationReservationHeld = false;
         uint256 expectedQuoteRemainder = quoteBalance - seed.quoteToLiquidity;
         _returnCanonicalShares();
@@ -345,10 +350,10 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _requireActiveBoardroom();
         migrationInProgress = false;
 
-        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(
-            boardroom, seed.expectedFacetSetHash, createdLocker, createdPool
+        BoardroomCallbackLib.recordProtocolLiquidityFromDistribution(
+            boardroom, seed.expectedFacetSetHash, createdVault, createdPoolId
         );
-        emit CurveMigrated(createdLocker, createdPool, amountA, amountB, liquidity, quoteRemainder, terminalPrice);
+        emit CurveMigrated(createdVault, createdPoolId, amountA, amountB, liquidity, quoteRemainder, terminalPrice);
     }
 
     /// @notice Governance cancellation before graduation starts the same bounded sell-only unwind as expiry.
@@ -495,7 +500,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
             migrationInProgress || curveStatus != CurvePhase.Graduated || block.timestamp > phaseEndsAt
                 || IMigratingBondingCurveBoardroom(boardroom).status() != BOARDROOM_STATUS_ACTIVE
         ) return false;
-        return _migrationAmountsFitAmm(accountedQuoteReserve, outstandingCurveShareLiability);
+        return _migrationAmountsFitV4(accountedQuoteReserve, outstandingCurveShareLiability);
     }
 
     function reservationExpiresAt() external view returns (uint64) {
@@ -566,12 +571,11 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         if (!_isWithinBuyWindow()) revert BuyWindowClosed();
     }
 
-    function _requireValidCreateParams(
-        address boardroom_,
-        address lockedLiquidityFactory_,
-        CreateParams calldata params
-    ) internal view {
-        _requireValidCreateAddresses(boardroom_, lockedLiquidityFactory_, params);
+    function _requireValidCreateParams(address boardroom_, address liquidityFactory_, CreateParams calldata params)
+        internal
+        view
+    {
+        _requireValidCreateAddresses(boardroom_, liquidityFactory_, params);
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) revert InvalidBasisPoints();
         _requireValidCurveParameters(params);
         if (
@@ -581,13 +585,12 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         ) revert InvalidTimeWindow();
     }
 
-    function _requireValidCreateAddresses(
-        address boardroom_,
-        address lockedLiquidityFactory_,
-        CreateParams calldata params
-    ) internal view {
+    function _requireValidCreateAddresses(address boardroom_, address liquidityFactory_, CreateParams calldata params)
+        internal
+        view
+    {
         if (
-            boardroom_ == address(0) || lockedLiquidityFactory_ == address(0) || params.shareToken == address(0)
+            boardroom_ == address(0) || liquidityFactory_ == address(0) || params.shareToken == address(0)
                 || params.quoteToken == address(0) || params.shareToken == params.quoteToken
         ) revert InvalidAddress();
         if (!_isAsset(params.quoteToken)) revert InvalidQuoteAsset(params.quoteToken);
@@ -605,13 +608,10 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         uint256 quoteToLiquidity = FixedPointMathLib.fullMulDiv(fullSaleQuote, params.quoteToLpBps, BPS);
         uint256 terminalPrice = params.basePrice + FixedPointMathLib.fullMulDiv(params.slope, params.saleSupply, WAD);
         uint256 sharesToLiquidity = FixedPointMathLib.fullMulDiv(quoteToLiquidity, WAD, terminalPrice);
-        uint256 minimumShares = _minimumMigrationFill(sharesToLiquidity);
-        uint256 minimumQuote = _minimumMigrationFill(quoteToLiquidity);
         if (
             sharesToLiquidity == 0 || sharesToLiquidity > params.migrationSupply
                 || sharesToLiquidity > type(uint112).max || quoteToLiquidity == 0
                 || quoteToLiquidity > type(uint112).max
-                || FixedPointMathLib.sqrt(minimumShares * minimumQuote) <= AMM_MINIMUM_LIQUIDITY
         ) revert InvalidMigrationConfiguration();
     }
 
@@ -658,6 +658,23 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     function _requireMigrationPrice(uint256 shares, uint256 quote, uint256 terminalPrice) internal pure {
         if (shares == 0 || quote == 0) revert InvalidMigrationConfiguration();
         uint256 actualPrice = FixedPointMathLib.fullMulDiv(quote, WAD, shares);
+        _requirePriceDeviation(actualPrice, terminalPrice);
+    }
+
+    function _requireMigrationSqrtPrice(uint160 sqrtPriceX96, uint256 terminalPrice) internal view {
+        if (sqrtPriceX96 < TickMath.MIN_SQRT_PRICE || sqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) {
+            revert InvalidMigrationConfiguration();
+        }
+        uint256 currency1PerCurrency0 =
+            FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96) * WAD, uint256(1) << 192);
+        if (currency1PerCurrency0 == 0) revert InvalidMigrationConfiguration();
+        uint256 actualPrice = shareToken < quoteToken
+            ? currency1PerCurrency0
+            : FixedPointMathLib.fullMulDiv(WAD, WAD, currency1PerCurrency0);
+        _requirePriceDeviation(actualPrice, terminalPrice);
+    }
+
+    function _requirePriceDeviation(uint256 actualPrice, uint256 terminalPrice) internal pure {
         uint256 difference = actualPrice > terminalPrice ? actualPrice - terminalPrice : terminalPrice - actualPrice;
         uint256 deviationBps = FixedPointMathLib.fullMulDivUp(difference, BPS, terminalPrice);
         if (deviationBps > MAX_MIGRATION_PRICE_DEVIATION_BPS) {
@@ -665,30 +682,31 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         }
     }
 
-    function _createLockedLiquidity(MigrationSeed memory seed)
+    function _createProtocolLiquidity(MigrationSeed memory seed)
         internal
-        returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
+        returns (address createdVault, bytes32 createdPoolId, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        shareToken.safeApprove(lockedLiquidityFactory, seed.sharesToLiquidity);
-        quoteToken.safeApprove(lockedLiquidityFactory, seed.quoteToLiquidity);
-        (createdLocker, createdPool, amountA, amountB, liquidity) = LockedLiquidityFactory(lockedLiquidityFactory)
-            .createLockedLiquidityForBoardroom(
+        shareToken.safeApprove(liquidityFactory, seed.sharesToLiquidity);
+        quoteToken.safeApprove(liquidityFactory, seed.quoteToLiquidity);
+        (createdVault, createdPoolId, amountA, amountB, liquidity) = PledgeV4LiquidityFactory(liquidityFactory)
+            .createProtocolLiquidityForBoardroom(
                 seed.expectedFacetSetHash,
                 boardroom,
-                LockedLiquidityFactory.CreateParams({
+                PledgeV4LiquidityFactory.CreateParams({
                 tokenA: shareToken,
                 tokenB: quoteToken,
                 amountADesired: seed.sharesToLiquidity,
                 amountBDesired: seed.quoteToLiquidity,
                 amountAMin: seed.minShareLiquidity,
                 amountBMin: seed.minQuoteLiquidity,
+                sqrtPriceX96: seed.sqrtPriceX96,
                 deadline: seed.deadline,
                 salt: migrationSalt
             })
             );
-        if (createdLocker == address(0) || createdPool == address(0)) revert InvalidAddress();
-        shareToken.safeApprove(lockedLiquidityFactory, 0);
-        quoteToken.safeApprove(lockedLiquidityFactory, 0);
+        if (createdVault == address(0) || createdPoolId == bytes32(0)) revert InvalidAddress();
+        shareToken.safeApprove(liquidityFactory, 0);
+        quoteToken.safeApprove(liquidityFactory, 0);
     }
 
     function _beginUnwind(SettlementReason reason) internal {
@@ -701,7 +719,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     function _releaseMigrationReservation(bytes32 expectedFacetSetHash) internal {
         if (!migrationReservationHeld) return;
         migrationReservationHeld = false;
-        LockedLiquidityFactory(lockedLiquidityFactory)
+        PledgeV4LiquidityFactory(liquidityFactory)
             .releaseMigrationReservation(expectedFacetSetHash, boardroom, shareToken, quoteToken, migrationSalt);
     }
 
@@ -803,16 +821,13 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         emit CurvePhaseChanged(CurvePhase.Graduated, SettlementReason.None, phaseEndsAt);
     }
 
-    function _migrationAmountsFitAmm(uint256 quoteBalance, uint256 liability) internal view returns (bool) {
+    function _migrationAmountsFitV4(uint256 quoteBalance, uint256 liability) internal view returns (bool) {
         uint256 quoteToLiquidity = _quoteToLiquidity(quoteBalance);
         uint256 terminalPrice = basePrice + FixedPointMathLib.fullMulDiv(slope, liability, WAD);
         uint256 sharesToLiquidity = FixedPointMathLib.fullMulDiv(quoteToLiquidity, WAD, terminalPrice);
         uint256 availableShares = ERC20(shareToken).balanceOf(address(this));
-        uint256 minimumShares = _minimumMigrationFill(sharesToLiquidity);
-        uint256 minimumQuote = _minimumMigrationFill(quoteToLiquidity);
         return sharesToLiquidity != 0 && sharesToLiquidity <= availableShares && sharesToLiquidity <= type(uint112).max
-            && quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max
-            && FixedPointMathLib.sqrt(minimumShares * minimumQuote) > AMM_MINIMUM_LIQUIDITY;
+            && quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max;
     }
 
     function _minimumMigrationFill(uint256 desiredAmount) internal pure returns (uint256) {

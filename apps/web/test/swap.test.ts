@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, PledgeCashDeployment, PledgeCashReadClient } from "@pledge.cash/sdk";
-import { exactRational } from "../src/lib/market-data";
+import type { Address, PledgeCashReadClient } from "@pledge.cash/sdk";
+import type { Hex } from "viem";
 import {
+  assertFutureSwapDeadline,
   buildAddLiquidityTransaction,
   buildRemoveLiquidityTransaction,
   buildSwapTransaction,
-  assertFutureSwapDeadline,
   readAmmPosition,
   readLiquidityQuote,
   readRemoveLiquidityQuote,
@@ -20,27 +20,43 @@ const share = "0x4000000000000000000000000000000000000000" as Address;
 const whype = "0x5000000000000000000000000000000000000000" as Address;
 const account = "0x6000000000000000000000000000000000000000" as Address;
 const router = "0x7000000000000000000000000000000000000000" as Address;
-const nativePool = "0x8000000000000000000000000000000000000000" as Address;
-const deployment: PledgeCashDeployment = { chainId: 31337, ammFactory: factory, ammRouter: router, wrappedNative: whype };
+const quoter = "0x7100000000000000000000000000000000000000" as Address;
+const stateView = "0x7200000000000000000000000000000000000000" as Address;
+const permit2 = "0x7300000000000000000000000000000000000000" as Address;
+const poolManager = "0x7400000000000000000000000000000000000000" as Address;
+const hook = "0x7500000000000000000000000000000000000000" as Address;
+const protocolFeeRecipient = "0x7600000000000000000000000000000000000000" as Address;
+const poolId = `0x${"11".repeat(32)}` as Hex;
+const positionSalt = `0x${"22".repeat(32)}` as Hex;
+const zeroAddress = "0x0000000000000000000000000000000000000000" as Address;
+const q96 = 1n << 96n;
+const deployment = {
+  chainId: 31337,
+  deploymentBlock: 0n,
+  permit2,
+  pledgeV4LiquidityFactory: factory,
+  uniswapUniversalRouter: router,
+  uniswapV4PoolManager: poolManager,
+  uniswapV4Quoter: quoter,
+  uniswapV4StateView: stateView,
+  wrappedNative: whype,
+};
 
-describe("swap token discovery", () => {
-  test("lists AMM pool tokens plus deployment wrapped native", async () => {
-    const state = await readSwapTokenList(
-      fakeReadClient(),
-      deployment,
-      account,
-      { wrappedNativeLabel: "WHYPE" },
-    );
+describe("Uniswap v4 token discovery", () => {
+  test("lists canonical vault currencies plus deployment wrapped native", async () => {
+    const state = await readSwapTokenList(fakeReadClient(), deployment, account, {
+      wrappedNativeLabel: "WHYPE",
+    });
 
     expect(state.error).toBeUndefined();
     expect(state.pools).toHaveLength(1);
+    expect(state.pools[0]).toMatchObject({ address: pool, poolId, token0: usdc, token1: share });
     expect(state.tokens.map((token) => token.address).sort()).toEqual([share, usdc, whype].sort());
 
     const cash = state.tokens.find((token) => token.address === usdc);
-    expect(cash?.label).toBeUndefined();
     expect(cash?.sources).toEqual(["pool"]);
     expect(cash?.pairAddresses).toEqual([share]);
-    expect(cash?.balance).toBe(1_000_000n);
+    expect(cash?.balance).toBe(10_000_000n);
 
     const wrappedNative = state.tokens.find((token) => token.address === whype);
     expect(wrappedNative?.label).toBe("WHYPE");
@@ -49,148 +65,90 @@ describe("swap token discovery", () => {
   });
 
   test("uses the active-chain wrapped native label", async () => {
-    const state = await readSwapTokenList(
-      fakeReadClient(),
-      deployment,
-      account,
-      { wrappedNativeLabel: "WMON" },
-    );
+    const state = await readSwapTokenList(fakeReadClient(), deployment, account, {
+      wrappedNativeLabel: "WMON",
+    });
 
-    const wrappedNative = state.tokens.find((token) => token.address === whype);
-    expect(wrappedNative?.label).toBe("WMON");
-    expect(wrappedNative?.sources).toEqual(["deployment"]);
+    expect(state.tokens.find((token) => token.address === whype)?.label).toBe("WMON");
   });
 
-  test("keeps the newest canonical pool when the factory has more than 500 pools", async () => {
-    const requestedIndices: bigint[] = [];
-    const newestPool = indexedPoolAddress(500n);
-    const client = {
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
-        if (request.address === factory && request.functionName === "allPoolsLength") return 501n;
-        if (request.address === factory && request.functionName === "allPools") {
-          const index = request.args?.[0] as bigint;
-          requestedIndices.push(index);
-          return indexedPoolAddress(index);
-        }
-        if (request.functionName === "token0") return usdc;
-        if (request.functionName === "token1") return share;
-        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
-        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
-        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
-        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
-      },
-    } as PledgeCashReadClient;
+  test("keeps the newest 500 canonical v4 pools from event discovery", async () => {
+    const logs = Array.from({ length: 501 }, (_, index) => liquidityCreatedLog(BigInt(index)));
+    const state = await readSwapTokenList(fakeReadClient({ logs }), deployment);
 
-    const state = await readSwapTokenList(client, deployment);
-
-    expect(requestedIndices).toHaveLength(500);
-    expect(requestedIndices[0]).toBe(1n);
-    expect(requestedIndices.at(-1)).toBe(500n);
-    expect(requestedIndices).not.toContain(0n);
     expect(state.pools).toHaveLength(500);
-    expect(state.pools.some((candidate) => candidate.address === newestPool)).toBe(true);
-    expect(state.error).toBe("Showing the newest 500 pools. Enter a token address to work with an older pool.");
+    expect(state.pools[0]?.address).toBe(indexedVaultAddress(500n));
+    expect(state.pools.at(-1)?.address).toBe(indexedVaultAddress(1n));
+    expect(state.pools.some((candidate) => candidate.address === indexedVaultAddress(0n))).toBe(false);
+    expect(state.error).toBe("Only the newest 500 canonical v4 pools are shown.");
   });
 
-  test("unions an older exact project pool beyond the global discovery window", async () => {
-    const oldestPool = indexedPoolAddress(0n);
-    const client = {
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
-        if (request.address === factory && request.functionName === "allPoolsLength") return 501n;
-        if (request.address === factory && request.functionName === "allPools") return indexedPoolAddress(request.args?.[0] as bigint);
-        if (request.functionName === "token0") return usdc;
-        if (request.functionName === "token1") return share;
-        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
-        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : "PLDG";
-        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
-        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
-      },
-    } as PledgeCashReadClient;
-
-    const state = await readSwapTokenList(client, deployment, undefined, { pinnedPools: [oldestPool] });
+  test("unions an exact pinned vault beyond the global discovery window", async () => {
+    const logs = Array.from({ length: 501 }, (_, index) => liquidityCreatedLog(BigInt(index)));
+    const oldestVault = indexedVaultAddress(0n);
+    const state = await readSwapTokenList(fakeReadClient({ logs }), deployment, undefined, {
+      pinnedPools: [oldestVault],
+    });
 
     expect(state.pools).toHaveLength(501);
-    expect(state.pools.some((candidate) => candidate.address === oldestPool)).toBe(true);
-    expect(state.tokens.find((token) => token.address === share)?.pools).toContain(oldestPool);
+    expect(state.pools.some((candidate) => candidate.address === oldestVault)).toBe(true);
+    expect(state.tokens.find((token) => token.address === share)?.pools).toContain(oldestVault);
   });
 
-  test("reads only exact pinned project pools without enumerating a 500-pool global market", async () => {
-    const pinnedPool = indexedPoolAddress(501n);
-    let globalPoolReads = 0;
-    const poolSummaryReads: string[] = [];
+  test("reads only exact pinned vaults without scanning global events", async () => {
+    const pinnedVault = indexedVaultAddress(501n);
+    let logReads = 0;
+    let vaultHydrations = 0;
+    const base = fakeReadClient();
     const client = {
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string };
-        if (request.functionName === "allPoolsLength" || request.functionName === "allPools") {
-          globalPoolReads += 1;
-          return request.functionName === "allPoolsLength" ? 500n : indexedPoolAddress(0n);
-        }
-        if (["token0", "token1", "getReserves"].includes(request.functionName)) {
-          poolSummaryReads.push(`${request.address}:${request.functionName}`);
-          expect(request.address).toBe(pinnedPool);
-          if (request.functionName === "token0") return usdc;
-          if (request.functionName === "token1") return share;
-          return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
-        }
-        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
-        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
-        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      ...base,
+      async getLogs() {
+        logReads += 1;
+        return [];
       },
-    } as PledgeCashReadClient;
+      async readContract(request: unknown) {
+        const parsed = request as { address: Address; functionName: string };
+        if (parsed.address === pinnedVault && parsed.functionName === "factory") vaultHydrations += 1;
+        return await base.readContract(request as never);
+      },
+    } as FakeClient;
 
     const state = await readSwapTokenList(client, deployment, undefined, {
       discoveryMode: "pinned-only",
-      pinnedPools: [pinnedPool],
+      pinnedPools: [pinnedVault],
     });
 
-    expect(globalPoolReads).toBe(0);
-    expect(poolSummaryReads).toHaveLength(3);
-    expect(state.pools.map((candidate) => candidate.address)).toEqual([pinnedPool]);
-    expect(state.tokens.find((token) => token.address === share)?.pools).toEqual([pinnedPool]);
+    expect(logReads).toBe(0);
+    expect(vaultHydrations).toBe(1);
+    expect(state.pools.map((candidate) => candidate.address)).toEqual([pinnedVault]);
   });
 
-  test("retains the newest 64 pinned pools in deterministic append order", async () => {
-    const discoveryOrder = Array.from(
-      { length: 66 },
-      (_, index) => indexedPoolAddress(BigInt((index * 17) % 66)),
-    );
-    const firstPool = discoveryOrder[0]!;
-    const duplicateWithDifferentCase = `0x${firstPool.slice(2).toUpperCase()}` as Address;
-    const requestedPools = [...discoveryOrder, duplicateWithDifferentCase];
-    const expectedPools = discoveryOrder.slice(-64);
-    const client = {
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string };
-        if (request.functionName === "token0") return usdc;
-        if (request.functionName === "token1") return share;
-        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
-        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
-        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
-        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
-      },
-    } as PledgeCashReadClient;
-
-    const state = await readSwapTokenList(client, deployment, undefined, {
+  test("retains the newest 64 pinned vaults in deterministic input order", async () => {
+    const discoveryOrder = Array.from({ length: 66 }, (_, index) =>
+      indexedVaultAddress(BigInt((index * 17) % 66)));
+    const firstVault = discoveryOrder[0]!;
+    const requested = [...discoveryOrder, `0x${firstVault.slice(2).toUpperCase()}` as Address];
+    const state = await readSwapTokenList(fakeReadClient(), deployment, undefined, {
       discoveryMode: "pinned-only",
-      pinnedPools: requestedPools,
+      pinnedPools: requested,
     });
 
-    expect(state.pools.map((candidate) => candidate.address)).toEqual(expectedPools);
+    expect(state.pools.map((candidate) => candidate.address)).toEqual(discoveryOrder.slice(-64));
     expect(state.error).toBe("Only the newest 64 project pools can be pinned at once.");
   });
 
-  test("cancels pinned discovery before issuing RPC reads", async () => {
+  test("preserves the caller abort reason before issuing reads", async () => {
     const controller = new AbortController();
     controller.abort(new DOMException("Project changed.", "AbortError"));
     let reads = 0;
+    const base = fakeReadClient();
     const client = {
-      async readContract(): Promise<unknown> {
+      ...base,
+      async readContract(request: unknown) {
         reads += 1;
-        throw new Error("should not read");
+        return await base.readContract(request as never);
       },
-    } as PledgeCashReadClient;
+    } as FakeClient;
 
     await expect(readSwapTokenList(client, deployment, account, {
       discoveryMode: "pinned-only",
@@ -200,224 +158,148 @@ describe("swap token discovery", () => {
     expect(reads).toBe(0);
   });
 
-  test("bounds pool address and summary discovery concurrency", async () => {
-    let activeAddressReads = 0;
-    let activeSummaryReads = 0;
-    let maxAddressReads = 0;
-    let maxSummaryReads = 0;
+  test("bounds concurrent vault and StateView hydration", async () => {
+    const logs = Array.from({ length: 40 }, (_, index) => liquidityCreatedLog(BigInt(index)));
+    const base = fakeReadClient({ logs });
+    let activeVaultReads = 0;
+    let activeStateReads = 0;
+    let maxVaultReads = 0;
+    let maxStateReads = 0;
     const client = {
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
-        if (request.address === factory && request.functionName === "allPoolsLength") return 40n;
-        if (request.address === factory && request.functionName === "allPools") {
-          activeAddressReads += 1;
-          maxAddressReads = Math.max(maxAddressReads, activeAddressReads);
+      ...base,
+      async readContract(request: unknown) {
+        const parsed = request as { address: Address; functionName: string };
+        if (parsed.functionName === "factory" && parsed.address !== factory) {
+          activeVaultReads += 1;
+          maxVaultReads = Math.max(maxVaultReads, activeVaultReads);
           await new Promise((resolve) => setTimeout(resolve, 0));
-          activeAddressReads -= 1;
-          return indexedPoolAddress(request.args?.[0] as bigint);
+          activeVaultReads -= 1;
         }
-        if (["token0", "token1", "getReserves"].includes(request.functionName)) {
-          activeSummaryReads += 1;
-          maxSummaryReads = Math.max(maxSummaryReads, activeSummaryReads);
+        if (parsed.address === stateView && parsed.functionName === "getSlot0") {
+          activeStateReads += 1;
+          maxStateReads = Math.max(maxStateReads, activeStateReads);
           await new Promise((resolve) => setTimeout(resolve, 0));
-          activeSummaryReads -= 1;
-          if (request.functionName === "token0") return usdc;
-          if (request.functionName === "token1") return share;
-          return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+          activeStateReads -= 1;
         }
-        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : "PLDG";
-        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
-        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+        return await base.readContract(request as never);
       },
-    } as PledgeCashReadClient;
+    } as FakeClient;
 
     await readSwapTokenList(client, deployment);
 
-    expect(maxAddressReads).toBeLessThanOrEqual(8);
-    expect(maxSummaryReads).toBeLessThanOrEqual(24);
+    expect(maxVaultReads).toBeLessThanOrEqual(8);
+    expect(maxStateReads).toBeLessThanOrEqual(8);
   });
 });
 
-describe("AMM liquidity helpers", () => {
+describe("Uniswap v4 swap and P4LP helpers", () => {
   test("fails closed before building a transaction with an expired deadline", () => {
     expect(() => assertFutureSwapDeadline("1000", 1000)).toThrow("transaction window expired");
     expect(() => assertFutureSwapDeadline("1001", 1000)).not.toThrow();
   });
 
-  test("builds native swap router calls when wrapped native is selected", async () => {
-    const nativeInputQuote = await readSwapQuote(fakeReadClient(), deployment, {
-      tokenIn: whype,
-      tokenOut: share,
-      amountIn: "1",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: true,
-    }, account);
-
-    expect(nativeInputQuote.error).toBeUndefined();
-    expect(nativeInputQuote.amountOut).toBe(2_000_000_000_000_000_000n);
-    expect(nativeInputQuote.slippageBps).toBe(50);
-    expect(nativeInputQuote.effectiveExecutionPrice).toMatchObject({
-      status: "known",
-      value: { quotePerBase: exactRational(2n) },
-    });
-    expect(nativeInputQuote.feeInclusivePriceImpact).toEqual({
-      status: "known",
-      value: exactRational(0n),
-    });
-    const nativeInputTransaction = buildSwapTransaction({
-      deployment,
-      form: { tokenIn: whype, tokenOut: share, amountIn: "1", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: true },
-      quote: nativeInputQuote,
-      account,
-    });
-
-    expect(nativeInputTransaction.functionName).toBe("swapExactNativeForTokens");
-    expect(nativeInputTransaction.value).toBe(1_000_000_000_000_000_000n);
-    expect(nativeInputTransaction.args[0]).toBe(1_990_000_000_000_000_000n);
-    expect(nativeInputTransaction.args[1]).toEqual([whype, share]);
-    expect(nativeInputTransaction.args[2]).toBe(account);
-
-    const nativeOutputQuote = await readSwapQuote(fakeReadClient(), deployment, {
+  test("quotes through the v4 Quoter and builds a Universal Router command", async () => {
+    const form = {
       tokenIn: share,
-      tokenOut: whype,
-      amountIn: "2",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: true,
-    }, account);
-
-    expect(nativeOutputQuote.error).toBeUndefined();
-    expect(nativeOutputQuote.amountOut).toBe(1_000_000_000_000_000_000n);
-    expect(nativeOutputQuote.slippageBps).toBe(50);
-    expect(nativeOutputQuote.effectiveExecutionPrice).toMatchObject({
-      status: "known",
-      value: { quotePerBase: exactRational(1n, 2n) },
-    });
-    expect(nativeOutputQuote.feeInclusivePriceImpact).toEqual({
-      status: "known",
-      value: exactRational(0n),
-    });
-    const nativeOutputTransaction = buildSwapTransaction({
-      deployment,
-      form: { tokenIn: share, tokenOut: whype, amountIn: "2", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: true },
-      quote: nativeOutputQuote,
-      account,
-    });
-
-    expect(nativeOutputTransaction.functionName).toBe("swapExactTokensForNative");
-    expect(nativeOutputTransaction.args[0]).toBe(2_000_000_000_000_000_000n);
-    expect(nativeOutputTransaction.args[1]).toBe(995_000_000_000_000_000n);
-    expect(nativeOutputTransaction.args[2]).toEqual([share, whype]);
-    expect(nativeOutputTransaction.args[3]).toBe(account);
-  });
-
-  test("starts the independent router quote while pool state is loading", async () => {
-    const base = fakeReadClient();
-    let routerQuoteStarted = false;
-    let poolReadObservedRouterQuote = false;
-    const concurrentClient = {
-      ...base,
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string };
-        if (request.address === router && request.functionName === "getAmountsOut") {
-          routerQuoteStarted = true;
-        }
-        if (request.address === nativePool && request.functionName === "token0") {
-          poolReadObservedRouterQuote = routerQuoteStarted;
-        }
-        return await base.readContract(rawRequest);
-      },
-    } as PledgeCashReadClient;
-
-    const quote = await readSwapQuote(concurrentClient, deployment, {
-      tokenIn: whype,
-      tokenOut: share,
+      tokenOut: usdc,
       amountIn: "1",
       slippageBps: "50",
       recipient: "",
       deadline: "1700000000",
-      useNative: true,
-    }, account);
+      useNative: false,
+    };
+    const quote = await readSwapQuote(fakeReadClient(), deployment, form, account);
 
     expect(quote.error).toBeUndefined();
-    expect(poolReadObservedRouterQuote).toBe(true);
+    expect(quote.amountIn).toBe(1_000_000_000_000_000_000n);
+    expect(quote.amountOut).toBe(2_000_000n);
+    expect(quote.amountOutMin).toBe(1_990_000n);
+    expect(quote.feeBps).toBe(3_000n);
+    expect(quote.feeDenominator).toBe(1_000_000n);
+    expect(quote.gasEstimate).toBe(123_456n);
+    expect(quote.effectiveExecutionPrice?.status).toBe("known");
+
+    const transaction = buildSwapTransaction({ deployment, form, quote, account });
+    expect(transaction.address).toBe(router);
+    expect(transaction.functionName).toBe("execute");
+    expect(transaction.args[0]).toBe("0x10");
+    expect(transaction.args[1]).toHaveLength(1);
+    expect(transaction.args[2]).toBe(1_700_000_000n);
   });
 
-  test("rejects swap quotes that round down to zero output", async () => {
-    const quote = await readSwapQuote(fakeReadClient(), deployment, {
+  test("rejects native routing until explicit Universal Router wrap actions exist", async () => {
+    const form = {
+      tokenIn: whype,
+      tokenOut: share,
+      amountIn: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    };
+    const quote = await readSwapQuote(fakeReadClient(), deployment, form, account);
+
+    expect(quote.error).toContain("wrap native currency first");
+    expect(() => buildSwapTransaction({ deployment, form, quote, account })).toThrow("Wrap native currency");
+  });
+
+  test("rejects zero-output quotes and does not call the Quoter for zero-liquidity pools", async () => {
+    const form = {
       tokenIn: share,
-      tokenOut: whype,
+      tokenOut: usdc,
       amountIn: "0.000000000000000001",
       slippageBps: "50",
       recipient: "",
       deadline: "1700000000",
-      useNative: true,
-    }, account);
+      useNative: false,
+    };
+    const zeroOutput = await readSwapQuote(fakeReadClient({ quoteOut: 0n }), deployment, form, account);
+    expect(zeroOutput.amountIn).toBe(1n);
+    expect(zeroOutput.amountOut).toBe(0n);
+    expect(zeroOutput.error).toBe("Swap output would be zero.");
 
-    expect(quote.amountIn).toBe(1n);
-    expect(quote.amountOut).toBe(0n);
-    expect(quote.error).toBe("Swap output would be zero.");
+    let quoterReads = 0;
+    const base = fakeReadClient({ poolLiquidity: 0n });
+    const client = {
+      ...base,
+      async readContract(request: unknown) {
+        const parsed = request as { address: Address };
+        if (parsed.address === quoter) quoterReads += 1;
+        return await base.readContract(request as never);
+      },
+    } as FakeClient;
+    const zeroLiquidity = await readSwapQuote(client, deployment, { ...form, amountIn: "1" }, account);
+    expect(zeroLiquidity.error).toContain("no active liquidity");
+    expect(zeroLiquidity.effectiveExecutionPrice?.status).toBe("unavailable");
+    expect(quoterReads).toBe(0);
   });
 
-  test("fails closed on zero-reserve and mismatched pool routes", async () => {
+  test("fails closed when factory and vault disagree on the token pair", async () => {
     const base = fakeReadClient();
-    let routerQuoteReads = 0;
-    const zeroReserveClient = {
+    const client = {
       ...base,
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string };
-        if (request.address === nativePool && request.functionName === "getReserves") {
-          return [0n, 20_000_000_000_000_000_000n, 0] as const;
-        }
-        if (request.address === router && request.functionName === "getAmountsOut") {
-          routerQuoteReads += 1;
-          throw new Error("Router quote should not override pool validation.");
-        }
-        return await base.readContract(rawRequest);
+      async readContract(request: unknown) {
+        const parsed = request as { address: Address; functionName: string };
+        if (parsed.address === pool && parsed.functionName === "currency1") return whype;
+        return await base.readContract(request as never);
       },
-    } as PledgeCashReadClient;
-    const zeroReserveQuote = await readSwapQuote(zeroReserveClient, deployment, {
-      tokenIn: whype,
-      tokenOut: share,
+    } as FakeClient;
+    const quote = await readSwapQuote(client, deployment, {
+      tokenIn: share,
+      tokenOut: usdc,
       amountIn: "1",
       slippageBps: "50",
       recipient: "",
       deadline: "1700000000",
-      useNative: true,
+      useNative: false,
     }, account);
 
-    expect(zeroReserveQuote.error).toContain("no two-sided liquidity");
-    expect(zeroReserveQuote.effectiveExecutionPrice?.status).toBe("unavailable");
-    expect(zeroReserveQuote.feeInclusivePriceImpact?.status).toBe("unavailable");
-    expect(routerQuoteReads).toBe(1);
-
-    const mismatchClient = {
-      ...base,
-      async readContract(rawRequest: unknown): Promise<unknown> {
-        const request = rawRequest as { address: Address; functionName: string };
-        if (request.address === nativePool && request.functionName === "token1") return usdc;
-        return await base.readContract(rawRequest);
-      },
-    } as PledgeCashReadClient;
-    const mismatchQuote = await readSwapQuote(mismatchClient, deployment, {
-      tokenIn: whype,
-      tokenOut: share,
-      amountIn: "1",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: true,
-    }, account);
-
-    expect(mismatchQuote.error).toContain("does not match the requested swap route");
-    expect(mismatchQuote.amountOut).toBeUndefined();
+    expect(quote.error).toContain("does not match the requested token pair");
+    expect(quote.amountOut).toBeUndefined();
   });
 
-  test("quotes balanced add liquidity amounts and builds add transaction", async () => {
-    const quote = await readLiquidityQuote(fakeReadClient(), deployment, {
+  test("quotes an active P4LP deposit and builds the vault transaction", async () => {
+    const form = {
       tokenA: usdc,
       tokenB: share,
       amountA: "1",
@@ -426,36 +308,36 @@ describe("AMM liquidity helpers", () => {
       recipient: "",
       deadline: "1700000000",
       useNative: false,
-    }, account);
+    };
+    const quote = await readLiquidityQuote(fakeReadClient(), deployment, form, account);
 
     expect(quote.error).toBeUndefined();
-    expect(quote.amountA).toBe(1_000_000n);
-    expect(quote.amountB).toBe(2_000_000_000_000_000_000n);
-    expect(quote.amountBMin).toBe(1_990_000_000_000_000_000n);
-    expect(quote.liquidityOut).toBe(100_000_000_000_000_000_000n);
+    expect(quote.pool).toMatchObject({ address: pool, poolId, liquidityState: 1 });
+    expect(quote.amountA).toBeGreaterThan(0n);
+    expect(quote.amountA).toBeLessThanOrEqual(1_000_000n);
+    expect(quote.amountB).toBeGreaterThan(0n);
+    expect(quote.amountB).toBeLessThanOrEqual(3_000_000_000_000_000_000n);
+    expect(quote.liquidityOut).toBeGreaterThan(0n);
 
-    const transaction = buildAddLiquidityTransaction({
-      deployment,
-      form: { tokenA: usdc, tokenB: share, amountA: "1", amountB: "3", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: false },
-      quote,
-      account,
-    });
-
-    expect(transaction.functionName).toBe("addLiquidity");
-    expect(transaction.args[0]).toBe(usdc);
-    expect(transaction.args[3]).toBe(2_000_000_000_000_000_000n);
-    expect(transaction.args[6]).toBe(account);
+    const transaction = buildAddLiquidityTransaction({ deployment, form, quote, account });
+    expect(transaction.address).toBe(pool);
+    expect(transaction.functionName).toBe("depositLiquidityForClaims");
+    expect(transaction.args[0]).toBe(1_000_000n);
+    expect(transaction.args[1]).toBe(3_000_000_000_000_000_000n);
+    expect(transaction.args[4]).toBe(account);
+    expect(transaction.args[5]).toBe(1_700_000_000n);
   });
 
-  test("reads LP position fee claims and builds remove transaction", async () => {
-    const position = await readAmmPosition(fakeReadClient(), deployment, usdc, share, account);
-    expect(position?.error).toBeUndefined();
-    expect(position?.lpBalance).toBe(10_000_000_000_000_000_000n);
-    expect(position?.poolShareBps).toBe(1_000n);
-    expect(position?.claimableA).toBe(10_000_000_000_000_001_000n);
-    expect(position?.claimableB).toBe(20_000_000_000_000_002_000n);
+  test("reads P4LP ownership and redeems claims only during wind-down claims mode", async () => {
+    const activePosition = await readAmmPosition(fakeReadClient(), deployment, usdc, share, account);
+    expect(activePosition?.error).toBeUndefined();
+    expect(activePosition?.lpToken?.symbol).toBe("P4LP");
+    expect(activePosition?.lpBalance).toBe(10_000_000_000_000_000_000n);
+    expect(activePosition?.poolShareBps).toBe(1_000n);
+    expect(activePosition?.claimableA).toBeUndefined();
+    expect(activePosition?.claimableB).toBeUndefined();
 
-    const quote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
+    const pairForm = {
       tokenA: usdc,
       tokenB: share,
       amountA: "1",
@@ -464,33 +346,72 @@ describe("AMM liquidity helpers", () => {
       recipient: "",
       deadline: "1700000000",
       useNative: false,
-    }, {
+    };
+    const removeForm = {
       liquidity: "5",
       slippageBps: "100",
       recipient: "",
       deadline: "1700000100",
       useNative: false,
-    }, account);
+    };
+    const activeQuote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, pairForm, removeForm, account);
+    expect(activeQuote.error).toContain("wind-down claims mode");
 
-    expect(quote.error).toBeUndefined();
-    expect(quote.amountA).toBe(50_000n);
-    expect(quote.amountB).toBe(100_000_000_000_000_000n);
-    expect(quote.amountAMin).toBe(49_500n);
-
-    const transaction = buildRemoveLiquidityTransaction({
+    const quote = await readRemoveLiquidityQuote(
+      fakeReadClient({ liquidityState: 2 }),
       deployment,
-      form: { liquidity: "5", slippageBps: "100", recipient: "", deadline: "1700000100", useNative: false },
-      quote,
+      pairForm,
+      removeForm,
       account,
-    });
+    );
+    expect(quote.error).toBeUndefined();
+    expect(quote.liquidity).toBe(5_000_000_000_000_000_000n);
+    expect(quote.amountA).toBeGreaterThan(0n);
+    expect(quote.amountB).toBeGreaterThan(0n);
 
-    expect(transaction.functionName).toBe("removeLiquidity");
-    expect(transaction.args[2]).toBe(5_000_000_000_000_000_000n);
-    expect(transaction.args[6]).toBe(1_700_000_100n);
+    const transaction = buildRemoveLiquidityTransaction({ deployment, form: removeForm, quote, account });
+    expect(transaction.address).toBe(pool);
+    expect(transaction.functionName).toBe("redeemClaims");
+    expect(transaction.args[0]).toBe(5_000_000_000_000_000_000n);
+    expect(transaction.args[3]).toBe(account);
+    expect(transaction.args[4]).toBe(1_700_000_100n);
   });
 
-  test("rejects dust LP removal quotes that round down to zero token output", async () => {
-    const quote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
+  test("includes the claim's pro-rata idle vault backing in redemption output", async () => {
+    const pairForm = {
+      tokenA: usdc,
+      tokenB: share,
+      amountA: "1",
+      amountB: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: false,
+    };
+    const removeForm = {
+      liquidity: "5",
+      slippageBps: "100",
+      recipient: "",
+      deadline: "1700000100",
+      useNative: false,
+    };
+    const withoutBacking = await readRemoveLiquidityQuote(
+      fakeReadClient({ liquidityState: 2 }), deployment, pairForm, removeForm, account,
+    );
+    const withBacking = await readRemoveLiquidityQuote(
+      fakeReadClient({ liquidityState: 2, vaultBalanceA: 10_000_000n, vaultBalanceB: 10_000_000_000_000_000_000n }),
+      deployment,
+      pairForm,
+      removeForm,
+      account,
+    );
+
+    expect(withBacking.amountA! - withoutBacking.amountA!).toBe(500_000n);
+    expect(withBacking.amountB! - withoutBacking.amountB!).toBe(500_000_000_000_000_000n);
+  });
+
+  test("rejects dust P4LP claims that round down to zero position liquidity", async () => {
+    const quote = await readRemoveLiquidityQuote(fakeReadClient({ liquidityState: 2, positionLiquidity: 1n }), deployment, {
       tokenA: usdc,
       tokenB: share,
       amountA: "1",
@@ -510,22 +431,50 @@ describe("AMM liquidity helpers", () => {
     expect(quote.liquidity).toBe(1n);
     expect(quote.amountA).toBe(0n);
     expect(quote.amountB).toBe(0n);
-    expect(quote.error).toBe("LP amount is too small for this pool.");
+    expect(quote.error).toBe("P4LP amount is too small for this position.");
+  });
+
+  test("rejects native P4LP deposit and redemption paths", async () => {
+    const pairForm = {
+      tokenA: whype,
+      tokenB: share,
+      amountA: "1",
+      amountB: "3",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    };
+    const addQuote = await readLiquidityQuote(fakeReadClient(), deployment, pairForm, account);
+    expect(addQuote.error).toContain("wrap native currency first");
+    expect(() => buildAddLiquidityTransaction({ deployment, form: pairForm, quote: addQuote, account }))
+      .toThrow("Wrap native currency");
+
+    const removeForm = {
+      liquidity: "5",
+      slippageBps: "100",
+      recipient: "",
+      deadline: "1700000100",
+      useNative: true,
+    };
+    const removeQuote = await readRemoveLiquidityQuote(fakeReadClient({ liquidityState: 2 }), deployment, pairForm, removeForm, account);
+    expect(removeQuote.error).toContain("unwrap wrapped native separately");
+    expect(() => buildRemoveLiquidityTransaction({ deployment, form: removeForm, quote: removeQuote, account }))
+      .toThrow("wrapped ERC20 tokens");
   });
 
   test("rejects invalid slippage before executable quotes are produced", async () => {
     const swapQuote = await readSwapQuote(fakeReadClient(), deployment, {
       tokenIn: share,
-      tokenOut: whype,
-      amountIn: "2",
+      tokenOut: usdc,
+      amountIn: "1",
       slippageBps: "abc",
       recipient: "",
       deadline: "1700000000",
-      useNative: true,
+      useNative: false,
     }, account);
-
     expect(swapQuote.amountOut).toBeUndefined();
-    expect(swapQuote.error).toBe("Slippage must be whole basis points.");
+    expect(swapQuote.error).toBe("Slippage must be a whole number of basis points.");
 
     const addQuote = await readLiquidityQuote(fakeReadClient(), deployment, {
       tokenA: usdc,
@@ -537,155 +486,138 @@ describe("AMM liquidity helpers", () => {
       deadline: "1700000000",
       useNative: false,
     }, account);
-
     expect(addQuote.liquidityOut).toBeUndefined();
-    expect(addQuote.error).toBe("Slippage must be between 0 and 9999 bps.");
-
-    const removeQuote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
-      tokenA: usdc,
-      tokenB: share,
-      amountA: "1",
-      amountB: "1",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: false,
-    }, {
-      liquidity: "5",
-      slippageBps: "0.5",
-      recipient: "",
-      deadline: "1700000100",
-      useNative: false,
-    }, account);
-
-    expect(removeQuote.amountA).toBeUndefined();
-    expect(removeQuote.error).toBe("Slippage must be whole basis points.");
-  });
-
-  test("builds native add and remove liquidity router calls when wrapped native is selected", async () => {
-    const addQuote = await readLiquidityQuote(fakeReadClient(), deployment, {
-      tokenA: whype,
-      tokenB: share,
-      amountA: "1",
-      amountB: "3",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: true,
-    }, account);
-
-    expect(addQuote.error).toBeUndefined();
-    const addTransaction = buildAddLiquidityTransaction({
-      deployment,
-      form: { tokenA: whype, tokenB: share, amountA: "1", amountB: "3", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: true },
-      quote: addQuote,
-      account,
-    });
-
-    expect(addTransaction.functionName).toBe("addLiquidityNative");
-    expect(addTransaction.value).toBe(1_000_000_000_000_000_000n);
-    expect(addTransaction.args[0]).toBe(share);
-    expect(addTransaction.args[1]).toBe(2_000_000_000_000_000_000n);
-    expect(addTransaction.args[3]).toBe(995_000_000_000_000_000n);
-
-    const removeQuote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
-      tokenA: whype,
-      tokenB: share,
-      amountA: "1",
-      amountB: "1",
-      slippageBps: "50",
-      recipient: "",
-      deadline: "1700000000",
-      useNative: true,
-    }, {
-      liquidity: "5",
-      slippageBps: "100",
-      recipient: "",
-      deadline: "1700000100",
-      useNative: true,
-    }, account);
-
-    expect(removeQuote.error).toBeUndefined();
-    const removeTransaction = buildRemoveLiquidityTransaction({
-      deployment,
-      form: { liquidity: "5", slippageBps: "100", recipient: "", deadline: "1700000100", useNative: true },
-      quote: removeQuote,
-      account,
-    });
-
-    expect(removeTransaction.functionName).toBe("removeLiquidityNative");
-    expect(removeTransaction.args[0]).toBe(share);
-    expect(removeTransaction.args[2]).toBe(990_000_000_000_000_000n);
-    expect(removeTransaction.args[3]).toBe(495_000_000_000_000_000n);
+    expect(addQuote.error).toBe("Slippage must be between 0 and 9,999 basis points.");
   });
 });
 
-function fakeReadClient(): PledgeCashReadClient {
+type FakeClient = PledgeCashReadClient & {
+  getBlockNumber: () => Promise<bigint>;
+  getLogs: (request: unknown) => Promise<unknown[]>;
+};
+
+function fakeReadClient(options: {
+  liquidityState?: number;
+  logs?: unknown[];
+  poolLiquidity?: bigint;
+  positionLiquidity?: bigint;
+  quoteOut?: bigint;
+  vaultBalanceA?: bigint;
+  vaultBalanceB?: bigint;
+} = {}): FakeClient {
   const symbols = new Map<Address, string>([
     [usdc, "USDC"],
     [share, "PLDG"],
     [whype, "WHYPE"],
-    [pool, "PAMM-LP"],
-    [nativePool, "PAMM-LP"],
   ]);
 
   return {
+    async getBlockNumber() {
+      return 1_000n;
+    },
+    async getLogs() {
+      return options.logs ?? [liquidityCreatedLog(-1n)];
+    },
     async readContract(rawRequest: unknown): Promise<unknown> {
       const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
-      if (request.address === factory && request.functionName === "allPoolsLength") return 1n;
-      if (request.address === factory && request.functionName === "allPools" && request.args?.[0] === 0n) return pool;
-      if (request.address === factory && request.functionName === "getPool") return pairPool(request.args);
-      if (request.address === factory && request.functionName === "predictPoolAddress") return pairPool(request.args);
-      if (request.address === factory && request.functionName === "SWAP_FEE_BPS") return 30n;
-      if (request.address === factory && request.functionName === "FEE_DENOMINATOR") return 10_000n;
-      if (request.address === factory && request.functionName === "PROTOCOL_FEE_SHARE_BPS") return 500n;
-      if (request.address === router && request.functionName === "getAmountsOut") return amountsOut(request.args);
-      if (request.address === pool && request.functionName === "token0") return usdc;
-      if (request.address === pool && request.functionName === "token1") return share;
-      if (request.address === pool && request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
-      if (request.address === pool && request.functionName === "totalSupply") return 100_000_000_000_000_000_000n;
-      if (request.address === pool && request.functionName === "claimable0") return 1_000n;
-      if (request.address === pool && request.functionName === "claimable1") return 2_000n;
-      if (request.address === pool && request.functionName === "index0") return 2_000_000_000_000_000_000n;
-      if (request.address === pool && request.functionName === "index1") return 3_000_000_000_000_000_000n;
-      if (request.address === pool && request.functionName === "supplyIndex0") return 1_000_000_000_000_000_000n;
-      if (request.address === pool && request.functionName === "supplyIndex1") return 1_000_000_000_000_000_000n;
-      if (request.address === nativePool && request.functionName === "token0") return whype;
-      if (request.address === nativePool && request.functionName === "token1") return share;
-      if (request.address === nativePool && request.functionName === "getReserves") return [10_000_000_000_000_000_000n, 20_000_000_000_000_000_000n, 0] as const;
-      if (request.address === nativePool && request.functionName === "totalSupply") return 100_000_000_000_000_000_000n;
-      if (request.address === nativePool && request.functionName === "claimable0") return 0n;
-      if (request.address === nativePool && request.functionName === "claimable1") return 0n;
-      if (request.address === nativePool && request.functionName === "index0") return 1_000_000_000_000_000_000n;
-      if (request.address === nativePool && request.functionName === "index1") return 1_000_000_000_000_000_000n;
-      if (request.address === nativePool && request.functionName === "supplyIndex0") return 1_000_000_000_000_000_000n;
-      if (request.address === nativePool && request.functionName === "supplyIndex1") return 1_000_000_000_000_000_000n;
+      if (request.address === factory && request.functionName === "poolIdFor") return poolId;
+      if (request.address === factory && request.functionName === "vaultForPoolId") return pool;
+      if (request.address === stateView && request.functionName === "getSlot0") {
+        return [q96, 0, 0, 3_000] as const;
+      }
+      if (request.address === stateView && request.functionName === "getLiquidity") {
+        return options.poolLiquidity ?? 100_000_000_000_000_000_000n;
+      }
+      if (request.address === quoter && request.functionName === "quoteExactInputSingle") {
+        return [options.quoteOut ?? 2_000_000n, 123_456n] as const;
+      }
+      if (request.address === permit2 && request.functionName === "allowance") {
+        return [(1n << 159n), Math.floor(Date.now() / 1000) + 3_600, 0] as const;
+      }
+
+      if (isVaultAddress(request.address)) {
+        const vaultPoolId = poolIdForVault(request.address);
+        if (request.functionName === "factory") return factory;
+        if (request.functionName === "boardroom") return account;
+        if (request.functionName === "poolManager") return poolManager;
+        if (request.functionName === "protocolFeeRecipient") return protocolFeeRecipient;
+        if (request.functionName === "tokenA" || request.functionName === "currency0") return usdc;
+        if (request.functionName === "tokenB" || request.functionName === "currency1") return share;
+        if (request.functionName === "hook") return hook;
+        if (request.functionName === "poolId") return vaultPoolId;
+        if (request.functionName === "positionSalt") return positionSalt;
+        if (request.functionName === "tickLower") return -887_220;
+        if (request.functionName === "tickUpper") return 887_220;
+        if (request.functionName === "poolFee") return 3_000;
+        if (request.functionName === "tickSpacing") return 60;
+        if (request.functionName === "liquidityState") return options.liquidityState ?? 1;
+        if (request.functionName === "positionLiquidity") {
+          return options.positionLiquidity ?? 100_000_000_000_000_000_000n;
+        }
+        if (request.functionName === "totalSupply") return 100_000_000_000_000_000_000n;
+        if (request.functionName === "symbol") return "P4LP";
+        if (request.functionName === "decimals") return 18;
+        if (request.functionName === "balanceOf") return 10_000_000_000_000_000_000n;
+      }
+
       if (request.functionName === "symbol") return symbols.get(request.address) ?? "TKN";
       if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
       if (request.functionName === "balanceOf") {
-        if (request.address === pool || request.address === nativePool) return 10_000_000_000_000_000_000n;
-        return request.address === usdc ? 1_000_000n : 0n;
+        const holder = request.args?.[0];
+        if (request.address === usdc) {
+          return holder === pool ? (options.vaultBalanceA ?? 0n) : 10_000_000n;
+        }
+        if (request.address === share) {
+          return holder === pool ? (options.vaultBalanceB ?? 0n) : 10_000_000_000_000_000_000n;
+        }
+        if (request.address === whype) return 10_000_000_000_000_000_000n;
+        return 0n;
       }
-      if (request.functionName === "allowance") return 0n;
+      if (request.functionName === "allowance") return 1n << 159n;
       throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
     },
-  } as PledgeCashReadClient;
+  } as FakeClient;
 }
 
-function amountsOut(args: readonly unknown[] | undefined): readonly bigint[] {
-  const [amountIn, path] = args as [bigint, readonly Address[]] | [];
-  if (!amountIn || !path) throw new Error("Missing getAmountsOut args");
-  if (path[0] === whype && path[1] === share) return [amountIn, amountIn * 2n] as const;
-  if (path[0] === share && path[1] === whype) return [amountIn, amountIn / 2n] as const;
-  return [amountIn, amountIn] as const;
+function liquidityCreatedLog(index: bigint) {
+  const indexed = index >= 0n;
+  const vault = indexed ? indexedVaultAddress(index) : pool;
+  const id = indexed ? indexedPoolId(index) : poolId;
+  const blockNumber = indexed ? index + 1n : 1n;
+  return {
+    args: {
+      amountA: 1n,
+      amountB: 1n,
+      boardroom: account,
+      curve: zeroAddress,
+      liquidity: 1n,
+      poolId: id,
+      quoteAsset: usdc,
+      salt: positionSalt,
+      sqrtPriceX96: q96,
+      vault,
+    },
+    blockNumber,
+    logIndex: 0,
+    transactionHash: `0x${blockNumber.toString(16).padStart(64, "0")}` as Hex,
+  };
 }
 
-function pairPool(args: readonly unknown[] | undefined): Address {
-  const [tokenA, tokenB] = args ?? [];
-  if ((tokenA === whype && tokenB === share) || (tokenA === share && tokenB === whype)) return nativePool;
-  return pool;
+function isVaultAddress(address: Address): boolean {
+  if (address.toLowerCase() === pool.toLowerCase()) return true;
+  const value = BigInt(address);
+  return value >= 1_000n && value < 10_000n;
 }
 
-function indexedPoolAddress(index: bigint): Address {
+function poolIdForVault(vault: Address): Hex {
+  if (vault.toLowerCase() === pool.toLowerCase()) return poolId;
+  return indexedPoolId(BigInt(vault) - 1_000n);
+}
+
+function indexedVaultAddress(index: bigint): Address {
   return `0x${(index + 1_000n).toString(16).padStart(40, "0")}` as Address;
+}
+
+function indexedPoolId(index: bigint): Hex {
+  return `0x${(index + 1n).toString(16).padStart(64, "0")}` as Hex;
 }

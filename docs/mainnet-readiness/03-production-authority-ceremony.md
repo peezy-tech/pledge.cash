@@ -30,8 +30,9 @@ development and testnet operation:
   state.
 - The environment template recommends using the same deterministic deployment owner on every chain that should share
   root contract addresses.
-- Policy registration, asset and spender admission, fee-recipient rotation, and several AMM controls are immediate
-  owner operations. The contracts do not themselves impose a governance timelock.
+- Policy registration, asset and spender admission, and fee-recipient rotation are immediate owner operations. The
+  contracts do not themselves impose a governance timelock. PoolManager, Universal Router, Quoter, StateView,
+  PositionManager, and Permit2 are immutable deployment dependencies with their own external authority boundaries.
 
 The result is a long-lived cross-chain release capability attached to the raw broadcaster key unless an external
 ceremony changes the architecture.
@@ -48,7 +49,7 @@ The ceremony must account for at least these authority classes:
 | Protocol governance | Register/disable policies and administer root-owned components | Module censorship or unsafe module admission |
 | Asset-policy owner | Admit approval assets and spenders | Unsafe approvals or denial of supported assets |
 | Protocol treasury | Receive protocol fees and other designated value | Fee loss or custody compromise |
-| AMM fee manager | Change supported AMM fee settings and recipients | Economic extraction or market disruption |
+| External Uniswap infrastructure authorities | Exercise powers present in the selected PoolManager, router, periphery, or Permit2 deployments | Market disruption, routing failure, approval loss, or externally governed fee changes |
 | Artifact promotion authority | Make the product recognize a deployment as supported | Users routed to wrong or incomplete contracts |
 | Hosting and DNS authority | Publish or withdraw product access | Phishing, stale UI, unavailable emergency communication |
 | Sentinel operator | Operate hosted accounts, indexing, and notifications | Missed alerts, privacy breach, misleading context |
@@ -122,7 +123,7 @@ Decide:
 Define separate custody and operational boundaries for:
 
 - protocol fee custody;
-- AMM fee management;
+- acceptance and monitoring of external Uniswap v4 and Permit2 authorities;
 - deployment gas funding;
 - emergency gas reserves;
 - routine forwarding or accounting;

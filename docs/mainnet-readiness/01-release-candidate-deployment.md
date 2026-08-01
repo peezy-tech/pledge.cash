@@ -11,9 +11,8 @@ The sole contract line is canonical `pledge.cash.protocol.v1`. Its Boardroom is
 the permanent asset-holding kernel routed through
 `ProtocolFacetRegistry`; there is no supported alternative deployment line.
 
-Neither target testnet has a protocol-v1 broadcast:
+The target testnet does not have a protocol-v1 broadcast:
 
-- HyperEVM `998.json` is `pending`;
 - Monad `10143.json` is `pending`;
 - no mainnet profile or supported mainnet artifact exists.
 
@@ -53,7 +52,7 @@ Local execution cannot prove:
   support discovery and recovery;
 - that the final authority accounts can perform the exact bootstrap and
   ownership handoff;
-- that the supported SDK, web, Sentinel, and x402 paths use the promoted
+- that the supported SDK, web, and Sentinel paths use the promoted
   registry/facet identity and fail closed on migration;
 - that the deployed compiler inputs, bytecode, source, receipts, and artifact
   can be independently reproduced;
@@ -87,8 +86,8 @@ validated ceremony or recovery plan.
    inputs.
 3. Choose the production registry governor, quorum, timelock, veto, and
    emergency process.
-4. Approve governance, treasury, AMM fee manager, deterministic deployer owner,
-   and broadcaster identities for each rehearsal and target.
+4. Approve governance, treasury, deterministic deployer owner, broadcaster, and the exact external Uniswap v4/Permit2
+   deployments for each rehearsal and target.
 5. Approve target-chain selector-count, release-activation gas, migration gas,
    and downtime limits.
 6. Define who may promote a verified candidate and which independent evidence
