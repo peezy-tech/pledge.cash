@@ -253,6 +253,7 @@ contract PledgeV4LiquidityVault is ERC20, Initializable, ReentrancyGuard, IUnloc
                 refundRecipient: msg.sender
             })
         );
+        _requireBoardroomActive();
         emit LiquidityClaimsMinted(msg.sender, recipient, liquidity);
     }
 

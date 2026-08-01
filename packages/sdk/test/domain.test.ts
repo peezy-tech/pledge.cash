@@ -308,6 +308,24 @@ describe("participation readers and builders", () => {
     );
     expect(actions).toBe("0x060c0e");
     expect(actionParams).toHaveLength(3);
+    expect(decodeAbiParameters(
+      parseAbiParameters(
+        "(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, bytes hookData",
+      ),
+      actionParams[0]!,
+    )).toEqual([
+      {
+        currency0: getAddress(paymentToken),
+        currency1: getAddress(shareToken),
+        fee: 3_000,
+        tickSpacing: 60,
+        hooks: getAddress(policy),
+      },
+      true,
+      250n,
+      99n,
+      "0x",
+    ]);
     expect(decodeAbiParameters(parseAbiParameters("address currency, uint256 amount"), actionParams[1]!))
       .toEqual([paymentToken, 250n]);
     expect(decodeAbiParameters(

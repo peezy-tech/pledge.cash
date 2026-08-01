@@ -51,7 +51,7 @@ export const permit2Abi = parseAbi([
   "function approve(address token, address spender, uint160 amount, uint48 expiration)",
 ]);
 const exactInputSingleParameters = parseAbiParameters(
-  "(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, uint256 minHopPriceX36, bytes hookData",
+  "(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, bytes hookData",
 );
 const currencyAndAmountParameters = parseAbiParameters("address currency, uint256 amount");
 const currencyRecipientAndAmountParameters = parseAbiParameters(
@@ -1022,7 +1022,6 @@ export function buildUniswapV4SwapExactInputSingleTransaction(input: {
   amountOutMin: bigint;
   recipient: Address;
   deadline: bigint;
-  minHopPriceX36?: bigint;
   hookData?: Hex;
 }) {
   if (input.amountIn <= 0n || input.amountIn > MAX_UINT128) {
@@ -1046,7 +1045,6 @@ export function buildUniswapV4SwapExactInputSingleTransaction(input: {
       zeroForOne,
       input.amountIn,
       input.amountOutMin,
-      input.minHopPriceX36 ?? 0n,
       input.hookData ?? "0x",
     ]),
     encodeAbiParameters(currencyAndAmountParameters, [input.currencyIn, input.amountIn]),

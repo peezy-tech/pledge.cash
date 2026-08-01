@@ -21,6 +21,7 @@ contract V4TestToken is ERC20 {
     bool public transfersRevert;
     bool public shortTransfers;
     bool public windDownOnTransfer;
+    address public windDownTransferRecipient;
 
     error TransfersDisabled();
 
@@ -50,8 +51,9 @@ contract V4TestToken is ERC20 {
         shortTransfers = shortTransfers_;
     }
 
-    function armWindDownOnTransfer() external {
+    function armWindDownOnTransfer(address recipient) external {
         windDownOnTransfer = true;
+        windDownTransferRecipient = recipient;
     }
 
     function transfer(address to, uint256 amount) public override returns (bool) {
@@ -63,7 +65,7 @@ contract V4TestToken is ERC20 {
     }
 
     function _afterTokenTransfer(address from, address to, uint256) internal override {
-        if (windDownOnTransfer && from != address(0) && to != address(0)) {
+        if (windDownOnTransfer && from != address(0) && to == windDownTransferRecipient) {
             windDownOnTransfer = false;
             V4BoardroomMock(boardroom).setWindingDown();
         }
@@ -392,7 +394,7 @@ contract PledgeV4LiquidityTest is Test {
         );
     }
 
-    function testExternalDepositRollsBackIfTokenCallbackStartsWindDown() public {
+    function testExternalDepositRollsBackIfSettlementCallbackStartsWindDown() public {
         (address vaultAddress,,,,) = boardroom.create(_createParams());
         PledgeV4LiquidityVault vault = PledgeV4LiquidityVault(vaultAddress);
 
@@ -406,7 +408,7 @@ contract PledgeV4LiquidityTest is Test {
         uint256 shareBalanceBefore = share.balanceOf(address(this));
         uint256 quoteBalanceBefore = quote.balanceOf(address(this));
 
-        share.armWindDownOnTransfer();
+        share.armWindDownOnTransfer(address(manager));
         vm.expectRevert(PledgeV4LiquidityVault.BoardroomMutationForbidden.selector);
         vault.depositLiquidityForClaims(deposit, deposit, 9.5 ether, 9.5 ether, address(this), block.timestamp);
 

@@ -88,12 +88,12 @@ const vault = requiredAddress(liquidityQuote.pool?.address, "P4LP vault");
 await submit("Approve token A for P4LP vault", buildErc20Approval({
   token: cashToken,
   spender: vault,
-  amount: requiredAmount(liquidityQuote.amountA, "liquidity amount A"),
+  amount: requiredAmount(liquidityQuote.amountADesired, "desired liquidity amount A"),
 }));
 await submit("Approve token B for P4LP vault", buildErc20Approval({
   token: shareToken,
   spender: vault,
-  amount: requiredAmount(liquidityQuote.amountB, "liquidity amount B"),
+  amount: requiredAmount(liquidityQuote.amountBDesired, "desired liquidity amount B"),
 }));
 const p4lpDeposit = await submit("Deposit into P4LP vault", buildAddLiquidityTransaction({
   deployment,
