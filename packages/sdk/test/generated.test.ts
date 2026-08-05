@@ -5,14 +5,7 @@ import {
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
-  boardroomRewardsAbi,
-  boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
-  distributionFactoryAbi,
-  dutchAuctionSaleAbi,
-  fixedPriceSaleAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
   pledgeCashNetworkProfiles,
@@ -28,37 +21,25 @@ import {
 describe("generated SDK exports", () => {
   test("includes core contract ABIs", () => {
     expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
-    expect(pledgeCashAbis.DistributionFactory).toBe(distributionFactoryAbi);
     expect(pledgeCashAbis.Boardroom).toBe(boardroomAbi);
     expect(pledgeCashAbis.BoardroomController).toBe(boardroomControllerAbi);
     expect(pledgeCashAbis.BoardroomControllerFactory).toBe(boardroomControllerFactoryAbi);
     expect(pledgeCashAbis.BoardroomFactory).toBe(boardroomFactoryAbi);
-    expect(pledgeCashAbis.BoardroomRewards).toBe(boardroomRewardsAbi);
-    expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
-    expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
-    expect(pledgeCashAbis.DutchAuctionSale).toBe(dutchAuctionSaleAbi);
-    expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
-    expect(pledgeCashAbis.MigratingBondingCurve).toBe(migratingBondingCurveAbi);
     expect(pledgeCashAbis.PledgeV4LiquidityFactory).toBe(pledgeV4LiquidityFactoryAbi);
     expect(pledgeCashAbis.PledgeV4LiquidityVault).toBe(pledgeV4LiquidityVaultAbi);
     expect(pledgeCashAbis.PledgeV4Hook).toBe(pledgeV4HookAbi);
     expect(pledgeCashAbis.ProtocolFacetRegistry).toBe(protocolFacetRegistryAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
-    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
-    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createDutchAuction")).toBe(true);
-    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMigratingBondingCurve")).toBe(true);
-    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMerkleAirdrop")).toBe(true);
-    expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
-    expect(dutchAuctionSaleAbi.some((item) => item.type === "function" && item.name === "finalize")).toBe(true);
-    expect(merkleAirdropAbi.some((item) => item.type === "function" && item.name === "claimGrant")).toBe(true);
-    expect(migratingBondingCurveAbi.some((item) => item.type === "function" && item.name === "migrate")).toBe(true);
     expect(pledgeV4LiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createProtocolLiquidity")).toBe(true);
     expect(pledgeV4LiquidityVaultAbi.some((item) => item.type === "function" && item.name === "depositLiquidityForClaims")).toBe(true);
     expect(pledgeV4HookAbi.some((item) => item.type === "function" && item.name === "beforeInitialize")).toBe(true);
+    expect("DistributionFactory" in pledgeCashAbis).toBe(false);
+    expect("BoardroomRewards" in pledgeCashAbis).toBe(false);
+    expect("BondMarket" in pledgeCashAbis).toBe(false);
   });
 
-  test("includes governance and participation functions consumed by helpers", () => {
+  test("includes governance functions consumed by helpers", () => {
     expect(functionNames(boardroomAbi)).toEqual(expect.arrayContaining([
       "appliedStorageVersion",
       "claimRedemptionAsset",
@@ -108,30 +89,12 @@ describe("generated SDK exports", () => {
       "governanceEligibleSupply",
       "isEncumberedAccount",
     ]));
-    expect(functionNames(boardroomRewardsAbi)).toEqual(expect.arrayContaining([
-      "claim",
-      "completeUnstake",
-      "earned",
-      "requestUnstake",
-      "stake",
-    ]));
-    expect(functionNames(boardroomRewardsFactoryAbi)).toEqual(expect.arrayContaining(["createRewards", "fundReward"]));
     expect(functionNames(tokenGrantAbi)).toEqual(expect.arrayContaining([
       "getSettlementCost",
       "getSettleableAmount",
       "isQuarantined",
       "transferable",
     ]));
-    expect(functionNames(fixedPriceSaleAbi)).toEqual(expect.arrayContaining(["getPaymentAmount", "purchasedBy"]));
-    expect(functionNames(dutchAuctionSaleAbi)).toEqual(expect.arrayContaining(["currentPrice", "getPaymentAmount", "purchasedBy", "settlementPrice"]));
-    expect(functionNames(migratingBondingCurveAbi)).toEqual(expect.arrayContaining([
-      "getBuyQuote",
-      "getSellQuote",
-      "graduationLatched",
-      "outstandingCurveShareLiability",
-      "sellableShares",
-    ]));
-    expect(functionNames(merkleAirdropAbi)).toEqual(expect.arrayContaining(["claimedShares", "isClaimed"]));
   });
 
   test("includes Boardroom lifecycle events and routed errors", () => {

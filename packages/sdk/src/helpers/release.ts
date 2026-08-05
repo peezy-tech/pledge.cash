@@ -119,15 +119,9 @@ const baseFacetFields = [
   ["view", "viewFacet", "viewFacetCodeHash"],
 ] as const;
 
-const optionalFacetFields = [
-  ["migration", "boardroomReleaseBMigrationFacet", "boardroomReleaseBMigrationFacetCodeHash"],
-  ["view-v2", "boardroomViewFacetV2", "boardroomViewFacetV2CodeHash"],
-] as const;
-
 /**
  * Normalizes the flat canonical deployment artifact into the exact proof
- * inputs. Optional future-release facets are admitted only as complete
- * address/code-hash pairs; the live registry decides whether they are active.
+ * inputs.
  */
 export function boardroomReleaseAttestationFromDeployment(
   deployment: PledgeCashDeployment | undefined,
@@ -157,7 +151,7 @@ export function boardroomReleaseAttestationFromDeployment(
   if (required.some((value) => value === undefined)) return undefined;
 
   const facets: BoardroomFacetAttestation[] = [];
-  for (const [role, addressField, codeHashField] of [...baseFacetFields, ...optionalFacetFields]) {
+  for (const [role, addressField, codeHashField] of baseFacetFields) {
     const facetAddress = deployment[addressField];
     const codeHash = deployment[codeHashField];
     if (facetAddress !== undefined && codeHash !== undefined) {

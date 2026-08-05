@@ -27,7 +27,6 @@ const repoRoot = resolve(scriptDir, "../../..");
 const outFile = join(repoRoot, "packages/sdk/src/generated.ts");
 
 const contracts = [
-  ["AssetPolicy", "packages/contracts/out/AssetPolicy.sol/AssetPolicy.json", "assetPolicyAbi"],
   [
     "Boardroom",
     "packages/contracts/out/IBoardroom.sol/IBoardroom.json",
@@ -58,26 +57,7 @@ const contracts = [
     "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json",
     "boardroomTokenAbi",
   ],
-  ["BoardroomRewards", "packages/contracts/out/BoardroomRewards.sol/BoardroomRewards.json", "boardroomRewardsAbi"],
-  [
-    "BoardroomRewardsFactory",
-    "packages/contracts/out/BoardroomRewardsFactory.sol/BoardroomRewardsFactory.json",
-    "boardroomRewardsFactoryAbi",
-  ],
-  ["BondMarket", "packages/contracts/out/BondMarket.sol/BondMarket.json", "bondMarketAbi"],
-  [
-    "BondMarketFactory",
-    "packages/contracts/out/BondMarketFactory.sol/BondMarketFactory.json",
-    "bondMarketFactoryAbi",
-  ],
-  [
-    "DistributionFactory",
-    "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json",
-    "distributionFactoryAbi",
-  ],
-  ["DutchAuctionSale", "packages/contracts/out/DutchAuctionSale.sol/DutchAuctionSale.json", "dutchAuctionSaleAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
-  ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
   ["IBoardroomCallPolicy", "packages/contracts/out/IBoardroomCallPolicy.sol/IBoardroomCallPolicy.json", "boardroomCallPolicyAbi"],
   [
     "IBoardroomPolicyRegistry",
@@ -95,16 +75,6 @@ const contracts = [
     "pledgeV4LiquidityVaultAbi",
   ],
   ["PledgeV4Hook", "packages/contracts/out/PledgeV4Hook.sol/PledgeV4Hook.json", "pledgeV4HookAbi"],
-  [
-    "MigratingBondingCurve",
-    "packages/contracts/out/MigratingBondingCurve.sol/MigratingBondingCurve.json",
-    "migratingBondingCurveAbi",
-  ],
-  [
-    "MerkleAirdrop",
-    "packages/contracts/out/MerkleAirdrop.sol/MerkleAirdrop.json",
-    "merkleAirdropAbi",
-  ],
   ["ProtocolFeeRouter", "packages/contracts/out/ProtocolFeeRouter.sol/ProtocolFeeRouter.json", "protocolFeeRouterAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   [
@@ -116,11 +86,6 @@ const contracts = [
     "BoardroomKernel",
     "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
     "boardroomKernelAbi",
-  ],
-  [
-    "BoardroomReleaseBMigrationFacet",
-    "packages/contracts/out/BoardroomReleaseBMigrationFacet.sol/BoardroomReleaseBMigrationFacet.json",
-    "boardroomReleaseBMigrationFacetAbi",
   ],
   [
     "ProtocolFacetRegistry",
@@ -135,9 +100,7 @@ const boardroomDiamondSupplementArtifacts = [
   "packages/contracts/out/BoardroomExecutionFacet.sol/BoardroomExecutionFacet.json",
   "packages/contracts/out/BoardroomMarketFacet.sol/BoardroomMarketFacet.json",
   "packages/contracts/out/BoardroomRedemptionFacet.sol/BoardroomRedemptionFacet.json",
-  "packages/contracts/out/BoardroomReleaseBMigrationFacet.sol/BoardroomReleaseBMigrationFacet.json",
   "packages/contracts/out/BoardroomViewFacet.sol/BoardroomViewFacet.json",
-  "packages/contracts/out/BoardroomViewFacetV2.sol/BoardroomViewFacetV2.json",
 ] as const;
 
 const deploymentFields = [
@@ -166,8 +129,6 @@ const deploymentFields = [
   ["marketFacet", "address"],
   ["redemptionFacet", "address"],
   ["viewFacet", "address"],
-  ["boardroomReleaseBMigrationFacet", "address"],
-  ["boardroomViewFacetV2", "address"],
   ["activeFacetSetHash", "string"],
   ["activeRelease", "bigint"],
   ["requiredStorageVersion", "bigint"],
@@ -176,17 +137,7 @@ const deploymentFields = [
   ["kernelSelectorSetHash", "string"],
   ["selectorCount", "bigint"],
   ["boardroomPolicyRegistry", "address"],
-  ["assetPolicy", "address"],
   ["protocolFeeRouter", "address"],
-  ["distributionFactory", "address"],
-  ["fixedPriceSaleLogic", "address"],
-  ["dutchAuctionLogic", "address"],
-  ["migratingBondingCurveLogic", "address"],
-  ["merkleAirdropLogic", "address"],
-  ["boardroomRewardsFactory", "address"],
-  ["boardroomRewardsLogic", "address"],
-  ["bondMarketFactory", "address"],
-  ["bondMarketLogic", "address"],
   ["uniswapV4PoolManager", "address"],
   ["uniswapUniversalRouter", "address"],
   ["uniswapV4Quoter", "address"],
@@ -205,7 +156,6 @@ const deploymentFields = [
   ["protocolFacetRegistryOwner", "address"],
   ["boardroomPolicyRegistryOwner", "address"],
   ["tokenGrantFactoryOwner", "address"],
-  ["assetPolicyOwner", "address"],
   ["protocolGovernance", "address"],
   ["protocolTreasury", "address"],
   ["protocolFeeRouterOwner", "address"],
@@ -216,7 +166,6 @@ const deploymentFields = [
   ["deploymentTimestamp", "bigint"],
   ["deterministicDeployerCodeHash", "string"],
   ["boardroomPolicyRegistryCodeHash", "string"],
-  ["assetPolicyCodeHash", "string"],
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],
   ["boardroomControllerFactoryCodeHash", "string"],
@@ -231,8 +180,6 @@ const deploymentFields = [
   ["marketFacetCodeHash", "string"],
   ["redemptionFacetCodeHash", "string"],
   ["viewFacetCodeHash", "string"],
-  ["boardroomReleaseBMigrationFacetCodeHash", "string"],
-  ["boardroomViewFacetV2CodeHash", "string"],
   ["tokenGrantFactoryCodeHash", "string"],
   ["tokenGrantLogicCodeHash", "string"],
   ["pledgeV4LiquidityFactoryCodeHash", "string"],
@@ -244,25 +191,12 @@ const deploymentFields = [
   ["uniswapV4StateViewCodeHash", "string"],
   ["uniswapV4PositionManagerCodeHash", "string"],
   ["permit2CodeHash", "string"],
-  ["distributionFactoryCodeHash", "string"],
-  ["fixedPriceSaleLogicCodeHash", "string"],
-  ["dutchAuctionLogicCodeHash", "string"],
-  ["migratingBondingCurveLogicCodeHash", "string"],
-  ["merkleAirdropLogicCodeHash", "string"],
-  ["boardroomRewardsFactoryCodeHash", "string"],
-  ["boardroomRewardsLogicCodeHash", "string"],
-  ["bondMarketFactoryCodeHash", "string"],
-  ["bondMarketLogicCodeHash", "string"],
   ["wrappedNativeCodeHash", "string"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
 const optionalCanonicalDeploymentFields = new Set<string>([
   "status",
   "reason",
-  "boardroomReleaseBMigrationFacet",
-  "boardroomViewFacetV2",
-  "boardroomReleaseBMigrationFacetCodeHash",
-  "boardroomViewFacetV2CodeHash",
 ]);
 const requiredCanonicalDeploymentFields = deploymentFields
   .map(([field]) => field)

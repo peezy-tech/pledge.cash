@@ -11,20 +11,11 @@ library BoardroomLiquidityStorage {
         Closed
     }
 
-    struct MigrationReservation {
-        address curve;
-        address expectedVault;
-        bytes32 expectedPoolId;
-        bytes32 salt;
-        uint64 expiresAt;
-    }
-
     struct Layout {
         Status status;
         address vault;
         bytes32 poolId;
         address quoteAsset;
-        MigrationReservation pendingMigration;
     }
 
     function layout() internal pure returns (Layout storage result) {

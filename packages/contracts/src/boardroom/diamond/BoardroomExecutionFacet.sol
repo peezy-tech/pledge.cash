@@ -175,23 +175,6 @@ contract BoardroomExecutionFacet is BoardroomFacetBase {
         );
     }
 
-    function recordGrantFromDistribution(bytes32, address grant) external {
-        _delegateGovernance(
-            abi.encodeCall(
-                BoardroomGovernanceLogic.recordGrantFromDistribution, (policyRegistryStorage, shareTokenStorage, grant)
-            )
-        );
-    }
-
-    function recordProtocolLiquidityFromDistribution(bytes32, address vault, bytes32 poolId) external {
-        _delegateGovernance(
-            abi.encodeCall(
-                BoardroomGovernanceLogic.recordProtocolLiquidityFromDistribution,
-                (policyRegistryStorage, shareTokenStorage, vault, poolId)
-            )
-        );
-    }
-
     function _containsControllerReplacement(BoardroomCall[] calldata calls) internal view returns (bool) {
         uint256 length = calls.length;
         for (uint256 i; i < length; ++i) {

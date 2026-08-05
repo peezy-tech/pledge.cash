@@ -198,30 +198,6 @@ describe("runtime deployment artifacts", () => {
     expect(deployment.pledgeV4LiquidityFactory).toBe("0x1000000000000000000000000000000000000006");
   });
 
-  test("preserves Boardroom reward deployment roots and attestations", () => {
-    const deployment = parseDeployment(`{
-      "chainId": 998,
-      "boardroomRewardsFactory": "0x1000000000000000000000000000000000000004",
-      "boardroomRewardsFactoryCodeHash": "0xabc456"
-    }`);
-
-    expect(deployment.boardroomRewardsFactory).toBe("0x1000000000000000000000000000000000000004");
-    expect(deployment.boardroomRewardsFactoryCodeHash).toBe("0xabc456");
-  });
-
-  test("preserves bond-market deployment provenance", () => {
-    const deployment = parseDeployment(`{
-      "chainId": 998,
-      "bondMarketFactory": "0x1000000000000000000000000000000000000001",
-      "bondMarketLogic": "0x1000000000000000000000000000000000000002",
-      "bondMarketFactoryCodeHash": "0xabc123"
-    }`);
-
-    expect(deployment.bondMarketFactory).toBe("0x1000000000000000000000000000000000000001");
-    expect(deployment.bondMarketLogic).toBe("0x1000000000000000000000000000000000000002");
-    expect(deployment.bondMarketFactoryCodeHash).toBe("0xabc123");
-  });
-
   test("preserves Boardroom kernel, registry, and helper roots", () => {
     const deployment = parseDeployment(`{
       "chainId": 998,

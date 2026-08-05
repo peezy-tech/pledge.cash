@@ -20,15 +20,7 @@ import {PledgeV4LiquidityVault} from "./PledgeV4LiquidityVault.sol";
 interface IPledgeV4LiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
 
-    function isIssuedDistribution(address distribution) external view returns (bool);
-
-    function policyRegistry() external view returns (address);
-
     function lockedLiquidityExitAllowed() external view returns (bool);
-}
-
-interface IPledgeV4LiquidityFactoryPolicyRegistry {
-    function isModulePolicy(address policy) external view returns (bool);
 }
 
 interface IPledgeV4LiquidityFactoryBoardroomFactory {
@@ -39,20 +31,6 @@ interface IPledgeV4LiquidityFactoryBoardroomFactory {
 
 interface IPledgeV4LiquidityFactoryShareToken {
     function boardroom() external view returns (address);
-}
-
-interface IPledgeV4MigrationDistribution {
-    function factory() external view returns (address);
-
-    function boardroom() external view returns (address);
-
-    function shareToken() external view returns (address);
-
-    function quoteToken() external view returns (address);
-
-    function migrationSalt() external view returns (bytes32);
-
-    function reservationExpiresAt() external view returns (uint64);
 }
 
 /// @notice Canonical pledge.cash policy for Boardroom-owned Uniswap v4 liquidity.
@@ -115,20 +93,9 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         PositionStatus status;
     }
 
-    struct MigrationReservation {
-        address curve;
-        address expectedVault;
-        bytes32 expectedPoolId;
-        address shareToken;
-        address quoteAsset;
-        bytes32 salt;
-    }
-
     struct CreationContext {
         address boardroom;
-        bytes32 expectedFacetSetHash;
         address payer;
-        address curve;
     }
 
     struct CreationResult {
@@ -154,7 +121,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
     mapping(address vault => address boardroom) public vaultBoardroom;
     mapping(bytes32 poolId => address vault) public vaultForPoolId;
     mapping(address boardroom => Position position) public positionOfBoardroom;
-    mapping(address boardroom => MigrationReservation reservation) public migrationReservationOf;
 
     error InvalidAddress();
     error InvalidBoardroomFactory(address factory);
@@ -163,7 +129,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
     error InvalidPair(address tokenA, address tokenB);
     error InvalidPosition(address boardroom);
     error PositionAlreadyConfigured(address boardroom);
-    error InvalidMigrationReservation(address boardroom, address curve);
     error PoolAlreadyInitialized(bytes32 poolId);
     error HookNotDeployed();
     error HookAlreadyDeployed(address hook);
@@ -182,8 +147,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         uint256 amountB,
         uint256 liquidity,
         uint160 sqrtPriceX96,
-        bytes32 salt,
-        address curve
+        bytes32 salt
     );
     event ProtocolLiquidityAdded(
         address indexed boardroom,
@@ -202,16 +166,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         uint256 amountB
     );
     event ProtocolLiquidityPositionClosed(address indexed boardroom, address indexed vault, bytes32 indexed poolId);
-    event MigrationReserved(
-        address indexed boardroom,
-        address indexed curve,
-        address indexed expectedVault,
-        bytes32 expectedPoolId,
-        bytes32 salt
-    );
-    event MigrationReservationReleased(
-        address indexed boardroom, address indexed curve, bytes32 indexed expectedPoolId, bytes32 salt
-    );
 
     constructor(
         IPoolManager poolManager_,
@@ -287,33 +241,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         returns (address vault, bytes32 poolId, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireCanonicalBoardroom(msg.sender);
-        return _createProtocolLiquidity(
-            CreationContext({
-                boardroom: msg.sender,
-                expectedFacetSetHash: BoardroomCallbackLib.boundFacetSetHash(msg.sender),
-                payer: msg.sender,
-                curve: address(0)
-            }),
-            params
-        );
-    }
-
-    function createProtocolLiquidityForBoardroom(
-        bytes32 expectedFacetSetHash,
-        address boardroom,
-        CreateParams calldata params
-    )
-        external
-        nonReentrant
-        returns (address vault, bytes32 poolId, uint256 amountA, uint256 amountB, uint256 liquidity)
-    {
-        _requireIssuedDistribution(boardroom, msg.sender);
-        return _createProtocolLiquidity(
-            CreationContext({
-                boardroom: boardroom, expectedFacetSetHash: expectedFacetSetHash, payer: msg.sender, curve: msg.sender
-            }),
-            params
-        );
+        return _createProtocolLiquidity(CreationContext({boardroom: msg.sender, payer: msg.sender}), params);
     }
 
     function addProtocolLiquidity(AddParams calldata params)
@@ -363,9 +291,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         address boardroom = msg.sender;
         _requireCanonicalBoardroom(boardroom);
         Position storage position = positionOfBoardroom[boardroom];
-        if (position.status != PositionStatus.Active || migrationReservationOf[boardroom].curve != address(0)) {
-            revert InvalidPosition(boardroom);
-        }
+        if (position.status != PositionStatus.Active) revert InvalidPosition(boardroom);
         PledgeV4LiquidityVault(position.vault).close();
         position.status = PositionStatus.Closed;
         BoardroomCallbackLib.closeProtocolLiquidityFromFactory(
@@ -380,65 +306,12 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         _requireCanonicalBoardroom(boardroom);
         Position storage position = positionOfBoardroom[boardroom];
         if (
-            position.status != PositionStatus.Active || migrationReservationOf[boardroom].curve != address(0)
+            position.status != PositionStatus.Active
                 || !IPledgeV4LiquidityFactoryBoardroom(boardroom).lockedLiquidityExitAllowed()
                 || !PledgeV4LiquidityVault(position.vault).isClosed()
         ) revert InvalidPosition(boardroom);
         position.status = PositionStatus.Closed;
         emit ProtocolLiquidityPositionClosed(boardroom, position.vault, position.poolId);
-    }
-
-    function reserveMigration(
-        bytes32 expectedFacetSetHash,
-        address boardroom,
-        address curve,
-        address tokenA,
-        address tokenB,
-        bytes32 salt
-    ) external nonReentrant {
-        _requireAuthorizedMigrationFactory(boardroom, curve, tokenA, tokenB, salt);
-        if (
-            positionOfBoardroom[boardroom].status != PositionStatus.Unconfigured
-                || migrationReservationOf[boardroom].curve != address(0)
-        ) revert PositionAlreadyConfigured(boardroom);
-
-        address expectedVault = predictLiquidityVaultAddress(boardroom, salt);
-        if (expectedVault.code.length != 0 || isVault[expectedVault]) revert PositionAlreadyConfigured(boardroom);
-        bytes32 expectedPoolId = poolIdFor(tokenA, tokenB);
-        _requireUninitializedPool(expectedPoolId);
-        migrationReservationOf[boardroom] = MigrationReservation({
-            curve: curve,
-            expectedVault: expectedVault,
-            expectedPoolId: expectedPoolId,
-            shareToken: tokenA,
-            quoteAsset: tokenB,
-            salt: salt
-        });
-        uint64 expiresAt = IPledgeV4MigrationDistribution(curve).reservationExpiresAt();
-        BoardroomCallbackLib.precommitProtocolLiquidity(
-            boardroom, expectedFacetSetHash, expectedVault, expectedPoolId, tokenB, curve, salt, expiresAt
-        );
-        emit MigrationReserved(boardroom, curve, expectedVault, expectedPoolId, salt);
-    }
-
-    function releaseMigrationReservation(
-        bytes32 expectedFacetSetHash,
-        address boardroom,
-        address tokenA,
-        address tokenB,
-        bytes32 salt
-    ) external nonReentrant {
-        _requireIssuedDistribution(boardroom, msg.sender);
-        MigrationReservation memory reservation = migrationReservationOf[boardroom];
-        if (
-            reservation.curve != msg.sender || reservation.shareToken != tokenA || reservation.quoteAsset != tokenB
-                || reservation.salt != salt
-        ) revert InvalidMigrationReservation(boardroom, msg.sender);
-        delete migrationReservationOf[boardroom];
-        BoardroomCallbackLib.releaseProtocolLiquidityReservation(
-            boardroom, expectedFacetSetHash, msg.sender, reservation.expectedPoolId, salt
-        );
-        emit MigrationReservationReleased(boardroom, msg.sender, reservation.expectedPoolId, salt);
     }
 
     function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
@@ -466,7 +339,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
             }
             if (selector == PledgeV4LiquidityFactory.closeProtocolLiquidity.selector && data.length == 4) {
                 Position memory position = positionOfBoardroom[boardroom];
-                return position.status == PositionStatus.Active && migrationReservationOf[boardroom].curve == address(0)
+                return position.status == PositionStatus.Active
                     && PledgeV4LiquidityVault(position.vault).lockedLiquidity() == 0;
             }
             return false;
@@ -520,23 +393,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         address quoteAsset = _quoteAsset(context.boardroom, params.tokenA, params.tokenB);
         PoolKey memory key = poolKeyFor(params.tokenA, params.tokenB);
         poolId = PoolId.unwrap(key.toId());
-        if (context.curve == address(0)) {
-            if (migrationReservationOf[context.boardroom].curve != address(0)) {
-                revert PositionAlreadyConfigured(context.boardroom);
-            }
-            vault = predictLiquidityVaultAddress(context.boardroom, params.salt);
-            BoardroomCallbackLib.precommitProtocolLiquidity(
-                context.boardroom, context.expectedFacetSetHash, vault, poolId, quoteAsset, address(0), params.salt, 0
-            );
-        } else {
-            MigrationReservation memory reservation = migrationReservationOf[context.boardroom];
-            if (
-                reservation.curve != context.curve || reservation.expectedVault == address(0)
-                    || reservation.expectedPoolId != poolId || reservation.shareToken != params.tokenA
-                    || reservation.quoteAsset != params.tokenB || reservation.salt != params.salt
-            ) revert InvalidMigrationReservation(context.boardroom, context.curve);
-            vault = reservation.expectedVault;
-        }
+        vault = predictLiquidityVaultAddress(context.boardroom, params.salt);
         _requireUninitializedPool(poolId);
         if (vault.code.length != 0 || isVault[vault] || vaultForPoolId[poolId] != address(0)) {
             revert PositionAlreadyConfigured(context.boardroom);
@@ -557,7 +414,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
 
         positionOfBoardroom[context.boardroom] =
             Position({vault: vault, poolId: poolId, quoteAsset: quoteAsset, status: PositionStatus.Active});
-        if (context.curve != address(0)) delete migrationReservationOf[context.boardroom];
         CreationResult memory created = CreationResult({
             vault: vault,
             poolId: poolId,
@@ -598,12 +454,10 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
     ) internal {
         BoardroomCallbackLib.activateProtocolLiquidity(
             context.boardroom,
-            context.expectedFacetSetHash,
+            BoardroomCallbackLib.boundFacetSetHash(context.boardroom),
             created.vault,
             created.poolId,
-            created.quoteAsset,
-            context.curve,
-            salt
+            created.quoteAsset
         );
         emit ProtocolLiquidityCreated(
             created.vault,
@@ -614,8 +468,7 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
             created.amountB,
             created.liquidity,
             sqrtPriceX96,
-            salt,
-            context.curve
+            salt
         );
     }
 
@@ -630,7 +483,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
         if (address(hook) == address(0) || positionOfBoardroom[boardroom].status != PositionStatus.Unconfigured) {
             return false;
         }
-        if (migrationReservationOf[boardroom].curve != address(0)) return false;
         if (
             !_validPair(boardroom, params.tokenA, params.tokenB)
                 || !_validSeedAmountsAndMinimums(
@@ -648,36 +500,6 @@ contract PledgeV4LiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard
             && _validSeedAmountsAndMinimums(
             params.amountADesired, params.amountBDesired, params.amountAMin, params.amountBMin
         );
-    }
-
-    function _requireAuthorizedMigrationFactory(
-        address boardroom,
-        address curve,
-        address tokenA,
-        address tokenB,
-        bytes32 salt
-    ) internal view {
-        _requireCanonicalBoardroom(boardroom);
-        address registry = IPledgeV4LiquidityFactoryBoardroom(boardroom).policyRegistry();
-        if (!IPledgeV4LiquidityFactoryPolicyRegistry(registry).isModulePolicy(msg.sender)) {
-            revert InvalidMigrationReservation(boardroom, curve);
-        }
-        if (!_validPair(boardroom, tokenA, tokenB) || tokenA != _boardroomShareToken(boardroom)) {
-            revert InvalidMigrationReservation(boardroom, curve);
-        }
-        IPledgeV4MigrationDistribution distribution = IPledgeV4MigrationDistribution(curve);
-        if (
-            distribution.factory() != msg.sender || distribution.boardroom() != boardroom
-                || distribution.shareToken() != tokenA || distribution.quoteToken() != tokenB
-                || distribution.migrationSalt() != salt
-        ) revert InvalidMigrationReservation(boardroom, curve);
-    }
-
-    function _requireIssuedDistribution(address boardroom, address curve) internal view {
-        _requireCanonicalBoardroom(boardroom);
-        if (!IPledgeV4LiquidityFactoryBoardroom(boardroom).isIssuedDistribution(curve)) {
-            revert InvalidMigrationReservation(boardroom, curve);
-        }
     }
 
     function _requireCanonicalBoardroom(address boardroom) internal view {

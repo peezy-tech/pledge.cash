@@ -216,37 +216,6 @@ contract BoardroomGovernanceLogic {
         _addDependency(shareToken, obligation, asset);
     }
 
-    function recordGrantFromDistribution(address policyRegistry, address shareToken, address grant) external {
-        address parent = msg.sender;
-        _beginParentTransition(parent);
-        address policy = IBoardroomCanonicalGrant(grant).factory();
-        _registerObligation(
-            policyRegistry, shareToken, policy, grant, BoardroomObligationStorage.Kind.Grant, address(0)
-        );
-        _pruneObligation(shareToken, parent);
-        BoardroomObligationStorage.layout().parentTransitionActive = false;
-    }
-
-    function recordProtocolLiquidityFromDistribution(
-        address policyRegistry,
-        address shareToken,
-        address vault,
-        bytes32 poolId
-    ) external {
-        address parent = msg.sender;
-        _beginParentTransition(parent);
-        address policy = IBoardroomCanonicalLiquidity(vault).factory();
-        BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
-        if (liquidity.vault != vault || liquidity.poolId != poolId || poolId == bytes32(0)) {
-            revert InvalidObligation(vault);
-        }
-        _registerObligation(
-            policyRegistry, shareToken, policy, vault, BoardroomObligationStorage.Kind.Liquidity, address(0)
-        );
-        _pruneObligation(shareToken, parent);
-        BoardroomObligationStorage.layout().parentTransitionActive = false;
-    }
-
     function _recordPostCallObligation(
         address policyRegistry,
         address shareToken,
@@ -352,16 +321,6 @@ contract BoardroomGovernanceLogic {
             canonical.factory() != policy || canonical.boardroom() != address(this)
                 || canonical.shareToken() != shareToken
         ) revert InvalidObligation(obligation);
-    }
-
-    function _beginParentTransition(address parent) internal {
-        BoardroomObligationStorage.Layout storage obligations = BoardroomObligationStorage.layout();
-        BoardroomObligationStorage.Record storage record = obligations.obligationOf[parent];
-        if (
-            obligations.parentTransitionActive || !record.active
-                || record.kind != BoardroomObligationStorage.Kind.Distribution
-        ) revert InvalidParentTransition(parent);
-        obligations.parentTransitionActive = true;
     }
 
     function _discoverDependencies(address shareToken, address obligation, BoardroomObligationStorage.Kind kind)

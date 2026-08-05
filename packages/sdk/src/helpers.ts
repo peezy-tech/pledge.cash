@@ -62,11 +62,3 @@ export type {
   BoardroomReleaseAttestation,
   BoardroomReleaseSupport,
 } from "./helpers/release";
-export {
-  buildMerkleAirdropClaimTransaction,
-  buildMerkleAirdropDirectClaimLeaf,
-  buildMerkleAirdropGrantClaimLeaf,
-  buildMerkleAirdropGrantClaimTransaction,
-  hashMerkleAirdropGrantTerms,
-  hashSortedMerklePair,
-} from "./helpers/merkle";

@@ -1,19 +1,10 @@
 import {
   boardroomAbi,
   boardroomControllerAbi,
-  boardroomRewardsAbi,
-  boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
-  bondMarketAbi,
-  bondMarketFactoryAbi,
-  distributionFactoryAbi,
-  dutchAuctionSaleAbi,
   erc20Abi,
-  fixedPriceSaleAbi,
   pledgeV4LiquidityFactoryAbi,
   pledgeV4LiquidityVaultAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
   type BoardroomCall,
@@ -89,22 +80,13 @@ const BOARDROOM_BATCH_CALL_FUNCTIONS = new Set([
 const ASSET_AND_OBLIGATION_ABIS = [
   boardroomAbi,
   boardroomControllerAbi,
-  boardroomRewardsAbi,
   boardroomTokenAbi,
-  bondMarketAbi,
-  dutchAuctionSaleAbi,
   erc20Abi,
-  fixedPriceSaleAbi,
   pledgeV4LiquidityVaultAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
   tokenGrantAbi,
 ] as const;
 
 const MODULE_FACTORY_ABIS = [
-  boardroomRewardsFactoryAbi,
-  bondMarketFactoryAbi,
-  distributionFactoryAbi,
   pledgeV4LiquidityFactoryAbi,
   tokenGrantFactoryAbi,
 ] as const;

@@ -58,10 +58,7 @@ contract BoardroomRedemptionPayout {
         if (BoardroomObligationStorage.layout().activeCount != 0) revert SnapshotNotReady();
 
         BoardroomLiquidityStorage.Layout storage liquidity = BoardroomLiquidityStorage.layout();
-        if (
-            liquidity.status == BoardroomLiquidityStorage.Status.Active
-                || liquidity.pendingMigration.curve != address(0)
-        ) revert SnapshotNotReady();
+        if (liquidity.status == BoardroomLiquidityStorage.Status.Active) revert SnapshotNotReady();
 
         _wrapNative(wrappedNative);
         _burnTreasuryShares(shareToken, false);

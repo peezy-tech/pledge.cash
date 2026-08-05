@@ -9,7 +9,6 @@ const WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS = 600n;
 const DEPLOYMENT_DISCOVERY_FIELDS = [
   "boardroomFactory",
   "tokenGrantFactory",
-  "distributionFactory",
   "pledgeV4LiquidityFactory",
 ] as const;
 

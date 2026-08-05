@@ -20,76 +20,19 @@ contract BoardroomMarketFacet is BoardroomFacetBase {
         address marketLogic_
     ) BoardroomFacetBase(redemptionPayoutLogic_, governanceLogic_, controllerFactory_, marketLogic_) {}
 
-    function precommitBondingCurve(bytes32, address curve, address quoteAsset, uint256 fundingAmount) external {
-        _delegateMarket(
-            abi.encodeCall(
-                BoardroomMarketLogic.precommitBondingCurve, (shareTokenStorage, curve, quoteAsset, fundingAmount)
-            )
-        );
-    }
-
     function validatePrimaryMarketTransfer(bytes32, address from, address to, uint256 amount) external {
         _delegateMarket(
             abi.encodeCall(BoardroomMarketLogic.validatePrimaryMarketTransfer, (shareTokenStorage, from, to, amount))
         );
     }
 
-    function precommitProtocolLiquidity(
-        bytes32,
-        address expectedVault,
-        bytes32 expectedPoolId,
-        address quoteAsset,
-        address curve,
-        bytes32 salt,
-        uint64 expiresAt
-    ) external {
-        _delegateMarket(
-            abi.encodeCall(
-                BoardroomMarketLogic.precommitProtocolLiquidity,
-                (
-                    policyRegistryStorage,
-                    shareTokenStorage,
-                    expectedVault,
-                    expectedPoolId,
-                    quoteAsset,
-                    curve,
-                    salt,
-                    expiresAt
-                )
-            )
-        );
-    }
-
-    function activateProtocolLiquidity(
-        bytes32,
-        address vault,
-        bytes32 poolId,
-        address quoteAsset,
-        address curve,
-        bytes32 salt
-    ) external {
+    function activateProtocolLiquidity(bytes32, address vault, bytes32 poolId, address quoteAsset) external {
         _delegateMarket(
             abi.encodeCall(
                 BoardroomMarketLogic.activateProtocolLiquidity,
-                (policyRegistryStorage, vault, poolId, quoteAsset, curve, salt)
+                (policyRegistryStorage, shareTokenStorage, vault, poolId, quoteAsset)
             )
         );
-    }
-
-    function releaseProtocolLiquidityReservation(bytes32, address curve, bytes32 expectedPoolId, bytes32 salt)
-        external
-    {
-        _delegateMarket(
-            abi.encodeCall(
-                BoardroomMarketLogic.releaseProtocolLiquidityReservation,
-                (policyRegistryStorage, curve, expectedPoolId, salt)
-            )
-        );
-    }
-
-    function settleBondingCurve(bytes32) external {
-        _delegateMarket(abi.encodeCall(BoardroomMarketLogic.settleBondingCurve, ()));
-        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.pruneObligation, (shareTokenStorage, msg.sender)));
     }
 
     function closeProtocolLiquidityFromFactory(bytes32, address vault) external {

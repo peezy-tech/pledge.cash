@@ -312,25 +312,11 @@ function proofClient(input: {
 }
 
 describe("Boardroom release proof", () => {
-  test("normalizes permanent roots and optional genesis-release evidence", () => {
+  test("normalizes permanent roots and genesis-release evidence", () => {
     expect(boardroomReleaseSupport(undefined).supported).toBe(false);
     expect(boardroomReleaseSupport(deployment())).toEqual({ supported: true });
     expect(boardroomReleaseAttestationFromDeployment(deployment())?.facets).toHaveLength(5);
 
-    const future = boardroomReleaseAttestationFromDeployment(deployment({
-      boardroomReleaseBMigrationFacet: migrationFacet,
-      boardroomReleaseBMigrationFacetCodeHash: liveCodeHash,
-      boardroomViewFacetV2: viewFacetV2,
-      boardroomViewFacetV2CodeHash: liveCodeHash,
-      activeRelease: 2n,
-      requiredStorageVersion: 2n,
-      selectorCount: 7n,
-    }));
-    expect(future?.facets).toHaveLength(7);
-    expect(future?.facets.slice(5)).toEqual([
-      { role: "migration", facetAddress: migrationFacet, codeHash: liveCodeHash, required: false },
-      { role: "view-v2", facetAddress: viewFacetV2, codeHash: liveCodeHash, required: false },
-    ]);
   });
 
   test("requires permanent roots but does not gate runtime on genesis release, facets, or owner", async () => {
@@ -370,10 +356,6 @@ describe("Boardroom release proof", () => {
 
     expect(boardroomReleaseSupport(deployment({ activeFacetSetHash: zeroHash })).supported).toBe(true);
     expect(boardroomReleaseSupport(deployment({ executionFacet: authorityFacet })).supported).toBe(true);
-    expect(boardroomReleaseSupport(deployment({
-      boardroomReleaseBMigrationFacet: migrationFacet,
-    })).supported).toBe(true);
-
     expect(boardroomReleaseSupport(deployment({ protocolFacetRegistryCodeHash: zeroHash })).supported).toBe(false);
     expect(boardroomReleaseSupport(deployment({ kernelSelectorSetHash: zeroHash })).supported).toBe(false);
   });

@@ -147,12 +147,6 @@ describe("frontend foundation", () => {
     expect(css).not.toContain("JetBrains Mono");
   });
 
-  test("keeps strict governance index validation out of the initial application chunk", async () => {
-    const source = await Bun.file(new URL("../src/app/App.tsx", import.meta.url)).text();
-
-    expect(source).toContain('import("../lib/governance-actions")');
-    expect(source).not.toMatch(/^import .*governance-actions/m);
-  });
 });
 
 function cssColor(css: string, token: string): string {

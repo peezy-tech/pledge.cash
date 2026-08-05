@@ -5,8 +5,6 @@ import {BoardroomAuthorityFacet} from "./BoardroomAuthorityFacet.sol";
 import {BoardroomExecutionFacet} from "./BoardroomExecutionFacet.sol";
 import {BoardroomMarketFacet} from "./BoardroomMarketFacet.sol";
 import {BoardroomRedemptionFacet} from "./BoardroomRedemptionFacet.sol";
-import {BoardroomReleaseBMigrationFacet} from "./BoardroomReleaseBMigrationFacet.sol";
-import {BoardroomViewFacetV2} from "./BoardroomViewFacetV2.sol";
 import {BoardroomStorageLayouts} from "./BoardroomStorageLayouts.sol";
 import {IBoardroom} from "../IBoardroom.sol";
 import {BoardroomManifestHashes} from "./BoardroomManifestHashes.sol";
@@ -22,8 +20,6 @@ library BoardroomRelease {
         address market;
         address redemption;
         address viewFacet;
-        address migration;
-        address viewV2;
     }
 
     function releaseA(Facets memory facets)
@@ -42,46 +38,6 @@ library BoardroomRelease {
             routes: routes,
             migrationFacet: address(0),
             migrationSelector: bytes4(0)
-        });
-    }
-
-    function releaseB(Facets memory facets, bytes32 predecessorFacetSetHash)
-        internal
-        view
-        returns (ProtocolFacetTypes.FacetSetManifest memory manifest)
-    {
-        (ProtocolFacetTypes.RouteDefinition[] memory routes, uint256 count) = _baseRoutes(facets);
-        count = _replaceFacet(
-            routes,
-            count,
-            BoardroomViewFacetV2.redemptionCredits.selector,
-            facets.viewV2,
-            ProtocolFacetTypes.RouteKind.View
-        );
-        count = _add(
-            routes,
-            count,
-            BoardroomViewFacetV2.releaseBMigrationState.selector,
-            facets.viewV2,
-            ProtocolFacetTypes.RouteKind.View
-        );
-        count = _add(
-            routes,
-            count,
-            BoardroomReleaseBMigrationFacet.migrateBoardroom.selector,
-            facets.migration,
-            ProtocolFacetTypes.RouteKind.Migration
-        );
-        _truncateAndSort(routes, count);
-        manifest = ProtocolFacetTypes.FacetSetManifest({
-            release: 2,
-            requiredStorageVersion: 2,
-            predecessorFacetSetHash: predecessorFacetSetHash,
-            storageLayoutHash: BoardroomStorageLayouts.RELEASE_B,
-            manifestHash: BoardroomManifestHashes.RELEASE_B,
-            routes: routes,
-            migrationFacet: facets.migration,
-            migrationSelector: BoardroomReleaseBMigrationFacet.migrateBoardroom.selector
         });
     }
 
@@ -235,24 +191,10 @@ library BoardroomRelease {
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
         );
-        count = _add(
-            routes,
-            count,
-            BoardroomExecutionFacet.pruneObligations.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
-        count = _add(
-            routes,
-            count,
-            BoardroomExecutionFacet.recordGrantFromDistribution.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
         return _add(
             routes,
             count,
-            BoardroomExecutionFacet.recordProtocolLiquidityFromDistribution.selector,
+            BoardroomExecutionFacet.pruneObligations.selector,
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
         );
@@ -266,13 +208,6 @@ library BoardroomRelease {
         count = _add(
             routes,
             count,
-            BoardroomMarketFacet.precommitBondingCurve.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
-        count = _add(
-            routes,
-            count,
             BoardroomMarketFacet.validatePrimaryMarketTransfer.selector,
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
@@ -280,28 +215,7 @@ library BoardroomRelease {
         count = _add(
             routes,
             count,
-            BoardroomMarketFacet.precommitProtocolLiquidity.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
-        count = _add(
-            routes,
-            count,
             BoardroomMarketFacet.activateProtocolLiquidity.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
-        count = _add(
-            routes,
-            count,
-            BoardroomMarketFacet.releaseProtocolLiquidityReservation.selector,
-            facet,
-            ProtocolFacetTypes.RouteKind.Mutating
-        );
-        count = _add(
-            routes,
-            count,
-            BoardroomMarketFacet.settleBondingCurve.selector,
             facet,
             ProtocolFacetTypes.RouteKind.Mutating
         );
@@ -412,7 +326,6 @@ library BoardroomRelease {
         count = _addView(routes, count, facet, IBoardroom.liquidityMutationAllowed.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityPoolId.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityQuoteAsset.selector);
-        count = _addView(routes, count, facet, IBoardroom.liquidityReservation.selector);
         count = _addView(routes, count, facet, IBoardroom.liquidityStatus.selector);
         count = _addView(routes, count, facet, IBoardroom.lockedLiquidityExitAllowed.selector);
         count = _addView(routes, count, facet, IBoardroom.marketLogic.selector);
@@ -463,24 +376,6 @@ library BoardroomRelease {
             selector: selector, facet: facet, codeHash: facet.codehash, kind: kind
         });
         return count + 1;
-    }
-
-    function _replaceFacet(
-        ProtocolFacetTypes.RouteDefinition[] memory routes,
-        uint256 count,
-        bytes4 selector,
-        address facet,
-        ProtocolFacetTypes.RouteKind kind
-    ) private view returns (uint256) {
-        for (uint256 i; i < count; ++i) {
-            if (routes[i].selector == selector) {
-                routes[i].facet = facet;
-                routes[i].codeHash = facet.codehash;
-                routes[i].kind = kind;
-                return count;
-            }
-        }
-        return _add(routes, count, selector, facet, kind);
     }
 
     function _truncateAndSort(ProtocolFacetTypes.RouteDefinition[] memory routes, uint256 count) private pure {

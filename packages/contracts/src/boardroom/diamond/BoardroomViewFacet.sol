@@ -260,22 +260,6 @@ contract BoardroomViewFacet is BoardroomFacetBase {
         return BoardroomLiquidityStorage.layout().quoteAsset;
     }
 
-    function liquidityReservation()
-        external
-        view
-        returns (address curve, address expectedVault, bytes32 expectedPoolId, bytes32 salt, uint256 expiresAt)
-    {
-        BoardroomLiquidityStorage.MigrationReservation storage reservation =
-        BoardroomLiquidityStorage.layout().pendingMigration;
-        return (
-            reservation.curve,
-            reservation.expectedVault,
-            reservation.expectedPoolId,
-            reservation.salt,
-            reservation.expiresAt
-        );
-    }
-
     function lockedLiquidityExitAllowed() external view returns (bool) {
         return _status() == BoardroomFacetTypes.BoardroomStatus.WindingDown;
     }

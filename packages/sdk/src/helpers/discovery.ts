@@ -1,37 +1,27 @@
 import { getAbiItem, isHex, type Address, type Hex } from "viem";
 import {
   boardroomFactoryAbi,
-  distributionFactoryAbi,
   pledgeV4LiquidityFactoryAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import { pledgeCashErrorMessage } from "./errors";
 import {
   readBoardroomState,
-  readDutchAuctionState,
-  readFixedPriceSaleState,
   readGrantState,
   readProtocolLiquidityVaultState,
-  readMerkleAirdropState,
-  readMigratingBondingCurveState,
 } from "./readers";
 import type {
   BoardroomState,
   DiscoveredBoardroom,
-  DiscoveredDistribution,
   DiscoveredGrant,
   DiscoveredProtocolLiquidity,
   DiscoveryError,
   DiscoveryRange,
   DiscoveryResult,
   EnrichedDiscovery,
-  FixedPriceSaleState,
-  DutchAuctionState,
   GrantDiscoveryRange,
   GrantState,
   ProtocolLiquidityVaultState,
-  MerkleAirdropState,
-  MigratingBondingCurveState,
   PledgeCashBlockReadClient,
   PledgeCashLogClient,
   PledgeCashReadClient,
@@ -53,7 +43,6 @@ const boardroomCreatedEvent = getAbiItem({
   abi: boardroomFactoryAbi,
   name: "BoardroomCreated",
 });
-const distributionCreatedEvent = getAbiItem({ abi: distributionFactoryAbi, name: "DistributionCreated" });
 const protocolLiquidityCreatedEvent = getAbiItem({ abi: pledgeV4LiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
 
 export async function queryGrantHistory(
@@ -193,41 +182,6 @@ export async function discoverBoardrooms(
   );
 }
 
-export async function discoverBoardroomDistributions(
-  client: PledgeCashLogClient,
-  input: DiscoveryRange & { factory: Address; boardroom?: Address },
-): Promise<DiscoveryResult<DiscoveredDistribution>> {
-  const result = await getLogs(client, input, input.factory, distributionCreatedEvent);
-  const distributions = new Map<string, DiscoveredDistribution>();
-
-  for (const log of [...result.logs].sort(compareLogs)) {
-    const args = log.args ?? {};
-    const distribution = addressArg(args, "distribution");
-    const boardroom = addressArg(args, "boardroom");
-    if (!distribution || !boardroom) continue;
-    if (input.boardroom && !sameAddress(boardroom, input.boardroom)) continue;
-
-    distributions.set(addressKey(distribution), {
-      distribution,
-      boardroom,
-      factory: input.factory,
-      kind: distributionKindLabel(bigintArg(args, "kind")),
-      shareToken: addressArg(args, "shareToken") ?? ZERO_ADDRESS,
-      paymentToken: addressArg(args, "paymentToken") ?? ZERO_ADDRESS,
-      shareAmount: bigintArg(args, "shareAmount") ?? 0n,
-      salt: hexArg(args, "salt") ?? "0x",
-      createdAtBlock: log.blockNumber ?? 0n,
-      transactionHash: log.transactionHash ?? "0x",
-    });
-  }
-
-  return discoveryResult(
-    input,
-    [...distributions.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
-    [result],
-  );
-}
-
 export async function discoverBoardroomProtocolLiquidity(
   client: PledgeCashLogClient,
   input: DiscoveryRange & { factory: Address; boardroom?: Address },
@@ -292,42 +246,6 @@ export async function enrichDiscoveredGrants(
         return { ...grant, state: await readGrantState(client, grant.grantAddress), stale: false };
       } catch (error) {
         return { ...grant, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredDistributions(
-  client: PledgeCashReadClient,
-  distributions: readonly DiscoveredDistribution[],
-): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | DutchAuctionState | MigratingBondingCurveState | MerkleAirdropState>[]> {
-  return await Promise.all(
-    distributions.map(async (distribution) => {
-      try {
-        if (distribution.kind === "migrating-bonding-curve") {
-          return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "fixed-price-sale") {
-          return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "merkle-airdrop") {
-          return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "dutch-auction") {
-          return { ...distribution, state: await readDutchAuctionState(client, distribution.distribution), stale: false };
-        }
-
-        try {
-          return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
-        } catch {
-          try {
-            return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
-          } catch {
-            return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
-          }
-        }
-      } catch (error) {
-        return { ...distribution, stale: true, error: error instanceof Error ? error.message : String(error) };
       }
     }),
   );
@@ -590,14 +508,6 @@ function addressArg(args: Record<string, unknown>, name: string): Address | unde
 function stringArg(args: Record<string, unknown>, name: string): string | undefined {
   const value = args[name];
   return typeof value === "string" ? value : undefined;
-}
-
-function distributionKindLabel(kind: bigint | undefined): DiscoveredDistribution["kind"] {
-  if (kind === 0n) return "fixed-price-sale";
-  if (kind === 1n) return "migrating-bonding-curve";
-  if (kind === 2n) return "merkle-airdrop";
-  if (kind === 3n) return "dutch-auction";
-  return "unknown";
 }
 
 function hexArg(args: Record<string, unknown>, name: string): Hex | undefined {
