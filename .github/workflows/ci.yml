@@ -106,6 +106,16 @@ jobs:
         working-directory: packages/contracts
         run: forge build --sizes
 
+      - name: Validate canonical network profiles
+        run: |
+          bun --cwd packages/contracts validate:networks
+          bun --cwd packages/contracts test:network-profiles
+          bash -n \
+            packages/contracts/script/deploy-network.sh \
+            packages/contracts/script/network-fork/deploy.sh \
+            packages/contracts/script/verify-network-artifact.sh \
+            packages/contracts/script/verify-network-profile-live.sh
+
       - name: Verify generated SDK is current
         run: |
           bun --cwd packages/sdk generate

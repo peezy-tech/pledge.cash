@@ -1,0 +1,6 @@
+{
+  "chainId": 1,
+  "status": "pending",
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Ethereum mainnet deployment is not authorized; testnet and release gates remain open"
+}

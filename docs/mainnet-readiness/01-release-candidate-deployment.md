@@ -11,10 +11,12 @@ The sole contract line is canonical `pledge.cash.protocol.v1`. Its Boardroom is
 the permanent asset-holding kernel routed through
 `ProtocolFacetRegistry`; there is no supported alternative deployment line.
 
-The target testnet does not have a protocol-v1 broadcast:
+The target testnets do not have a protocol-v1 broadcast:
 
-- Monad `10143.json` is `pending`;
-- no mainnet profile or supported mainnet artifact exists.
+- Ethereum Sepolia `11155111.json` is `pending`;
+- Base Sepolia `84532.json` is `pending`;
+- Ethereum, Base, Arbitrum, and Robinhood Chain have canonical profiles and
+  pending status artifacts, but mainnet deployment is not authorized.
 
 Testnet deployment is the next operational stage after final local acceptance
 and the pull-request review cycle. This document does not authorize that

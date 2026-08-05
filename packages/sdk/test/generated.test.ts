@@ -15,6 +15,8 @@ import {
   migratingBondingCurveAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
+  pledgeCashNetworkProfiles,
+  pledgeCashNetworkSupportPolicy,
   pledgeV4HookAbi,
   pledgeV4LiquidityFactoryAbi,
   pledgeV4LiquidityVaultAbi,
@@ -148,11 +150,33 @@ describe("generated SDK exports", () => {
   });
 
   test("includes checked-in deployment metadata", () => {
-    expect(pledgeCashDeployments[10143]?.chainId).toBe(10143);
-    expect(pledgeCashDeployments[10143]?.status).toBe("pending");
-    expect(pledgeCashDeployments[10143]?.protocolVersion).toBe("pledge.cash.protocol.v1");
-    expect(pledgeCashDeployments[10143]?.tokenGrantFactory).toBeUndefined();
-    expect(pledgeCashDeployments[10143]?.boardroomFactory).toBeUndefined();
+    const supportedChainIds = [11155111, 84532, 1, 8453, 42161, 4663];
+    expect(Object.keys(pledgeCashDeployments).map(Number)).toEqual(expect.arrayContaining(supportedChainIds));
+    for (const chainId of supportedChainIds) {
+      const deployment = pledgeCashDeployments[chainId as keyof typeof pledgeCashDeployments];
+      expect(deployment?.chainId).toBe(chainId);
+      expect(deployment?.status).toBe("pending");
+      expect(deployment?.protocolVersion).toBe("pledge.cash.protocol.v1");
+      expect(deployment?.tokenGrantFactory).toBeUndefined();
+      expect(deployment?.boardroomFactory).toBeUndefined();
+    }
+  });
+
+  test("generates the approved network profiles from the canonical manifest", () => {
+    expect(pledgeCashNetworkSupportPolicy).toEqual({
+      defaultChainId: 11155111,
+      testnetChainIds: [11155111, 84532],
+      mainnetChainIds: [1, 8453, 42161, 4663],
+    });
+    expect(pledgeCashNetworkProfiles.map((profile) => profile.key)).toEqual([
+      "ethereum-sepolia",
+      "base-sepolia",
+      "ethereum",
+      "base",
+      "arbitrum",
+      "robinhood-chain",
+    ]);
+    expect(pledgeCashNetworkProfiles.every((profile) => profile.uniswap.routerEncoding === "universal-router-2.0-v4-exact-input-single")).toBe(true);
   });
 
   test("marks generated source as generated", async () => {

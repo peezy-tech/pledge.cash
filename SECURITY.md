@@ -1,9 +1,9 @@
 # Security Policy
 
 pledge.cash is currently an unreleased local-review candidate. Canonical
-protocol v1 has not been broadcast to Monad testnet. The contracts
-are not mainnet production software, and this repository does not support a
-mainnet deployment.
+protocol v1 has not been broadcast to Ethereum Sepolia or Base Sepolia. The
+four planned mainnet profiles are pending and unauthorized. The contracts are
+not mainnet production software, and no public pledge.cash deployment exists.
 
 ## Supported Scope
 
@@ -15,7 +15,7 @@ Security reports are in scope for:
   migration, AMM pools and routing, locked liquidity, protocol fee routing,
   token-transfer helpers, factories, and deterministic deployment primitives,
 - deployment and verification surfaces that can publish or attest an unsafe contract stack, including
-  `packages/contracts/script/Deploy.s.sol`, chain-specific deployment wrappers and artifact verifiers,
+  `packages/contracts/script/Deploy.s.sol`, the canonical network manifest, generic deployment and fork wrappers, and artifact verifiers,
   `PledgeCashDeploymentSalts.sol`, and checked-in deployment artifacts,
 - SDK or web deployment parsing when a defect can select, conceal, or misrepresent a contract address, authority,
   runtime code hash, or chain,
@@ -23,7 +23,7 @@ Security reports are in scope for:
 
 Out of scope:
 
-- mainnet deployments, because none are supported by this repo yet,
+- mainnet deployments, because none exists or is authorized by this repo yet,
 - denial-of-service testing against public RPCs, DNS, hosting, or third-party
   infrastructure,
 - social engineering, phishing, spam, or physical attacks,

@@ -20,19 +20,28 @@ describe("web network profiles", () => {
 
     expect(local.name).toBe("Local Anvil");
     expect(local.rpcUrl).toBe("http://127.0.0.1:8547");
-    expect(local.wrappedNativeSymbol).toBe("WHYPE");
+    expect(local.wrappedNativeSymbol).toBe("WETH");
     expect(walletRpcUrl(local)).toBe(local.rpcUrl);
   });
 
-  test("keeps Monad and local selectable", () => {
-    expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([10143, 31337]);
+  test("keeps the approved public networks and local Anvil selectable", () => {
+    expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([
+      11155111,
+      84532,
+      1,
+      8453,
+      42161,
+      4663,
+      31337,
+    ]);
   });
 
-  test("identifies unseeded Local, Testnet, and Custom environments truthfully", () => {
+  test("identifies unseeded Local, Testnet, Mainnet, and Custom environments truthfully", () => {
     const local = networkEnvironmentIdentity(networkForChainId(LOCAL_ANVIL_CHAIN_ID));
     const localByChainId = networkEnvironmentIdentity({ chainId: LOCAL_ANVIL_CHAIN_ID, key: "custom" });
     const localByProfileKey = networkEnvironmentIdentity({ chainId: 42_424, key: "local-anvil" });
-    const testnet = networkEnvironmentIdentity(networkForChainId(10143));
+    const testnet = networkEnvironmentIdentity(networkForChainId(11155111));
+    const mainnet = networkEnvironmentIdentity(networkForChainId(1));
     const customNetwork = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_CHAIN_ID: "424242",
       VITE_PLEDGE_CASH_CHAIN_NAME: "Partner chain",
@@ -47,6 +56,7 @@ describe("web network profiles", () => {
       expect(localIdentity.description).not.toMatch(/seeded|fixtures/i);
     }
     expect(testnet).toMatchObject({ kind: "testnet", label: "Testnet", hasRealValue: false });
+    expect(mainnet).toMatchObject({ kind: "mainnet", label: "Mainnet", hasRealValue: true });
     expect(custom).toMatchObject({ kind: "custom", label: "Custom", hasRealValue: undefined });
   });
 
@@ -66,7 +76,16 @@ describe("web network profiles", () => {
     });
     const custom = networks.find((network) => network.chainId === 424242);
 
-    expect(networks.map((network) => network.chainId)).toEqual([10143, 31337, 424242]);
+    expect(networks.map((network) => network.chainId)).toEqual([
+      11155111,
+      84532,
+      1,
+      8453,
+      42161,
+      4663,
+      31337,
+      424242,
+    ]);
     expect(custom?.key).toBe("custom");
     expect(custom?.name).toBe("Custom Testnet");
     expect(custom?.rpcUrl).toBe("https://rpc.custom.test");
@@ -79,17 +98,17 @@ describe("web network profiles", () => {
   });
 
   test("preserves blank legacy explorer overrides as disabled links", () => {
-    const monad = createPledgeCashNetworks({
+    const sepolia = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_EXPLORER_URL: "",
-    }).find((network) => network.chainId === 10143);
+    }).find((network) => network.chainId === 11155111);
     const custom = createPledgeCashNetworks({
       VITE_PLEDGE_CASH_CHAIN_ID: "424242",
       VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
       VITE_PLEDGE_CASH_EXPLORER_URL: "",
     }).find((network) => network.chainId === 424242);
 
-    expect(monad?.explorerUrl).toBe("");
-    expect(monad?.chain.blockExplorers).toBeUndefined();
+    expect(sepolia?.explorerUrl).toBe("");
+    expect(sepolia?.chain.blockExplorers).toBeUndefined();
     expect(custom?.explorerUrl).toBe("");
     expect(custom?.chain.blockExplorers).toBeUndefined();
   });
@@ -97,10 +116,10 @@ describe("web network profiles", () => {
   test("can resolve transaction links against the originating chain", () => {
     const hash = "0x00000000000000000000000000000000000000000000000000000000000000aa";
     const address = "0x1000000000000000000000000000000000000000";
-    const monad = networkForChainId(10143);
+    const sepolia = networkForChainId(11155111);
 
-    expect(transactionUrl(hash, monad.chainId)).toBe(`${monad.explorerUrl}/tx/${hash}`);
-    expect(addressUrl(address, monad.chainId)).toBe(`${monad.explorerUrl}/address/${address}`);
+    expect(transactionUrl(hash, sepolia.chainId)).toBe(`${sepolia.explorerUrl}/tx/${hash}`);
+    expect(addressUrl(address, sepolia.chainId)).toBe(`${sepolia.explorerUrl}/address/${address}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
     expect(addressUrl(address, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
     expect(transactionUrl(hash, 999_999)).toBeUndefined();
@@ -125,7 +144,7 @@ describe("web network profiles", () => {
 
     try {
       expect(() => persistSelectedNetwork(LOCAL_ANVIL_CHAIN_ID)).not.toThrow();
-      expect(initialSelectedNetwork().chainId).toBe(10143);
+      expect(initialSelectedNetwork().chainId).toBe(11155111);
     } finally {
       if (previousWindow) {
         Object.defineProperty(globalThis, "window", previousWindow);
@@ -133,5 +152,14 @@ describe("web network profiles", () => {
         Reflect.deleteProperty(globalThis, "window");
       }
     }
+  });
+
+  test("supports explicit per-chain RPC overrides without changing other profiles", () => {
+    const networks = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_RPC_URL_84532: "https://base-sepolia.example.test",
+    });
+
+    expect(networks.find((network) => network.chainId === 84532)?.rpcUrl).toBe("https://base-sepolia.example.test");
+    expect(networks.find((network) => network.chainId === 11155111)?.rpcUrl).toBe("https://ethereum-sepolia-rpc.publicnode.com");
   });
 });

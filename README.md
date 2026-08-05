@@ -4,9 +4,11 @@ pledge.cash is a permissionless protocol and product workspace for token-backed 
 
 The repository is unreleased. Its sole contract line is canonical protocol v1:
 Boardrooms are asset-holding kernels routed through a protocol-owned facet
-registry. The Monad testnet artifact is pending; testnet
-deployment is the next operational stage after final local acceptance and
-review, and no mainnet deployment is supported.
+registry. The canonical public network manifest supports Ethereum Sepolia and Base
+Sepolia as deployment candidates, followed by planned Ethereum, Base,
+Arbitrum, and Robinhood Chain mainnets. Every public artifact is still
+pending: testnet deployment is the next operational stage after final local
+acceptance and review, and no mainnet protocol deployment exists.
 
 ## Repository Layout
 
@@ -25,7 +27,7 @@ review, and no mainnet deployment is supported.
 - [Bond Market Protocol](docs/bond-market-protocol.md): oracleless reserve and first-party LP auctions with non-transferable vested positions.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
 - [Project Token Launch](docs/project-token-launch.md): local dogfood scenario for a Boardroom-backed project token.
-- [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and Monad testnet operator flows.
+- [Deployment](docs/deployment.md): canonical network profiles plus deterministic full-stack simulation, fork rehearsal, broadcast, and verification flows.
 - [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
 - [Security](SECURITY.md): supported scope and vulnerability reporting process.
 - [Agent Guide](AGENTS.md): operating rules for coding agents and humans making repo changes.
@@ -59,19 +61,26 @@ Run only the contracts package:
 bun --cwd packages/contracts test
 ```
 
-Simulate the Monad testnet deployment:
+Validate the canonical two-testnet/four-mainnet support policy and rehearse
+either testnet deployment:
 
 ```sh
-bun run simulate:monad-testnet
+bun run validate:networks
+bun run simulate:sepolia
+bun run simulate:base-sepolia
 ```
 
-The state-changing Monad broadcast command is reserved for the explicit
-testnet deployment ceremony after all gates in
-[`docs/deployment.md`](docs/deployment.md) pass:
+The complete no-funds fork gates are the normal pre-deployment proof:
 
 ```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:monad-testnet
+bun run test:sepolia-fork:deployment
+bun run test:base-sepolia-fork:deployment
 ```
+
+State-changing testnet commands are documented in
+[`docs/deployment.md`](docs/deployment.md). They require an explicit RPC,
+clean exact source, chain-and-commit confirmation, funded deployment key, and
+an authorized deployment ceremony.
 
 Build the product workspace and its public docs for GitHub Pages:
 

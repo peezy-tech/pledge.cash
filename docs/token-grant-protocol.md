@@ -57,10 +57,12 @@ the canonical root deployment route.
 
 The creation fee is chain-native and does not hard-code a gas-token symbol.
 The wider root stack supplies a chain-specific wrapped-native address for
-Boardroom and v4-liquidity accounting. The repository has a deployment wrapper for
-Monad testnet (`10143`), but its checked-in protocol-v1 artifact is
-**pending**. The file is not a contract address or
-evidence of a live `TokenGrantFactory`.
+Boardroom and v4-liquidity accounting. The repository has canonical deployment
+profiles for Ethereum Sepolia (`11155111`) and Base Sepolia (`84532`), but
+both checked-in protocol-v1 artifacts are **pending**. The files are not
+contract addresses or evidence of a live `TokenGrantFactory`. The planned
+Ethereum, Base, Arbitrum, and Robinhood Chain mainnet artifacts are pending
+and unauthorized as well.
 
 The wrappers retain a candidate artifact only after verifying its live code,
 wiring, policy state, authorities, release identity, and receipts. Promoting a

@@ -75,7 +75,8 @@ inside one delayed Boardroom self-call.
 Launch and governance writes require a promoted, live-verified protocol-v1
 artifact and a Boardroom with `migrationRequired() == false`. Both public
 testnet artifacts are pending, so these writes are currently local-scenario
-workflows only. No mainnet deployment is supported.
+workflows only. The four mainnet profiles are pending and no mainnet protocol
+deployment exists.
 
 ## Wind-down and redemptions
 

@@ -5,8 +5,9 @@
 > The kernel/facet and policy conclusions remain relevant. Custom-AMM,
 > locked-liquidity, x402, chain-998, byte-size, and test-count details below are
 > historical. Use `docs/amm-protocol.md`, `docs/deployment.md`, and the release-A/B
-> manifests for the current implementation. Chain `10143` remains pending, no
-> target-chain transaction has been broadcast, and mainnet remains a NO-GO.
+> manifests for the current implementation. Ethereum Sepolia `11155111` and
+> Base Sepolia `84532` remain pending, no public-chain transaction has been
+> broadcast, and all four planned mainnets remain a NO-GO.
 
 ## Outcome
 

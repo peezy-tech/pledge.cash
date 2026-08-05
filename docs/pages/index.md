@@ -44,15 +44,18 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 ## Current Availability
 
-Canonical protocol v1 has not been broadcast to Monad testnet. Its checked-in
-artifact is **pending**, so public
-contract-dependent workflows are unavailable. A matching local Anvil
-deployment and seed can be used for isolated development; local state is not a
+Canonical protocol v1 has not been broadcast to Ethereum Sepolia or Base
+Sepolia. Both testnet artifacts are **pending**. Ethereum, Base, Arbitrum, and
+Robinhood Chain also remain pending and are not authorized for mainnet
+deployment, so public contract-dependent workflows are unavailable. A
+matching local Anvil deployment and seed can be used for isolated development;
+local state is not a
 public deployment.
 
 The app must fail closed for creation, launch, participation, governance, and
 redemption when the selected artifact is pending or its registry/facet
-identity cannot be verified. No mainnet deployment is supported.
+identity cannot be verified. The four mainnet profiles remain pending and no
+mainnet protocol deployment exists.
 
 Read [Networks and current limitations](start/networks-and-limitations) before interacting with any claimed deployment.
 

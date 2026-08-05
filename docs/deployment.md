@@ -10,13 +10,26 @@ There is no parallel Boardroom deployment path in this unreleased repository.
 
 | Network | Chain id | Default RPC | Wrapped native | Checked-in artifact |
 | --- | ---: | --- | --- | --- |
-| Monad testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `10143.json`: **pending** |
+| Ethereum Sepolia | `11155111` | `https://ethereum-sepolia-rpc.publicnode.com` | `0xfff9976782d46cc05630d1f6ebab18b2324d6b14` | `11155111.json`: **pending** |
+| Base Sepolia | `84532` | `https://sepolia.base.org` | `0x4200000000000000000000000000000000000006` | `84532.json`: **pending** |
+| Ethereum | `1` | `https://ethereum-rpc.publicnode.com` | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | `1.json`: **pending**, mainnet not authorized |
+| Base | `8453` | `https://mainnet.base.org` | `0x4200000000000000000000000000000000000006` | `8453.json`: **pending**, mainnet not authorized |
+| Arbitrum | `42161` | `https://arb1.arbitrum.io/rpc` | `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1` | `42161.json`: **pending**, mainnet not authorized |
+| Robinhood Chain | `4663` | `https://rpc.mainnet.chain.robinhood.com` | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` | `4663.json`: **pending**, mainnet not authorized |
 | Local Anvil | `31337` | `http://127.0.0.1:8547` | locally deployed | ignored local artifacts |
 
-The target testnet does not have a canonical protocol-v1 broadcast. Testnet
+Neither target testnet has a canonical protocol-v1 broadcast. Testnet
 deployment is the next operational step after the final local acceptance and
 review gates, but this repository state does not authorize or evidence that
-broadcast. Mainnet remains unsupported.
+broadcast. The four mainnets have first-class profiles for future rollout;
+none is authorized or deployed.
+
+`packages/contracts/config/networks.json` is the canonical support manifest.
+It pins the approved two-testnet/four-mainnet allowlist, RPC and explorer
+identity, confirmation policy, wrapped-native token, CREATE2 factory, Uniswap
+v4 dependencies, Universal Router encoding generation, and every observed
+runtime code hash. The mutable upstream Uniswap feed is provenance used to
+review profile updates; deployment never consumes it as runtime authority.
 
 An RPC responding with the expected chain id proves only network access. A
 target becomes usable only after a clean-source broadcast produces a verified
@@ -200,16 +213,10 @@ all Boardroom routing immediately. When the storage version increases, normal
 writes remain unavailable on each Boardroom until its permissionless migration
 succeeds.
 
-The target wrappers load their chain-specific environment, pin chain id, and
-refuse any dirty source worktree:
-
-```sh
-script/monad-testnet/registry-release.sh preflight /absolute/path/release.json
-```
-
-Its target-specific variables use the
-`MONAD_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
-names. Common generic names remain available as explicit fallbacks.
+Post-genesis release operations deliberately use the generic operator and its
+explicit chain, registry, owner, and facet-set inputs. A promoted deployment
+artifact may supply review evidence, but the operator still re-reads and
+verifies live authority before either publication or activation.
 
 The active live inventory can be verified without a manifest or mutation:
 
@@ -253,39 +260,51 @@ simulation, and production-acceptance gates.
 
 ## Environment
 
-Start from `.env.example` and provide:
+The network manifest owns chain-specific dependencies. Operators provide only
+deployment authority and an RPC endpoint:
 
 ```sh
+PLEDGE_CASH_DEPLOYER_PRIVATE_KEY=0x...
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0x...
 PLEDGE_CASH_PROTOCOL_TREASURY=0x...
-UNISWAP_V4_POOL_MANAGER=0x...
-UNISWAP_UNIVERSAL_ROUTER=0x...
-UNISWAP_V4_QUOTER=0x...
-UNISWAP_V4_STATE_VIEW=0x...
-UNISWAP_V4_POSITION_MANAGER=0x...
-PERMIT2_ADDRESS=0x...
 ```
 
-Monad dry runs and broadcasts require:
+Use the profile-specific RPC variable or the generic one:
 
 ```sh
-MONAD_TESTNET_PRIVATE_KEY=...
+SEPOLIA_RPC_URL=https://...
+BASE_SEPOLIA_RPC_URL=https://...
+# or PLEDGE_CASH_RPC_URL=https://...
 ```
 
 Optional overrides include:
 
 ```sh
-MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
-MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=0
-CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=0x...
+GAS_ESTIMATE_MULTIPLIER=120
 ```
 
-Each wrapper checks its RPC chain id, derives the broadcaster from the private
-key, requires that address to equal the deterministic-deployer owner, and
-refuses a dirty source worktree.
+The wrapper validates the manifest, checks RPC chain id and every pinned
+runtime code hash, derives the broadcaster from the private key, and requires
+that address to equal the deterministic-deployer owner. A public fallback RPC
+may be used for simulation; broadcast requires an explicitly configured RPC,
+a clean worktree, and a chain-and-source confirmation.
+Process-level configuration overrides dotenv values. Broadcast authority is
+not an environment setting: the wrapper accepts it only through the
+command-line `--broadcast <chain-id:source-commit>` argument. A dotenv file
+cannot authorize a transaction.
+
+Validate the offline support policy and perform a read-only live dependency
+preflight without a deployment key:
+
+```sh
+bun run validate:networks
+cd packages/contracts
+script/verify-network-profile-live.sh 11155111
+script/verify-network-profile-live.sh 84532
+```
 
 ## Dry-run simulation
 
@@ -293,8 +312,9 @@ Dry runs send no target-chain transaction and do not rewrite deployment
 artifacts:
 
 ```sh
-bun run simulate:monad-testnet
-bun run simulate:testnets
+bun run simulate:sepolia
+bun run simulate:base-sepolia
+# Generic form: bun --cwd packages/contracts simulate:network -- <chain-id>
 ```
 
 A successful simulation is useful deployment evidence, but it is not proof
@@ -302,11 +322,18 @@ that a target chain contains the protocol.
 
 ## Testnet broadcast and candidate handling
 
-The following commands are state-changing and require deliberate operator
-authorization:
+The following commands are state-changing. Do not run them until the testnet
+deployment ceremony is authorized. Each command requires the exact clean
+source commit as its command-line confirmation:
 
 ```sh
-bun run deploy:monad-testnet
+source_commit="$(git rev-parse HEAD)"
+
+SEPOLIA_RPC_URL=https://... \
+bun run deploy:sepolia -- "11155111:${source_commit}"
+
+BASE_SEPOLIA_RPC_URL=https://... \
+bun run deploy:base-sepolia -- "84532:${source_commit}"
 ```
 
 After a broadcast, the wrapper:
@@ -315,10 +342,12 @@ After a broadcast, the wrapper:
 2. derives the inclusive discovery block and minimized successful-receipt
    ledger from Foundry's broadcast record;
 3. attaches the exact 40-character source commit;
-4. verifies deterministic provenance, code hashes, registry release metadata,
+4. waits for the selected profile's confirmation depth (bounded by
+   `CONFIRMATION_TIMEOUT_SECONDS`, 1800 seconds by default);
+5. verifies deterministic provenance, code hashes, registry release metadata,
    all 97 release-A routes, ownership, immutable wiring, policy state, and fee
    routing against the live RPC;
-5. retains the verified candidate and
+6. retains the verified candidate and
    `<chain-id>.receipts.candidate.json`.
 
 Verification does **not** overwrite `<chain-id>.json`. Promotion is a separate
@@ -330,9 +359,11 @@ registry owner and active release must still equal the artifact's genesis
 ceremony state, so a candidate cannot pass after an intervening ownership
 handoff or release activation.
 
-Monad uses its network-specific Foundry toolchain. Those operational
-preconditions must be rehearsed again before the first testnet transaction;
-the current pending artifacts do not prove them.
+The generic wrapper also understands the four approved mainnet profiles, but
+their artifacts explicitly state that deployment is not authorized. A future
+mainnet invocation additionally requires the command-line `--allow-mainnet`
+flag and a separate release decision after testnet acceptance; the current
+repository state does not supply that authorization.
 
 ## Artifact acceptance
 
@@ -409,26 +440,33 @@ Re-running the same command is the idempotence check: existing roots must be
 accepted only when their init-code commitments and live configuration match.
 The ignored `deployments/31337.json` is local evidence, not a public identity.
 
-### Sepolia fork deployment proof
+### Testnet fork deployment proofs
 
-The isolated Sepolia-fork gate deploys the complete protocol against the live
-canonical Sepolia PoolManager, Universal Router, Quoter, StateView,
-PositionManager, Permit2, wrapped-native token, and CREATE2 factory. It verifies
-that every external dependency has code, records and checks the first broadcast
-receipt-by-receipt, reconstructs every deterministic address and release hash,
-reruns the deployment, and verifies that the canonical identity and live wiring
-remain unchanged.
+The profile-driven fork gate deploys the complete protocol against either
+testnet's live canonical PoolManager, Universal Router, Quoter, StateView,
+PositionManager, Permit2, wrapped-native token, and CREATE2 factory. It checks
+every dependency against the pinned runtime hash, records and checks the first
+broadcast receipt-by-receipt, reconstructs every deterministic address and
+release hash, reruns the deployment, and verifies that the canonical identity
+and live wiring remain unchanged.
 
 ```sh
 bun run test:sepolia-fork:deployment
+bun run test:base-sepolia-fork:deployment
+# Or run both sequentially:
+bun run test:testnet-forks:deployment
 ```
 
-The command requires Foundry v1.7.1 and a clean committed worktree. It defaults
-to a public Sepolia RPC; set `SEPOLIA_RPC_URL` when a private or higher-capacity
-endpoint is preferable. Set `SEPOLIA_FORK_BLOCK` to repeat an exact historical
-fork. The child Anvil chain uses id `31337`, never broadcasts to Sepolia, keeps
-all logs, candidate artifacts, and receipt evidence in a printed temporary
-directory, and does not overwrite the normal local deployment artifact.
+The commands require Foundry v1.7.1 and a clean committed worktree. They use
+the profile fallback RPC unless `SEPOLIA_RPC_URL` or
+`BASE_SEPOLIA_RPC_URL` is configured. Set `SEPOLIA_FORK_BLOCK`,
+`BASE_SEPOLIA_FORK_BLOCK`, or generic `NETWORK_FORK_BLOCK` to repeat an exact
+historical fork. A pinned historical proof requires an archive-capable RPC;
+an endpoint that supports current reads may still prune the requested state.
+The child Anvil chain uses id `31337`, never broadcasts to a
+public chain, keeps all logs, candidate artifacts, and receipt evidence in a
+printed temporary directory, and does not overwrite the normal local
+deployment artifact.
 
 The canonical Boardroom lifecycle proof uses a separate fresh Anvil state:
 
@@ -460,11 +498,14 @@ after an Anvil reset does not preserve deployment identity.
 Before the first testnet broadcast, record a clean result for:
 
 ```sh
+bun run validate:networks
 bun --cwd packages/contracts build
 bun --cwd packages/contracts test
 forge build --sizes
 bun --cwd packages/sdk generate
 bun --cwd packages/sdk test
+bun run test:sepolia-fork:deployment
+bun run test:base-sepolia-fork:deployment
 bun run docs:check
 bun run format:check
 git diff --check

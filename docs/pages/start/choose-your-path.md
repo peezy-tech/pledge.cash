@@ -7,7 +7,8 @@ description: Go directly to the pledge.cash workspace that matches what you need
 
 Start with the outcome you want. You can inspect public project state before connecting a wallet.
 
-> **Availability:** canonical protocol v1 is pending on Monad testnet. The
+> **Availability:** canonical protocol v1 is pending on both candidate
+> testnets, and every planned mainnet remains pending and unauthorized. The
 > workflows below describe a verified future deployment or
 > a matching local Anvil scenario; public protocol writes are currently
 > unavailable.
@@ -47,7 +48,7 @@ or authorize an available action.
 External-controller launch and governance writes require a promoted,
 live-verified protocol-v1 artifact, a matching active facet-set hash, and a
 Boardroom that does not require migration. Both testnets remain pending and
-mainnet remains unsupported.
+the four mainnet profiles remain pending and unauthorized.
 
 ## I need raw diagnostics or alerts
 

@@ -11,17 +11,26 @@ Network support is not the same as a live protocol deployment. The app can offer
 
 | Network | Chain id | Current artifact | What users should do |
 | --- | ---: | --- | --- |
-| Monad testnet | `10143` | **Pending** — canonical protocol v1 has not been broadcast | Do not submit pledge.cash protocol transactions |
+| Ethereum Sepolia | `11155111` | **Pending** — canonical protocol v1 has not been broadcast | Wait for a promoted testnet artifact |
+| Base Sepolia | `84532` | **Pending** — canonical protocol v1 has not been broadcast | Wait for a promoted testnet artifact |
+| Ethereum | `1` | **Pending** — mainnet deployment is not authorized | Do not submit pledge.cash protocol transactions |
+| Base | `8453` | **Pending** — mainnet deployment is not authorized | Do not submit pledge.cash protocol transactions |
+| Arbitrum | `42161` | **Pending** — mainnet deployment is not authorized | Do not submit pledge.cash protocol transactions |
+| Robinhood Chain | `4663` | **Pending** — mainnet deployment is not authorized | Do not submit pledge.cash protocol transactions |
 | Local Anvil | `31337` | Generated locally and ignored by Git | Use only for the local scenario that produced it |
-| Mainnet | — | No supported deployment | Treat any claimed mainnet address as unsupported |
 
-The checked-in `10143.json` file contains pending status only and does not
-certify usable factory addresses. A local proof, old transaction,
-screenshot, or candidate file is not a promoted public identity.
+Each public chain has a checked-in status artifact, but every one is pending
+and none certifies usable pledge.cash factory addresses. A local proof, old
+transaction, screenshot, or candidate file is not a promoted public identity.
 
 ## Default RPCs
 
-- Pending Monad testnet: `https://testnet-rpc.monad.xyz`
+- Pending Ethereum Sepolia: `https://ethereum-sepolia-rpc.publicnode.com`
+- Pending Base Sepolia: `https://sepolia.base.org`
+- Planned Ethereum: `https://ethereum-rpc.publicnode.com`
+- Planned Base: `https://mainnet.base.org`
+- Planned Arbitrum: `https://arb1.arbitrum.io/rpc`
+- Planned Robinhood Chain: `https://rpc.mainnet.chain.robinhood.com`
 - Local Anvil: normally `http://127.0.0.1:8547`, or the deployment's configured reverse-proxied RPC route
 
 RPC availability proves only that a chain can answer. It does not prove the pledge.cash deployment artifact is current.
@@ -30,7 +39,12 @@ RPC availability proves only that a chain can answer. It does not prove the pled
 
 The app stores network selection locally and supports direct selection with:
 
-- `?chain=10143`
+- `?chain=11155111`
+- `?chain=84532`
+- `?chain=1`
+- `?chain=8453`
+- `?chain=42161`
+- `?chain=4663`
 - `?chain=31337`
 
 Changing network changes contract identity, balances, receipts, and provenance. Confirm the chain in both the app and wallet before every signature.

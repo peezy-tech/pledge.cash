@@ -97,10 +97,10 @@ describe("frontend foundation", () => {
 
   test("labels and disables networks whose deployment is not ready", () => {
     const local = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 31337)!;
-    const monad = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 10143)!;
+    const sepolia = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 11155111)!;
 
     expect(networkOptionLabel(local)).toBe("Local Anvil — Local (resettable, no real value)");
-    expect(networkOptionLabel(monad, "pending")).toBe("Monad Testnet — deployment pending");
+    expect(networkOptionLabel(sepolia, "pending")).toBe("Ethereum Sepolia — Testnet — deployment pending");
     expect(networkAvailabilityLabel("missing")).toBe("not deployed");
     expect(networkOptionDisabled("pending")).toBe(true);
     expect(networkOptionDisabled("ready")).toBe(false);
@@ -110,7 +110,7 @@ describe("frontend foundation", () => {
         <AppHeader
           chainId={31337}
           chainName="Local Anvil"
-          networkAvailability={{ 10143: "pending", 31337: "ready" }}
+          networkAvailability={{ 11155111: "pending", 31337: "ready" }}
           networks={PLEDGE_CASH_NETWORKS}
           onNetworkChange={() => undefined}
           pendingAction={undefined}
@@ -121,7 +121,7 @@ describe("frontend foundation", () => {
       </Web3Provider>,
     );
 
-    expect(html).toContain("Monad Testnet — deployment pending");
+    expect(html).toContain("Ethereum Sepolia — Testnet — deployment pending");
     expect(html.match(/<option disabled=""/g)?.length).toBe(1);
   });
 

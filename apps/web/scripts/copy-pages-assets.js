@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const outDir = process.env.VITE_OUT_DIR ?? "dist";
@@ -41,11 +41,22 @@ const deploymentOutDir = join(outDir, "deployments");
 await mkdir(deploymentOutDir, { recursive: true });
 
 const deploymentDir = "../../packages/contracts/deployments";
-const deploymentFiles = (await readdir(deploymentDir)).filter((file) => file.endsWith(".json"));
+const networkManifest = JSON.parse(
+  await readFile("../../packages/contracts/config/networks.json", "utf8"),
+);
+const publicDeploymentFiles = new Set(
+  networkManifest.profiles.map((profile) => `${profile.chainId.toString()}.json`),
+);
+if (process.env.VITE_PLEDGE_CASH_CHAIN_ID === "31337") {
+  publicDeploymentFiles.add("31337.json");
+}
+const deploymentFiles = (await readdir(deploymentDir))
+  .filter((file) => publicDeploymentFiles.has(file))
+  .sort();
 if (deploymentFiles.length === 0) {
   await writeFile(
-    join(deploymentOutDir, "10143.json"),
-    `${JSON.stringify({ status: "pending", reason: "Broadcast artifact not published yet" })}\n`,
+    join(deploymentOutDir, "11155111.json"),
+    `${JSON.stringify({ chainId: 11155111, status: "pending", reason: "Broadcast artifact not published yet" })}\n`,
   );
 } else {
   await Promise.all(

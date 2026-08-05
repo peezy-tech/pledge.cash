@@ -5,16 +5,26 @@ description: Current network choices, deployment availability, wallet support, a
 
 # Networks and Limitations
 
-The app’s `Network` selector can show Monad Testnet and `Local`. Selecting a network changes which deployment artifact, RPC, projects, and transaction history the app uses. It does not automatically switch an already connected wallet; use `Switch` when the header asks you to match networks.
+The app’s `Network` selector shows the two candidate testnets, four planned
+mainnets, and `Local`. Selecting a network changes which deployment artifact,
+RPC, projects, and transaction history the app uses. It does not automatically
+switch an already connected wallet; use `Switch` when the header asks you to
+match networks.
 
 ## Current deployment availability
 
 | Network | Chain ID | Current status |
 | --- | ---: | --- |
-| Monad Testnet | `10143` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| Ethereum Sepolia | `11155111` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| Base Sepolia | `84532` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| Ethereum | `1` | Mainnet deployment is `pending` and not authorized. |
+| Base | `8453` | Mainnet deployment is `pending` and not authorized. |
+| Arbitrum | `42161` | Mainnet deployment is `pending` and not authorized. |
+| Robinhood Chain | `4663` | Mainnet deployment is `pending` and not authorized. |
 | Local Anvil | `31337` | Intended for a host or developer environment that provides the matching RPC and local deployment artifact. Local addresses and state are not durable public deployments. |
 
-No mainnet deployment is supported by these docs. A network appearing in the selector is not proof that a current pledge.cash contract stack exists there.
+No mainnet protocol deployment exists. A network appearing in the selector is
+not proof that a current pledge.cash contract stack exists there.
 
 ## Wallet support
 

@@ -9,10 +9,12 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-Canonical protocol v1 is pending on Monad testnet `10143`. The checked-in
-artifact does not provide usable root addresses. Clients
-must withhold contract-dependent workflows while the selected artifact is
-pending.
+Canonical protocol v1 is pending on Ethereum Sepolia `11155111` and Base
+Sepolia `84532`; neither checked-in artifact provides usable root addresses.
+Ethereum `1`, Base `8453`, Arbitrum `42161`, and Robinhood Chain `4663` are
+planned mainnet profiles whose deployments remain pending and unauthorized.
+Clients must withhold contract-dependent workflows while the selected
+artifact is pending.
 
 Do not develop against guessed or historical addresses. A candidate artifact
 becomes publishable only after deterministic provenance, the complete
@@ -21,8 +23,10 @@ fee, and immutable-wiring verification succeeds.
 
 ## Deterministic deployment flow
 
-1. Configure deterministic deployer owner, protocol governance, treasury, wrapped native, canonical PoolManager,
-   Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and broadcaster.
+1. Configure the broadcaster, deterministic deployer owner, protocol
+   governance, treasury, and an operator-owned RPC. The canonical manifest
+   supplies wrapped native, CREATE2, PoolManager, Universal Router, v4 Quoter,
+   StateView, PositionManager, and Permit2 identities.
 2. Run the chain-specific dry-run wrapper and confirm chain id.
 3. Broadcast through the maintained wrapper.
 4. Verify the candidate against live RPC state and runtime code hashes.
@@ -32,21 +36,23 @@ fee, and immutable-wiring verification succeeds.
 
 Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
 
-## Sepolia fork gate
+## Testnet fork gates
 
-Before selecting a production network, run the complete deployment against a
-local fork of Ethereum Sepolia's canonical Uniswap v4 stack:
+Before any public broadcast, run the complete deployment against local forks
+of both candidate testnets' canonical Uniswap v4 stacks:
 
 ```sh
 bun run test:sepolia-fork:deployment
+bun run test:base-sepolia-fork:deployment
 ```
 
 The gate checks the upstream chain and dependency bytecode, deploys and
 receipt-verifies protocol genesis, reruns the deterministic deployment, and
 then verifies that its addresses, release identity, ownership, policies, and
 live wiring remain unchanged. It uses no Sepolia funds and sends no Sepolia
-transactions. Pin `SEPOLIA_FORK_BLOCK` when the evidence must be exactly
-repeatable.
+transactions. Pin `SEPOLIA_FORK_BLOCK` or `BASE_SEPOLIA_FORK_BLOCK` when the
+evidence must be exactly repeatable, and use an archive-capable RPC for a
+pinned historical block.
 
 ## Local Anvil scenario
 

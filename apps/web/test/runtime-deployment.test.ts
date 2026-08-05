@@ -131,7 +131,7 @@ describe("runtime deployment artifacts", () => {
   test("rejects chain-specific artifacts from a different chain", () => {
     const deployment = parseDeployment('{"chainId":998,"tokenGrantFactory":"0x1000000000000000000000000000000000000000"}');
 
-    expect(isRuntimeDeploymentForChain(deployment, 10143)).toBe(false);
+    expect(isRuntimeDeploymentForChain(deployment, 424242)).toBe(false);
   });
 
   test("parses ready, pending, missing, and error artifact statuses", () => {
@@ -169,14 +169,14 @@ describe("runtime deployment artifacts", () => {
 
   test("does not select mismatched runtime or generated artifacts", () => {
     const availability = selectRuntimeDeploymentAvailability(
-      10143,
+      424242,
       { chainId: 998 },
       { kind: "deployment", deployment: { chainId: 998 } },
     );
 
     expect(availability.status).toBe("error");
     expect(availability.deployment).toBeUndefined();
-    expect(availability.reason).toContain("not chain 10143");
+    expect(availability.reason).toContain("not chain 424242");
   });
 
   test("preserves Uniswap v4 execution roots and protocol-liquidity identity", () => {
@@ -451,7 +451,7 @@ describe("runtime deployment recovery", () => {
     let currentFetchCount = 0;
     const currentResults: RuntimeDeploymentResult[] = [];
     const stopCurrent = startRuntimeDeploymentRecovery({
-      chainId: 10143,
+      chainId: 424242,
       fetchDeployment: async () => {
         currentFetchCount += 1;
         return { kind: "missing" };

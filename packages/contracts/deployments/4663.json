@@ -1,0 +1,6 @@
+{
+  "chainId": 4663,
+  "status": "pending",
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Robinhood Chain mainnet deployment is not authorized; testnet and release gates remain open"
+}

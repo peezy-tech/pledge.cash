@@ -10,6 +10,7 @@ const docsRoot = dirname(root);
 const repoRoot = dirname(docsRoot);
 const pagesRoot = join(docsRoot, "pages");
 const deploymentsRoot = join(repoRoot, "packages", "contracts", "deployments");
+const networkManifestPath = join(repoRoot, "packages", "contracts", "config", "networks.json");
 const appRoutes = new Set(["explore", "portfolio", "settings/alerts", "studio", "tools"]);
 const safeExternalSchemes = new Set(["http", "https", "mailto"]);
 
@@ -182,9 +183,10 @@ function unsafeClaims(page, source) {
 }
 
 async function pendingDeploymentChecks(pageSources) {
-  const networkNames = new Map([
-    [10143, "Monad"],
-  ]);
+  const networkManifest = JSON.parse(await readFile(networkManifestPath, "utf8"));
+  const networkNames = new Map(
+    networkManifest.profiles.map((profile) => [profile.chainId, profile.name]),
+  );
   const artifacts = (await readdir(deploymentsRoot))
     .filter((name) => name.endsWith(".json"))
     .sort();
@@ -193,21 +195,22 @@ async function pendingDeploymentChecks(pageSources) {
     const deployment = JSON.parse(await readFile(join(deploymentsRoot, artifact), "utf8"));
     if (deployment.status !== "pending") continue;
     const name = networkNames.get(deployment.chainId) ?? `chain ${deployment.chainId.toString()}`;
+    const networkToken = deployment.chainId.toString();
+    const networkPattern = new RegExp(`\`${networkToken}\``);
     let hasVisibleStatus = false;
 
     for (const { page, source } of pageSources) {
-      const prose = proseSource(source);
-      if (!new RegExp(`\\b${name}\\b`, "i").test(prose)) continue;
+      if (!networkPattern.test(source)) continue;
       const statusPattern = "(?:pending|unavailable|not (?:broadcast|deployed|live|available|usable|supported))";
       const pageStatesPending = new RegExp(
-        `(?:\\b${name}\\b[\\s\\S]{0,1200}\\b${statusPattern}\\b|\\b${statusPattern}\\b[\\s\\S]{0,400}\\b${name}\\b)`,
+        `(?:\`${networkToken}\`[\\s\\S]{0,1200}\\b${statusPattern}\\b|\\b${statusPattern}\\b[\\s\\S]{0,400}\`${networkToken}\`)`,
         "i",
-      ).test(prose);
+      ).test(source);
       if (pageStatesPending) hasVisibleStatus = true;
       else errors.push(`${page} mentions pending ${name} without presenting its pending or unavailable status on the page`);
 
-      for (const paragraph of prose.split(/\r?\n\s*\r?\n/)) {
-        if (!new RegExp(`\\b${name}\\b`, "i").test(paragraph)) continue;
+      for (const paragraph of source.split(/\r?\n\s*\r?\n/)) {
+        if (!networkPattern.test(paragraph)) continue;
         const positiveLiveClaim = /\b(?:is|are|runs?|was|were) (?:currently )?(?:live|deployed|available|supported)\b|\blive (?:deployment|protocol stack)\b/i.test(paragraph);
         const qualified = /\bpending\b|\bnot (?:broadcast|deployed|live|available|usable|supported)\b|\bunavailable\b/i.test(paragraph);
         if (positiveLiveClaim && !qualified) {

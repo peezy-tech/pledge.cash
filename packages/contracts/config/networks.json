@@ -1,0 +1,378 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "supportPolicy": {
+    "defaultChainId": 11155111,
+    "testnetChainIds": [11155111, 84532],
+    "mainnetChainIds": [1, 8453, 42161, 4663]
+  },
+  "sources": {
+    "uniswapDeployments": {
+      "url": "https://developers.uniswap.org/docs/protocols/v4/deployments",
+      "dataUrl": "https://developers.uniswap.org/deployments.json",
+      "repository": "https://github.com/Uniswap/contracts",
+      "commit": "37936185dee7decf681360ec799c124e0e034672",
+      "generatedAt": "2026-07-15T22:25:40.000Z"
+    },
+    "robinhoodChain": {
+      "networkUrl": "https://docs.robinhood.com/chain/connecting/",
+      "contractsUrl": "https://docs.robinhood.com/chain/contracts/"
+    }
+  },
+  "profiles": [
+    {
+      "chainId": 11155111,
+      "key": "ethereum-sepolia",
+      "name": "Ethereum Sepolia",
+      "environment": "testnet",
+      "deploymentPhase": "testnet-candidate",
+      "rpcEnv": "SEPOLIA_RPC_URL",
+      "defaultRpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+      "explorer": {
+        "name": "Etherscan",
+        "url": "https://sepolia.etherscan.io"
+      },
+      "nativeCurrency": {
+        "name": "Sepolia Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 5,
+      "observedAt": {
+        "blockNumber": 11426147,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+        "codeHash": "0xc864e10689f2da18833652a3b075d43106e87f0f90d95ee64f6f0b33bc026083"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
+          "codeHash": "0x09930125a49f5b95caf8052991cc14d1240dca8b43f42b899115b86867e4bce1"
+        },
+        "universalRouter": {
+          "address": "0x3A9D48AB9751398BbFa63ad67599Bb04e4BdF98b",
+          "codeHash": "0x14f7c9253a5406bafa90cb512f4a2db2a10513886603e7a9b4a2e72329e944f4"
+        },
+        "quoter": {
+          "address": "0x61B3f2011A92d183C7dbaDBdA940a7555Ccf9227",
+          "codeHash": "0xf481a751ac453d40c46d12360b85b05472028c1b113ab63749d69a5f8b0e47d1"
+        },
+        "stateView": {
+          "address": "0xE1Dd9c3fA50EDB962E442f60DfBc432e24537E4C",
+          "codeHash": "0xaaed3db8eb8ebde8014ce4c8a3938496687f4c6374e17a7d735288f6c65ceb9e"
+        },
+        "positionManager": {
+          "address": "0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4",
+          "codeHash": "0xcffd746f78c2b50aafd19076bbe9c48f14446e5248fc5d76b9b4896610e51aab"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0x96d9f5c3f0fb0423426b7f970186235b7347027f4e5c19c40c412b7d97fc3751"
+        }
+      }
+    },
+    {
+      "chainId": 84532,
+      "key": "base-sepolia",
+      "name": "Base Sepolia",
+      "environment": "testnet",
+      "deploymentPhase": "testnet-candidate",
+      "rpcEnv": "BASE_SEPOLIA_RPC_URL",
+      "defaultRpcUrl": "https://sepolia.base.org",
+      "explorer": {
+        "name": "BaseScan",
+        "url": "https://sepolia.basescan.org"
+      },
+      "nativeCurrency": {
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 5,
+      "observedAt": {
+        "blockNumber": 45093605,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0x4200000000000000000000000000000000000006",
+        "codeHash": "0x83f731a17e6c0cdd04bc6f60b15d3e789e215b71403087b84b48650a1e5cbb21"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
+          "codeHash": "0x03c45db6d09b14da7c1f7239a5a49697f976d395277e6d2acb6fbed3f9e0249f"
+        },
+        "universalRouter": {
+          "address": "0x492E6456D9528771018DeB9E87ef7750EF184104",
+          "codeHash": "0x952c879f642706a4d399eb917827b5a2a5519328446dba72aef3579909bf15ef"
+        },
+        "quoter": {
+          "address": "0x4A6513c898fe1B2d0E78d3b0e0A4a151589B1cBa",
+          "codeHash": "0x2dddcef87d5ed402d16be6e1165ce38a10af3b69020a19705b91063a9069078c"
+        },
+        "stateView": {
+          "address": "0x571291b572ed32ce6751a2Cb2486EbEe8DEfB9B4",
+          "codeHash": "0x0e54f1b36938b15a1d4207f9cfe5e13eee61c5393c7a498e859d5bdc86999c39"
+        },
+        "positionManager": {
+          "address": "0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80",
+          "codeHash": "0xe8329b35b8b34290b6cf03affc0836f7b23205229cc96ffdc66544b93112c076"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0xdcde65555316946c298e4c60c6213eb5c3aeab4354d1f3fac5427236bcbb9ebe"
+        }
+      }
+    },
+    {
+      "chainId": 1,
+      "key": "ethereum",
+      "name": "Ethereum",
+      "environment": "mainnet",
+      "deploymentPhase": "mainnet-planned",
+      "rpcEnv": "ETHEREUM_RPC_URL",
+      "defaultRpcUrl": "https://ethereum-rpc.publicnode.com",
+      "explorer": {
+        "name": "Etherscan",
+        "url": "https://etherscan.io"
+      },
+      "nativeCurrency": {
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 12,
+      "observedAt": {
+        "blockNumber": 25690600,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "codeHash": "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+          "codeHash": "0x785f1014552b7ce7d5fb7d0c970ca60edee94fd00425d7ca21609acac7ce1293"
+        },
+        "universalRouter": {
+          "address": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+          "codeHash": "0x6a5f46971b50c6e1b7eef97902311444e479d734e4f80ad88367783cf373fe7f"
+        },
+        "quoter": {
+          "address": "0x52F0E24D1c21C8A0cB1e5a5dD6198556BD9E1203",
+          "codeHash": "0x06de58fa119c5deaa7a667fb92d3894e25d9160e62fb82c8d86d43b47eefe441"
+        },
+        "stateView": {
+          "address": "0x7fFE42C4a5DEeA5b0feC41C94C136Cf115597227",
+          "codeHash": "0xd7947778589cf4aac9a092a4451292a2056380941635ab7006d3c691d8dfd878"
+        },
+        "positionManager": {
+          "address": "0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e",
+          "codeHash": "0x77e36c08b19959a30dde46dec9abe6208e371ff2f56884a56fe1e1a53615528b"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0xc67d1657868aa5146eaf24fb879fb1fdec3d2d493b3683a61c9c2f4fb2851131"
+        }
+      }
+    },
+    {
+      "chainId": 8453,
+      "key": "base",
+      "name": "Base",
+      "environment": "mainnet",
+      "deploymentPhase": "mainnet-planned",
+      "rpcEnv": "BASE_RPC_URL",
+      "defaultRpcUrl": "https://mainnet.base.org",
+      "explorer": {
+        "name": "BaseScan",
+        "url": "https://basescan.org"
+      },
+      "nativeCurrency": {
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 5,
+      "observedAt": {
+        "blockNumber": 49583076,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0x4200000000000000000000000000000000000006",
+        "codeHash": "0x8a3a1f6a9f9dce633117adee5b458245835a8645a8c8726a26382a4622508b1c"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0x498581fF718922c3f8e6A244956aF099B2652b2b",
+          "codeHash": "0x83b2af6e9f3158defc2811cbcb0db71ecf8b2ba2abea39c39e370ac5c6f43eb6"
+        },
+        "universalRouter": {
+          "address": "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+          "codeHash": "0x27713951fb0660a1422b710122022d90723d883dc7b72949be79cb2957d234e0"
+        },
+        "quoter": {
+          "address": "0x0d5e0F971ED27FBfF6c2837bf31316121532048D",
+          "codeHash": "0x9a5c0cdd56325bef0e48cdab071a4b6a7f877e1271c2e08510998d724a038bb3"
+        },
+        "stateView": {
+          "address": "0xA3c0c9b65baD0b08107Aa264b0f3dB444b867A71",
+          "codeHash": "0xbbd5859677ef5491143133e8ed2b8faa0272f6fc2cbae94c53e79cc8c0538545"
+        },
+        "positionManager": {
+          "address": "0x7C5f5A4bBd8fD63184577525326123B519429bDc",
+          "codeHash": "0x243f9e091ddf11c7c04e28059fdbbf1bab82b72d414fafb8e096c097aaeb622a"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0xa67739abc3ede9dbdc0491636c67d6a14ac07fab9030c3f509b1eb7b11dff8ed"
+        }
+      }
+    },
+    {
+      "chainId": 42161,
+      "key": "arbitrum",
+      "name": "Arbitrum",
+      "environment": "mainnet",
+      "deploymentPhase": "mainnet-planned",
+      "rpcEnv": "ARBITRUM_RPC_URL",
+      "defaultRpcUrl": "https://arb1.arbitrum.io/rpc",
+      "explorer": {
+        "name": "Arbiscan",
+        "url": "https://arbiscan.io"
+      },
+      "nativeCurrency": {
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 20,
+      "observedAt": {
+        "blockNumber": 491449877,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+        "codeHash": "0x2d240bb4510ed1acfeaba905eb4bcc4524d63c8ae66e48fcccac55ea714db7a7"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32",
+          "codeHash": "0xe4b2759e456c9c4ef763e3b4e257c5105e1ba283d7de8b131dd321197de794a4"
+        },
+        "universalRouter": {
+          "address": "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
+          "codeHash": "0xc15e8e18812f640245cac34716a18270e3d3288e99b328a410401888ff484720"
+        },
+        "quoter": {
+          "address": "0x3972C00f7ed4885e145823eb7C655375d275A1C5",
+          "codeHash": "0x98305ebcd33e8989a8e941072ffe9bc6dac7912ccb9d097befa2d17696da37ff"
+        },
+        "stateView": {
+          "address": "0x76Fd297e2D437cd7f76d50F01AfE6160f86e9990",
+          "codeHash": "0x4c0e823a0cd44b6b2d9485e774c421cf929db3996096d9b84ee6b23525184b9e"
+        },
+        "positionManager": {
+          "address": "0xd88F38F930b7952f2DB2432Cb002E7abbF3dD869",
+          "codeHash": "0x6156ddaa1c8cd2c26d37455a5dc57b1761dc2848856426c0ac261ae0c7fecd68"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0x9e51dcb64cf56fc09a82cb41edbc17c6a2250f18dbd1b91e884c0aca02acd57c"
+        }
+      }
+    },
+    {
+      "chainId": 4663,
+      "key": "robinhood-chain",
+      "name": "Robinhood Chain",
+      "environment": "mainnet",
+      "deploymentPhase": "mainnet-planned",
+      "rpcEnv": "ROBINHOOD_CHAIN_RPC_URL",
+      "defaultRpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+      "explorer": {
+        "name": "Robinhood Chain Explorer",
+        "url": "https://robinhoodchain.blockscout.com"
+      },
+      "nativeCurrency": {
+        "name": "Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "confirmations": 20,
+      "observedAt": {
+        "blockNumber": 28711547,
+        "checkedAt": "2026-08-05"
+      },
+      "create2Factory": {
+        "address": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+        "codeHash": "0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989"
+      },
+      "wrappedNative": {
+        "symbol": "WETH",
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "codeHash": "0x5706be52f64875fee65a2cec0d80e47a23d8793cbe85d214b48445e2d05f5353"
+      },
+      "uniswap": {
+        "routerEncoding": "universal-router-2.0-v4-exact-input-single",
+        "poolManager": {
+          "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+          "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+        },
+        "universalRouter": {
+          "address": "0x8876789976decbfcbbbe364623c63652db8c0904",
+          "codeHash": "0x2ce6aaaf9f4151f5e1cbf774668772f17f532ae11b15e9284fd0a072a8b0fbde"
+        },
+        "quoter": {
+          "address": "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94",
+          "codeHash": "0xd707b1da8cb165e5ea35a3b4450d971eb562ec171e23492aa117036b78a868f6"
+        },
+        "stateView": {
+          "address": "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b",
+          "codeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+        },
+        "positionManager": {
+          "address": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+          "codeHash": "0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2"
+        },
+        "permit2": {
+          "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "codeHash": "0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca"
+        }
+      }
+    }
+  ]
+}

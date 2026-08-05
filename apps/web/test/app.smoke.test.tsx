@@ -358,7 +358,7 @@ describe("web app shell", () => {
 
     expect(isGovernanceBackgroundRefresh(key, key)).toBe(true);
     expect(isGovernanceBackgroundRefresh(undefined, key)).toBe(false);
-    expect(isGovernanceBackgroundRefresh("10143:other", key)).toBe(false);
+    expect(isGovernanceBackgroundRefresh("424242:other", key)).toBe(false);
   });
 
   test("governance deadlines reject even when route loading ignores cancellation", async () => {
@@ -388,7 +388,7 @@ describe("web app shell", () => {
     expect(html).toContain('href="#app-main-content"');
     expect(html).toContain("Skip to main content");
     expect(html).toContain("Checking deployment availability");
-    expect(html).toContain("Monad Testnet — checking deployment");
+    expect(html).toContain("Ethereum Sepolia — Testnet — checking deployment");
     expect(html).toContain("pledge.cash will not run discovery, contract reads, or wallet actions");
     expect(html).toContain('aria-label="Testnet environment: Public test network using test assets with no real value."');
     expect(html).toContain('aria-label="Testnet environment disclosure"');
@@ -424,13 +424,13 @@ describe("web app shell", () => {
     const pending = renderToString(
       <DeploymentUnavailablePage
         availability={{
-          chainId: 10143,
+          chainId: 11155111,
           deployment: undefined,
           reason: "Awaiting the public broadcast artifact.",
           source: undefined,
           status: "pending",
         }}
-        networkName="Monad Testnet"
+        networkName="Ethereum Sepolia"
       />,
     );
     const unsupported = renderToString(

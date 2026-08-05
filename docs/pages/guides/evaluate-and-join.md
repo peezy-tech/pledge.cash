@@ -7,8 +7,9 @@ description: Verify a project, compare its participation paths, and complete a p
 
 Start with evidence, not the project name. A pledge.cash project is a Boardroom contract plus the share token, distributions, grants, and liquidity contracts that can be proven to belong to it.
 
-> **Current availability:** canonical protocol v1 is pending on Monad testnet
-> (`10143`). Public participation writes are
+> **Current availability:** canonical protocol v1 is pending on Ethereum
+> Sepolia (`11155111`) and Base Sepolia (`84532`); the four planned mainnets
+> remain pending and unauthorized. Public participation writes are
 > unavailable. Use these steps only with a matching local Anvil deployment,
 > or after a target-testnet artifact has been promoted and live-verified. See
 > [Networks and deployments](../reference/networks-and-deployments).

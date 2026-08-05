@@ -13,6 +13,21 @@ const baseEnv = {
 };
 
 describe("Sentinel config", () => {
+  test("defaults to both supported testnets from the canonical SDK profiles", () => {
+    const { SENTINEL_CHAIN_IDS: _, SENTINEL_RPC_URL_31337: __, ...withoutChainOverrides } = baseEnv;
+    const config = loadConfig(withoutChainOverrides);
+
+    expect(config.chains.map((chain) => chain.chainId)).toEqual([11155111, 84532]);
+    expect(config.chains.map((chain) => chain.rpcUrl)).toEqual([
+      "https://ethereum-sepolia-rpc.publicnode.com",
+      "https://sepolia.base.org",
+    ]);
+    expect(config.chains.map((chain) => chain.explorerUrl)).toEqual([
+      "https://sepolia.etherscan.io",
+      "https://sepolia.basescan.org",
+    ]);
+  });
+
   test("uses an RPC-safe watcher range and rejects wider windows", () => {
     expect(loadConfig(baseEnv).maxBlockRange).toBe(1_000);
     expect(() => loadConfig({ ...baseEnv, SENTINEL_MAX_BLOCK_RANGE: "1001" })).toThrow();

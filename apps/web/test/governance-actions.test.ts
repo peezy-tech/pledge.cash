@@ -112,7 +112,7 @@ describe("scheduled controller operation loading", () => {
     const sentinelClient = indexedSentinel(async () => ({
       items: [
         indexedOperation(1),
-        indexedOperation(2, { chainId: 10143 }),
+        indexedOperation(2, { chainId: 424242 }),
         indexedOperation(3, { boardroom: { address: otherBoardroom } }),
         indexedOperation(4, { operationId: "0x1234" }),
       ],

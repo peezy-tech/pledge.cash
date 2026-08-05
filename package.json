@@ -24,8 +24,9 @@
   },
   "scripts": {
     "build": "bun --cwd packages/contracts build && bun --cwd packages/sdk build && bun --cwd apps/web build",
-    "deploy:monad-testnet": "bun --cwd packages/contracts deploy:monad-testnet",
-    "deploy:testnets": "bun --cwd packages/contracts deploy:testnets",
+    "deploy:network": "bun --cwd packages/contracts deploy:network",
+    "deploy:sepolia": "bun --cwd packages/contracts deploy:sepolia",
+    "deploy:base-sepolia": "bun --cwd packages/contracts deploy:base-sepolia",
     "docs:build": "bun --cwd docs build",
     "docs:check": "bun --cwd docs check:types",
     "docs:dev": "bun --cwd docs dev",
@@ -40,9 +41,13 @@
     "sentinel:dev": "bun --cwd services/sentinel dev",
     "sentinel:integration:anvil": "bun --cwd services/sentinel integration:anvil",
     "sentinel:test": "bun --cwd services/sentinel test",
-    "simulate:monad-testnet": "bun --cwd packages/contracts simulate:monad-testnet",
-    "simulate:testnets": "bun --cwd packages/contracts simulate:testnets",
+    "simulate:network": "bun --cwd packages/contracts simulate:network",
+    "simulate:sepolia": "bun --cwd packages/contracts simulate:sepolia",
+    "simulate:base-sepolia": "bun --cwd packages/contracts simulate:base-sepolia",
     "test:sepolia-fork:deployment": "bun --cwd packages/contracts test:sepolia-fork:deployment",
+    "test:base-sepolia-fork:deployment": "bun --cwd packages/contracts test:base-sepolia-fork:deployment",
+    "test:testnet-forks:deployment": "bun --cwd packages/contracts test:testnet-forks:deployment",
+    "validate:networks": "bun --cwd packages/contracts validate:networks",
     "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"
   },
   "devDependencies": {

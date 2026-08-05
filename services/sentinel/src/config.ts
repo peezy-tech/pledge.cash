@@ -1,7 +1,13 @@
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 
+import {
+  getPledgeCashNetworkProfile,
+  pledgeCashNetworkSupportPolicy,
+} from "@pledge.cash/sdk";
 import { z } from "zod";
+
+const defaultSentinelChainIds = pledgeCashNetworkSupportPolicy.testnetChainIds.join(",");
 
 const optionalStringSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -33,9 +39,7 @@ export const sentinelEnvSchema = z
     SENTINEL_PORT: z.coerce.number().int().positive().default(8787),
     SENTINEL_TRUSTED_PROXY_IPS: optionalStringSchema,
     SENTINEL_WEB_ORIGIN: z.string().url(),
-    SENTINEL_CHAIN_IDS: z.string().min(1).default("10143"),
-    SENTINEL_RPC_URL_10143: z.string().url().default("https://testnet-rpc.monad.xyz"),
-    SENTINEL_RPC_URL_31337: optionalStringSchema,
+    SENTINEL_CHAIN_IDS: z.string().min(1).default(defaultSentinelChainIds),
     SENTINEL_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(12_000),
     SENTINEL_MAX_BLOCK_RANGE: z.coerce.number().int().positive().max(1_000).default(1_000),
     BETTER_AUTH_SECRET: z.string().min(32),
@@ -197,13 +201,13 @@ function readPositiveInteger(env: Record<string, unknown>, key: string, defaultV
   return value === undefined ? defaultValue : z.coerce.number().int().nonnegative().parse(value);
 }
 
-function readUrl(env: Record<string, unknown>, key: string): string {
+function readUrl(env: Record<string, unknown>, key: string, fallback?: string): string {
   const value = readOptionalString(env, key);
-  if (value === undefined) {
+  if (value === undefined && fallback === undefined) {
     throw new Error(`${key} is required for configured Sentinel chain`);
   }
 
-  return z.string().url().parse(value);
+  return z.string().url().parse(value ?? fallback);
 }
 
 function readOrigin(value: string, key: string): string {
@@ -310,16 +314,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const webOrigin = readOrigin(raw.SENTINEL_WEB_ORIGIN, "SENTINEL_WEB_ORIGIN");
 
   const chains = chainIds.map((chainId): SentinelChainConfig => {
-    const explorerUrl = readOptionalString(rawEnv, `SENTINEL_EXPLORER_URL_${chainId}`);
+    const profile = getPledgeCashNetworkProfile(chainId);
+    const explorerUrl = readOptionalString(rawEnv, `SENTINEL_EXPLORER_URL_${chainId}`)
+      ?? profile?.explorer.url;
     return withOptional(
       {
         chainId,
         confirmations: readPositiveInteger(
           rawEnv,
           `SENTINEL_CONFIRMATIONS_${chainId}`,
-          chainId === 31337 ? 0 : 5
+          chainId === 31337 ? 0 : profile?.confirmations ?? 5
         ),
-        rpcUrl: readUrl(rawEnv, `SENTINEL_RPC_URL_${chainId}`)
+        rpcUrl: readUrl(rawEnv, `SENTINEL_RPC_URL_${chainId}`, profile?.defaultRpcUrl)
       },
       "explorerUrl",
       explorerUrl

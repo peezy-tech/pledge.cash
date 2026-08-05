@@ -9,11 +9,13 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-Monad testnet `10143` is pending because
-canonical protocol v1 has not been broadcast. The warning is expected:
-contract-dependent public workflows are unavailable. Do not paste historical
-addresses or override the gate. Use only a matching local Anvil artifact, or
-wait for a promoted target-testnet release.
+Ethereum Sepolia `11155111` and Base Sepolia `84532` are pending because
+canonical protocol v1 has not been broadcast. Ethereum `1`, Base `8453`,
+Arbitrum `42161`, and Robinhood Chain `4663` are also pending because mainnet
+deployment is not authorized. The warning is expected: contract-dependent
+public workflows are unavailable. Do not paste historical addresses or
+override the gate. Use only a matching local Anvil artifact, or wait for a
+promoted target-testnet release.
 
 ## No browser wallet is detected
 
