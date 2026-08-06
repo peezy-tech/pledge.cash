@@ -52,9 +52,7 @@ export default {
       pages: [
         "guides/evaluate-and-join",
         "guides/receive-and-settle-grant",
-        "guides/claim-airdrop",
         "guides/create-and-operate-project",
-        "guides/govern-a-project",
         "guides/wind-down-and-redeem",
       ],
     },
@@ -64,8 +62,6 @@ export default {
         "understand/boardrooms-and-project-tokens",
         "understand/grants-and-vesting",
         "understand/distributions-and-liquidity",
-        "understand/governance-and-holder-protections",
-        "understand/staking-and-rewards",
         "understand/treasury-obligations-and-redemptions",
         "understand/provenance-and-hosted-context",
       ],
@@ -84,9 +80,7 @@ export default {
       pages: [
         "developers/index",
         "developers/boardroom",
-        "developers/staking-and-rewards",
         "developers/grants",
-        "developers/distributions-and-airdrops",
         "developers/amm-and-liquidity",
         "developers/deployment-and-local-scenarios",
       ],

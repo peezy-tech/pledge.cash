@@ -1,53 +1,26 @@
 ---
 title: Glossary
-description: Plain-language definitions for pledge.cash contracts, roles, lifecycle states, transactions, and hosted context.
+description: Plain-language definitions for the lean pledge.cash contracts, roles, lifecycle, and deployment evidence.
 ---
 
 # Glossary
 
 | Term | Meaning |
 | --- | --- |
-| Active | Boardroom state in which allowed issuance and participation can continue. It can be pre-launch or launched. |
-| Airdrop manifest | Offchain data that maps a claim index and account to amount, proof, claim mode, and optional grant terms. The root commits to it, but the contract does not publish it. |
-| AMM | Automated market maker. pledge.cash uses canonical Uniswap v4 PoolKeys for exchange execution rather than owning a separate reserve ledger. |
-| Boardroom | Canonical onchain project account and permanent asset-holding execution gateway whose kernel routes protocol functions through the active facet release. |
-| BoardroomFactory | Deployment root that creates and recognizes canonical Boardrooms. |
-| Boardroom owner | Address with direct pre-launch authority and certain lifecycle powers. Ownership does not survive as direct treasury execution after launch. |
-| Canonical | Proven through the selected chain, deployment, factory, and contract relationships—not merely a matching name. |
-| Claimable | Maximum cumulative grant-token amount permitted to settle under current terms; a vesting halt can lower it. It includes tokens already settled and is not necessarily vested now. |
-| Cliff | Timestamp before which a grant vests zero tokens. |
-| Curve sell right | Fungible right carried by transferable shares, bounded globally by the curve's outstanding share liability. |
-| Deployment artifact | Chain-specific record of current protocol addresses, authority, wiring, and code identity, or an explicit pending status. |
-| Distribution | Boardroom-created fixed sale, Merkle airdrop, or migrating curve that escrows project shares. |
-| Controller | External generation-bound owner that accepts proposer-scheduled operations and enters the Boardroom policy gateway after delay. |
-| Expected facet-set hash | Explicit release hash supplied as the first argument to every state-changing Boardroom call and committed by controller authorizations. A stale value reverts. |
-| Facet-set hash | Commitment to one complete ordered Boardroom release, including selectors, route kinds, facet addresses/code hashes, storage requirements, migration metadata, and human manifest. |
-| Proposer | EOA or ERC-1271 contract authorized by the current controller to schedule operations. |
-| Grant | Contract that escrows existing tokens and releases vested amounts under fixed terms. |
-| Grant-right NFT | ERC721 whose current owner is synchronized as the grant holder while the grant remains live. |
-| Governance-eligible supply | Current or checkpointed circulating shares outside the Boardroom treasury and authenticated protocol custody, used as the denominator for active-staker thresholds. |
-| Governance epoch | Boardroom version counter that invalidates older controller operations when controller or lifecycle context changes. |
-| Holder | Current grant-right owner for a grant, or a project-share owner in governance/redemption context. Read the surrounding context. |
-| Issuer | Account or Boardroom that escrows tokens into a grant and receives paid-settlement proceeds. |
-| P4LP | ERC20 claim issued by a canonical pledge.cash vault, one unit per unit of its full-range Uniswap v4 position liquidity. |
-| Protocol liquidity | The Boardroom-governed portion of one canonical P4LP vault and PoolId; external P4LP claims remain holder-owned. |
-| Merkle proof | Sibling hashes proving one exact leaf belongs to a published Merkle root. |
-| Migration required | Boardroom state after a storage-version activation but before that individual Boardroom has applied the release-pinned atomic migration; ordinary writes are blocked. |
-| Obligation | Recorded grant, distribution, or active liquidity vault that must be resolved before Boardroom redemptions open. |
-| Payment token | ERC20 paid in a sale or paid grant. It is distinct from the delivered grant token in a paid grant. |
-| Pending deployment | Artifact state that deliberately withholds protocol addresses until a current stack is broadcast and verified. |
-| Policy | Contract that authorizes a bounded Boardroom call or module lifecycle operation. |
-| ProtocolFacetRegistry | Global protocol-governed registry that publishes immutable complete Boardroom releases and atomically activates one release for every Boardroom. |
-| Price | Stored rate per whole delivered token. For paid grants, total settlement cost depends on chosen amount and rounds up. |
-| Provenance | Factory and contract relationships that establish canonical identity. |
-| Redemption credit | Per-holder, per-asset right created when project shares burn; failed asset payouts remain retryable against it. |
-| Redemptions open | Terminal Boardroom state with fixed asset and supply snapshots. |
-| Repriced transaction | Wallet replacement that preserves the action while changing transaction fees. The replacement hash is authoritative. |
-| Sentinel | Optional hosted indexing and alert service. It is not protocol settlement or governance authority. |
-| Settleable now | Vested, unsettled grant amount available before expiry and close. |
-| Settlement | Holder transaction that pays any exact cost and receives vested grant tokens from escrow. |
-| Share token | ERC20 created and controlled by one Boardroom; used for project economics, governance thresholds, and final redemption. |
-| Snapshotting | Bounded permissionless phase that freezes supply and registry length, then processes every asset before redemptions open. |
-| Unknown | A value the app failed to establish. It never means zero. |
-| Veto | Qualified-holder cancellation of a pending controller operation through the Boardroom. |
-| Winding down | One-way Boardroom state that stops new commitments and prepares obligations and assets for redemption. |
+| Boardroom | Non-upgradeable project custodian, share issuer, obligation registry, and redemption contract. |
+| Boardroom owner | External account with Active-state operation authority; may be a wallet, Safe, or separate timelock. |
+| Project token | ERC20 share token minted and burned only by its Boardroom. |
+| Redeemable asset | Registered ERC20 considered during the final Boardroom snapshot. |
+| Obligation | A canonical grant or locker that must close before snapshotting. |
+| Token Grant | Deterministic contract holding the complete escrow for one vesting grant. |
+| Grant right | ERC721 whose current holder alone may settle the grant. |
+| Liquidity locker | Contract holding one verified Uniswap v4 PositionManager NFT for a Boardroom. |
+| PoolKey | v4 currency pair, fee, tick spacing, and hook address that identify pool configuration. |
+| ProtocolFeeRouter | Custodian forwarding the protocol share of collected fees to its configured recipient. |
+| Active | Boardroom operating state with owner execution and share issuance. |
+| WindingDown | Irreversible state for closing grants and liquidity after normal execution stops. |
+| Snapshotting | Bounded pass that freezes redemption supply and treasury asset balances. |
+| RedemptionsOpen | Final state where burned shares create credits for per-asset claims. |
+| Pending artifact | Checked configuration with no verified live pledge.cash addresses. |
+| Canonical identity | Chain, artifact, runtime code, and factory relationships proving a protocol object. |
+| Hosted identity | Optional peezy.tech sign-in and wallet-link context with no onchain authority. |

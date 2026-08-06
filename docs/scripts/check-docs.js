@@ -11,7 +11,7 @@ const repoRoot = dirname(docsRoot);
 const pagesRoot = join(docsRoot, "pages");
 const deploymentsRoot = join(repoRoot, "packages", "contracts", "deployments");
 const networkManifestPath = join(repoRoot, "packages", "contracts", "config", "networks.json");
-const appRoutes = new Set(["explore", "portfolio", "settings/alerts", "studio", "tools"]);
+const appRoutes = new Set(["explore", "portfolio", "settings/identity", "studio", "tools"]);
 const safeExternalSchemes = new Set(["http", "https", "mailto"]);
 
 const errors = [];
@@ -163,10 +163,6 @@ function unsafeClaims(page, source) {
     const normalized = paragraph.replace(/\s+/g, " ").trim();
     if (!normalized) continue;
     const explicitlyUnavailable = /\b(?:blocked|disabled|pending|unavailable|cannot|can't|does not|doesn't|not (?:available|shown|supported|safe))\b/i.test(normalized);
-    const launchClaim = /\b(?:(?:click|choose|press|select|use) (?:the )?|(?:you|owners?|operators?) (?:can|may|should) )(?:launch governance|launch boardroom governance)\b/i.test(normalized);
-    if (launchClaim && !explicitlyUnavailable) {
-      errors.push(`${page} presents governance launch as available; the current app blocks that transaction`);
-    }
 
     const unsupportedGrantFact = /\b(?:exact settlement cost|transfer state|quarantine status)\b/i.exec(normalized);
     if (unsupportedGrantFact && !explicitlyUnavailable) {

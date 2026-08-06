@@ -1,70 +1,22 @@
 ---
-title: Tools and Alerts
-description: Know when to use protocol-level diagnostics and how optional governance notifications work.
+title: Tools and Wallet Identity
+description: Use protocol diagnostics and optional peezy.tech wallet links without confusing hosted context with onchain authority.
 ---
 
-# Tools and Alerts
+# Tools and Wallet Identity
 
-Most work belongs in `Explore`, `Portfolio`, a project workspace, or `Studio`. `Tools and Diagnostics` and `Governance alerts` are supporting surfaces for advanced inspection and optional notifications.
+[Tools](../../tools) exposes advanced protocol diagnostics such as canonical deployment
+and contract identities. Use it when a normal project or grant route cannot resolve, and
+copy chain ID and address together when sharing evidence.
 
-## Tools and Diagnostics
+[Wallet identity](../../settings/identity) connects the app to the optional Sentinel
+identity service. You can authenticate and link additional wallets to one peezy.tech
+identity. A wallet link helps sign-in and discovery only: it does not make that wallet a
+Boardroom owner, grant holder, token holder, or transaction signer.
 
-[Open Tools and Diagnostics](../../tools)
+The lean Sentinel service does not watch governance, analyze proposals, send protocol
+alerts, or change contract state. If the identity service is unavailable, onchain wallet
+transactions and public reads still work.
 
-The Tools page contains:
-
-- `Deployment`: active chain ID, factory state, creation fee, and configured deployment addresses.
-- `Wallet`: the connected address and wallet chain.
-- `Artifact`: the raw deployment artifact used by the app.
-- `Create Direct Grant`: a protocol-level direct grant workflow that is not attached to a Boardroom project.
-- `Discovery Diagnostics`: explicit scan ranges, cached results, and contract read errors.
-
-Use these tools to diagnose a deployment, verify an address, or resume bounded discovery. They do not override canonical provenance, wallet authority, network matching, simulation, or transaction review.
-
-If an artifact says `pending`, missing contract addresses are intentional. Do not substitute addresses from an older deployment.
-
-## Governance alerts
-
-[Open Governance alerts](../../settings/alerts)
-
-Alerts are available only when the app build has the optional Sentinel API configured. Without it, alert URLs return
-to `Explore`. Sentinel is an offchain notification service; it does not schedule, veto, execute, or change onchain
-authority.
-
-Sentinel currently verifies EOA wallet signatures only. ERC-1271 smart-account signatures are not supported for SIWE
-sign-in or wallet linking. That limitation applies to Sentinel identity—not to ordinary read-only use of project pages.
-
-To configure alerts:
-
-1. Use an offered social method to create a walletless peezy.tech account or open an existing one. You can instead connect an EOA browser wallet and choose `Sign in with wallet`.
-2. Once signed in, you can link another offered social method from `Identity` as an additional way to open the same account.
-3. Under `Wallets`, connect and link each EOA you want to use for wallet-based alerts, then choose `Watch alerts`.
-4. Under `Delivery`, choose `Link Telegram` and complete the expiring link flow.
-5. Under `Alert rules`, choose `Wallet holdings` or `Specific Boardrooms`, set `Minimum severity`, and `Save`.
-
-A linked EOA wallet can sign in only while its Identity credential is enabled; the `Wallets` panel shows its current sign-in status. Only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
-
-## Recent deliveries
-
-After signing in, `Recent deliveries` shows account-scoped receipts for alerts Sentinel prepared for your enabled channels. The list does not expose provider credentials or raw provider errors.
-
-- `Queued` means the alert is waiting for a delivery attempt.
-- `Delivered` means the channel provider accepted the send. It does not prove that a person read or acted on it.
-- `Retry scheduled` means a delivery attempt failed and Sentinel plans another bounded attempt.
-- `Delivery stopped` means automatic retries are exhausted. Review or replace the affected delivery channel.
-
-Choose `Review action` to reopen the exact chain, Boardroom, and action context. Recheck current contract state before acting: a delivery receipt records Sentinel processing, not the action's current onchain status.
-
-## Public governance activity
-
-When Sentinel is configured, a project’s `Governance` section can show observed `Decision history` without giving the viewer transaction authority. Treat an alert as a prompt to inspect the canonical project, decoded action, and current onchain status—not as proof that an action remains pending or safe.
-
-## Recovery and privacy
-
-- `Alert service` with `Retry` means the Sentinel request failed; onchain project pages remain usable.
-- A failed or stopped delivery affects only that offchain channel. It does not change the underlying governance action or any wallet authority.
-- Use `Refresh`, `Refresh wallets`, or `Refresh channels` after completing an external sign-in or Telegram flow.
-- A linked wallet and notification destination are offchain account data. `Stop watching` disables that wallet's alert coverage, removing a delivery channel stops delivery there, and `Sign out` ends only the current browser session. The current product does not expose wallet-credential unlinking or account deletion; none of those three controls removes the Sentinel account or its sign-in credential.
-- Never sign a message whose domain, URI, wallet, chain ID, or purpose does not match the pledge.cash alert flow shown in the browser.
-
-[Read the project Governance guide](project-workspace) · [Review safety boundaries](../start/use-safely)
+When hosted context conflicts with a transaction receipt or contract read, preserve the
+chain evidence and treat the hosted result as stale until refreshed.

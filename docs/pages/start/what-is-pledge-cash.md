@@ -1,37 +1,29 @@
 ---
 title: What Is pledge.cash?
-description: Understand the product, its onchain building blocks, and what a project token does not promise.
+description: Learn the four retained protocol surfaces and the responsibilities delegated to external systems.
 ---
 
 # What Is pledge.cash?
 
-pledge.cash is a workspace for creating, operating, and inspecting token-backed projects. Each project centers on a **Boardroom**: an onchain account that can hold treasury assets, issue a project token, create token grants, run distribution contracts, manage liquidity, and move through wind-down into redemptions.
+pledge.cash gives a token-backed project a small onchain operating core:
 
-The app turns that contract state into three workspaces:
+- a **Boardroom**, which holds treasury assets, issues one ERC20 project token, records
+  obligations, and ends in redemptions;
+- **Token Grants**, which escrow existing ERC20s and release vested amounts to an
+  ERC721 grant-right holder;
+- a **Liquidity Locker**, which holds one verified Uniswap v4 PositionManager NFT and
+  routes fees to the Boardroom and protocol;
+- optional **peezy.tech identity**, which groups sign-in methods and linked wallets but
+  never grants contract authority.
 
-- `Explore` is the public project directory.
-- `Portfolio` finds wallet-specific grants and project responsibilities.
-- `Studio` contains creation and operator controls.
+Projects choose their Boardroom owner externally. It can be a wallet, Safe, or separate
+timelock. Public token launches can use Uniswap's CCA Liquidity Launchpad. Swaps use
+Uniswap periphery. pledge.cash does not provide bespoke governance, auctions,
+airdrops, staking, rewards, bonds, or a custom AMM.
 
-Every project also has a public workspace with `Overview`, `Participate`, `Governance`, and `Transparency` sections. Reading public project state does not require a wallet.
+A project token is not an equity certificate, legal promise, guaranteed claim, or price
+guarantee. Its concrete protocol right is participation in the Boardroom's final
+redemption state, subject to the assets and supply frozen onchain.
 
-## What the product can prove
-
-pledge.cash can show what the active contracts report: project authority, token supply, treasury balances, grants, distributions, liquidity, governance state, and redemption assets. Contract addresses and onchain history remain available for independent verification.
-
-It cannot prove that a project is trustworthy, economically sound, or legally compliant. An incomplete RPC or event-history read is labeled as incomplete; an unknown value is not silently presented as zero.
-
-## What a token does not mean
-
-Holding a project token does **not**, by itself, create equity, debt, dividends, employment, corporate voting rights, legal membership, or any other offchain entitlement. A grant, sale, airdrop, or AMM transaction creates only the rights encoded by the deployed contracts and any separate agreement you have independently verified. After governance launch, active stakers can have limited onchain veto or wind-down power when the contract thresholds are met; liquid holders retain economic and redemption rights but no governance power.
-
-Words such as “owner,” “holder,” “buyer,” “advisor,” and “contractor” describe how a wallet interacts with the protocol. They are not legal classifications.
-
-## Start with your job
-
-- To inspect or participate in a project, [use Explore](../using/explore).
-- To find grants or wallet responsibilities, [use Portfolio](../using/portfolio).
-- To create or operate a project, [use Studio](../using/studio).
-- Before signing anything, read [Use pledge.cash safely](use-safely) and [Transactions and wallet](../using/transactions-and-wallet).
-
-[Open Explore in the app](../../explore)
+Next, read [Boardrooms and project tokens](../understand/boardrooms-and-project-tokens)
+or [choose your path](choose-your-path).

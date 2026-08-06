@@ -1,68 +1,26 @@
 ---
 title: Canonical identity
-description: How pledge.cash proves Boardrooms, project tokens, grants, distributions, v4 pools, and P4LP vaults belong to the selected deployment.
+description: Verify Boardrooms, share tokens, grants, lockers, positions, and external periphery on one exact chain.
 ---
 
 # Canonical identity
 
-Canonical identity is a relationship, not a logo or address-shaped string. It always includes the chain and current deployment.
+An address is not self-authenticating. Verify every object against the selected chain's
+live deployment artifact and factory relationships.
 
-## Verification chain
-
-| Object | Canonical proof |
+| Object | Required evidence |
 | --- | --- |
-| Boardroom | The selected BoardroomFactory reports that it created the address; the Boardroom reports the artifact registry; its kernel selector-set hash, active facet-set hash, applied storage version/layout, and migration state agree with the registry at one pinned block |
-| Project token | Full reciprocal proof is that the Boardroom reports the token and the token reports that Boardroom as authority. The current app uses the factory-verified Boardroom's token field but does not separately read the reverse token authority |
-| Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
-| Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
-| Distribution | The selected DistributionFactory permanently records the address, Boardroom, and kind, while the distribution reports that factory, Boardroom, and verified project share token |
-| Bond market | The selected BondMarketFactory reports the market, while the market reports that factory, the verified Boardroom, and its project share token; liquidity bonds additionally accept only that Boardroom's funded P4LP vault from the configured liquidity factory |
-| Merkle airdrop | The distribution proof above and the configured TokenGrantFactory agree |
-| Migrating curve | The distribution proof above holds and the curve reports the configured `PledgeV4LiquidityFactory`; its reservation commits the expected vault and PoolId until consumed or released |
-| P4LP vault | Factory mappings, Boardroom position, and vault-reported factory/Boardroom agree; PoolManager, hook, currencies, fee, tick spacing, PoolId, and project share-token side match the deployment |
-| Uniswap v4 pool | The full PoolKey hashes to the recorded PoolId and the configured StateView reports initialized slot0; a PoolId alone does not prove a pledge.cash vault owns liquidity there |
+| Boardroom | `BoardroomFactory.isBoardroom`, matching `factory`, runtime code |
+| Project token | Boardroom `shareToken`, factory `isShareToken`, token `boardroom` |
+| Token Grant | Factory `grantForTokenId`, token ID derived from grant address, live grant fields |
+| Grant right | Current ERC721 `ownerOf` plus grant `holder` |
+| Liquidity locker | Factory `isLocker`, `lockerOfBoardroom`, immutable Boardroom and token fields |
+| v4 position | PositionManager `ownerOf(tokenId) == locker`, exact hookless PoolKey, position info and liquidity |
+| Swap path | Artifact's Universal Router, Permit2, Quoter, StateView, and exact PoolKey |
 
-No single display field proves the whole row.
+Events support discovery and history, but current mappings and contract reads decide
+whether a relationship still holds. Hosted identity, names, icons, project copy, saved
+addresses, and URLs are never sufficient provenance.
 
-Active obligation lists and migration reservations prove current lifecycle state, not permanent identity. They are cleared
-when obligations are pruned or reservations are consumed or released. A terminal grant, distribution, or vault can
-remain canonical through its permanent factory and reciprocal contract records; after curve migration, verify the
-resulting vault and PoolId rather than requiring the spent reservation.
-
-## Canonical routes
-
-The app's project and grant routes verify provenance before enabling actions. A contract with bytecode but the wrong factory relationship is an invalid route, not an “unverified version” of the same product.
-
-Transient RPC failure is different. The app can report that a canonical object is temporarily unavailable when it cannot complete a read. Retry that read; do not replace the missing value with zero or silently fall back to another address.
-
-## Deployment identity matters
-
-Chain id alone is insufficient, especially on local Anvil. A reset can deploy a new stack on the same chain id. Transaction refresh and cached state must also match the deployment identity active when the read or transaction began.
-
-Ethereum Sepolia `11155111`, Base Sepolia `84532`, Ethereum `1`, Base `8453`,
-Arbitrum `42161`, and Robinhood Chain `4663` all have pending canonical
-protocol-v1 artifacts. None has a current pledge.cash root identity for
-writes. A local chain has an identity only while its ignored artifact, Anvil
-state, and source build remain together.
-
-## Current state and history
-
-Current storage can prove present owner, supply, status, and obligations. Lifetime lists and governance action history may require event scans. If an RPC cannot scan the required range, the app must label history incomplete.
-
-An absent row from an incomplete scan is not proof the object never existed. **Unknown is not zero, and incomplete is not empty.**
-
-## Sentinel context
-
-Sentinel can index public governance actions and store wallet-linked alert subscriptions and delivery channels. That optional service data does not establish contract provenance. See [Provenance and Sentinel context](../understand/provenance-and-hosted-context).
-
-## A practical verification record
-
-Before a material transaction, record:
-
-- chain id and deployment artifact identity;
-- registry, kernel, active release/facet-set hash, storage requirement, and
-  root factory addresses;
-- Boardroom and project-token addresses;
-- selected child contract and its factory/Boardroom relationships;
-- transaction target, function, calldata, value, and simulation block;
-- final canonical receipt, including any replacement hash.
+If a public artifact is pending, there is no canonical pledge.cash contract identity on
+that network.

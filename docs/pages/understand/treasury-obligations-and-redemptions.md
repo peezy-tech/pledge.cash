@@ -1,52 +1,30 @@
 ---
 title: Treasury obligations and redemptions
-description: Understand why grants, distributions, and liquidity must close before the treasury can be snapshotted for holders.
+description: Understand why grants and locked liquidity close before a bounded treasury snapshot and per-asset claims.
 ---
 
 # Treasury obligations and redemptions
 
-A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants, distributions, curves, and its P4LP
-vault can hold project shares or return external assets later. The protocol records them as obligations so wind-down
-accounts for those paths first.
+The Boardroom registry identifies ERC20 assets eligible for final redemption. A grant or
+locker records the external assets it can return as dependencies. Snapshotting cannot
+start while any recorded obligation remains active.
 
-## Redeemable assets
+## Wind-down order
 
-Canonical wrapped native is admitted when a Boardroom initializes. Module creation admits assets that can later reach the treasury, such as grant tokens, payment tokens, distribution quote tokens, and liquidity sides. Governance can append additional supported ERC20s to the permanent registry; bounded pagination, rather than a protocol-wide asset capacity, keeps processing finite per transaction.
+1. The owner starts wind-down; ordinary execution and new share minting stop.
+2. The Boardroom wraps native currency.
+3. Each locker exits or cancels, and each Boardroom-funded grant reaches a closed state.
+4. Anyone prunes closed obligations.
+5. After the minimum delay, the Boardroom burns shares held by its own treasury and
+   begins snapshotting.
+6. Assets are processed in pages of at most 32. Unreadable assets are excluded and
+   recorded instead of blocking all other claims.
+7. Redemptions open only after the full registry is processed.
 
-An arbitrary transfer to the Boardroom does not automatically prove the asset belongs in the redemption basket. During
-wind-down, a holder with the required 10% current-and-previous-block eligible stake can admit a positive-balance final
-asset. Snapshotting freezes registration and liquidity/supply treatment. An unreadable admitted asset is classified
-explicitly during a bounded snapshot page instead of silently skipped or allowed to create an unbounded loop.
+A holder burns shares once to receive redemption credits. They then claim each included
+asset independently, with a minimum-output check. The claim is proportional to frozen
+asset balance and frozen redemption supply. Rounding excess can be swept only after the
+entire allocation for that asset has been claimed.
 
-## Why obligations must close
-
-- a grant may return unvested or expired escrow;
-- a sale or airdrop may return unallocated shares;
-- a curve may return shares and quote reserve or create the canonical P4LP vault;
-- a vault may return underlying assets or, in a hostile-token fallback, register protocol-held P4LP itself.
-
-Redemptions open only after active obligation counts reach zero and every frozen asset-registry entry has been processed.
-Permissionless pruning removes terminal members from active accounting while permanent provenance tombstones remain.
-
-## The opening snapshot
-
-Beginning Snapshotting burns treasury shares, fixes economic share supply and treasury-share treatment, and freezes the
-asset registry and liquidity mutation. Permissionless calls then process at most 32 frozen registry entries at a time.
-Only a completely processed registry may enter RedemptionsOpen. Late deposits do not change entitlement; excess goes to
-the explicit redemption-excess recipient whose semantics survive launch and controller replacement.
-
-Holder payout uses remaining snapshot balance and remaining entitlement shares, preserving the final indivisible remainder for the final claimant.
-
-## Burned shares and per-asset credits
-
-`redeem` burns shares into credits owned by the caller, then attempts every snapshot asset independently. A failed transfer, gas-bounded failure, or unmet minimum leaves that asset's credit outstanding. Other assets can still pay.
-
-The credit owner later calls `claimRedemptionAsset` for each unpaid asset. The recipient can differ, but it does not own the retry authority. A successful allocation cannot occur twice.
-
-This is why a lower post-transaction share balance is not proof that every asset paid. Follow [Wind down and redeem](../guides/wind-down-and-redeem) and verify each credit.
-
-## Hostile-token boundaries
-
-Exact-transfer checks prevent taxed or no-op transfers from silently corrupting balances. Bounded calls, quarantine, and
-the no-underlying-call P4LP fallback protect liveness, but they cannot make a malicious token valuable or transferable.
-A quarantined amount or P4LP claim is explicit evidence of unresolved asset quality, not a guaranteed cash payout.
+Redemption does not promise a particular asset value. It proves the holder's share of
+what the Boardroom actually held at the snapshot.

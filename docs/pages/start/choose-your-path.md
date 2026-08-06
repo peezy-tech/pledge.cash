@@ -1,59 +1,35 @@
 ---
 title: Choose Your Path
-description: Go directly to the pledge.cash workspace that matches what you need to do.
+description: Go to the lean pledge.cash workspace that matches your role and intended action.
 ---
 
 # Choose Your Path
 
-Start with the outcome you want. You can inspect public project state before connecting a wallet.
+## Evaluating or holding a project token
 
-> **Availability:** canonical protocol v1 is pending on both candidate
-> testnets, and every planned mainnet remains pending and unauthorized. The
-> workflows below describe a verified future deployment or
-> a matching local Anvil scenario; public protocol writes are currently
-> unavailable.
+Read [Evaluate and join a project](../guides/evaluate-and-join), then use
+[Explore](../../explore). Verify the chain, canonical Boardroom, share token, owner,
+treasury, obligations, and locker before swapping.
 
-## I want to inspect a project
+## Receiving a grant
 
-Open `Explore`, search by name, symbol, or Boardroom address, then select a project. Use `Overview` for the useful summary and `Transparency` for balances, commitments, history, and contract addresses.
+Read [Settle a token grant](../guides/receive-and-settle-grant), then use
+[Portfolio](../../portfolio). A grant is an escrow-backed ERC721 right; inspect its token,
+vesting, expiry, price, and current holder before approving payment or settling.
 
-[Learn how Explore works](../using/explore) · [Open Explore](../../explore)
+## Creating or operating a project
 
-## I want to buy, claim, or swap project tokens
+Read [Create and operate a project](../guides/create-and-operate-project), then open
+[Studio](../../studio). Decide the external owner first. Studio coordinates Boardroom,
+grant, locker, and lifecycle calls but cannot create authority the wallet does not have.
 
-Open the project’s `Participate` section. The app shows only the routes discovered for that Boardroom: non-transferable
-bond markets, Dutch auctions, fixed-price sales, bonding curves, airdrops, and Uniswap v4 markets. Review whether the route is
-live, then connect the wallet that will act.
+## Linking wallets to an identity
 
-[Learn about the project workspace](../using/project-workspace)
+Open [Wallet identity](../../settings/identity). This optional service affects sign-in
+and discovery only. Onchain ownership is always read from contracts.
 
-## I received a token grant
+## Integrating the protocol
 
-Connect the current holder wallet and open `Portfolio`. Choose `Open grant` to verify provenance, vesting, payment terms, settleable amount, and expiry before approving or settling.
-
-[Learn how Portfolio works](../using/portfolio) · [Review grant settlement](../using/grant-details)
-
-## I operate a project
-
-Connect the operator wallet and open `Studio`. Choose an existing Boardroom or start project setup. Studio reveals controls only after the canonical project, wallet network, lifecycle, and authority have been checked.
-
-[Learn how Studio works](../using/studio) · [Open Studio](../../studio)
-
-## I stake for governance power
-
-Open the project’s `Governance` section to inspect controller/proposer authority, generation, epochs, delay, veto and
-wind-down thresholds, and scheduled operations. Connect only when the app must compare current and previous-block stake
-or authorize an available action.
-
-External-controller launch and governance writes require a promoted,
-live-verified protocol-v1 artifact, a matching active facet-set hash, and a
-Boardroom that does not require migration. Both testnets remain pending and
-the four mainnet profiles remain pending and unauthorized.
-
-## I need raw diagnostics or alerts
-
-Use `Tools and Diagnostics` for deployment artifacts, wallet diagnostics, direct grants, and discovery controls. Use `Governance alerts` only when the optional Sentinel service is configured.
-
-[Learn about tools and alerts](../using/tools-and-alerts)
-
-Before any write, read [Use pledge.cash safely](use-safely).
+Start at [Developer documentation](../developers). Use checked ABIs, chain-specific
+artifacts, factory relationships, and transaction receipts rather than address lists copied
+from prose.

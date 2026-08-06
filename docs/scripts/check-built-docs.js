@@ -136,7 +136,7 @@ for (const url of mcpUrls) {
   if (!expectedUrls.has(url)) errors.push(`Generated MCP manifest has an unexpected page URL: ${String(url)}`);
 }
 
-const sourceMarkers = llmsFull.match(/<!-- Source: \/[^\n]+ -->/g) ?? [];
+const sourceMarkers = llmsFull.match(/<!-- Source: \/[^\n]* -->/g) ?? [];
 if (sourceMarkers.length !== expectedPages) {
   errors.push(`llms-full.txt has ${sourceMarkers.length.toString()} source markers, expected ${expectedPages.toString()}`);
 }
