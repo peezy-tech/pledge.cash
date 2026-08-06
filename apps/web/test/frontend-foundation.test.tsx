@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address } from "@pledge.cash/sdk";
+import type { Address, BoardroomState, LiquidityLockerState } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
   DesktopPrimaryNav,
@@ -9,6 +9,14 @@ import {
   StudioSectionNav,
 } from "../src/app/product-navigation";
 import { Web3Provider } from "../src/components/web3-provider";
+import { BoardroomWorkspace, type BoardroomWorkspaceForm } from "../src/features/boardrooms/boardroom-workspace";
+import {
+  defaultBoardroomGrantForm,
+  defaultLiquidityExitForm,
+  defaultLiquidityLockerForm,
+  defaultLiquidityPositionForm,
+  defaultWindDownForm,
+} from "../src/lib/forms";
 import {
   AppHeader,
   networkAvailabilityLabel,
@@ -35,28 +43,58 @@ describe("frontend foundation", () => {
     expect(html.match(/aria-current="page"/g)?.length).toBe(2);
   });
 
-  test("renders four canonical project sections with compact mobile labels", () => {
+  test("renders the three canonical project sections", () => {
     const html = renderToString(
-      <ProjectSectionNav active="governance" boardroom={boardroom} chainId={31337} />,
+      <ProjectSectionNav active="swap" boardroom={boardroom} chainId={31337} />,
     );
 
     expect(html).toContain('aria-label="Project sections"');
     expect(html).toContain(`/projects/31337/${boardroom}/overview`);
-    expect(html).toContain(`/projects/31337/${boardroom}/participate`);
-    expect(html).toContain(`/projects/31337/${boardroom}/governance`);
+    expect(html).toContain(`/projects/31337/${boardroom}/swap`);
     expect(html).toContain(`/projects/31337/${boardroom}/transparency`);
-    expect(html).toContain("Govern");
+    expect(html).toContain("Swap");
     expect(html).toContain("Transparency");
     expect(html.match(/aria-current="page"/g)?.length).toBe(1);
   });
 
   test("keeps every operator workflow reachable from Studio", () => {
-    const html = renderToString(<StudioSectionNav active="distributions" boardroom={boardroom} chainId={31337} />);
+    const html = renderToString(<StudioSectionNav active="liquidity" boardroom={boardroom} chainId={31337} />);
     expect(html).toContain('aria-label="Studio sections"');
     expect(html).toContain(`/studio/31337/${boardroom}/setup`);
-    expect(html).toContain(`/studio/31337/${boardroom}/governance`);
+    expect(html).toContain(`/studio/31337/${boardroom}/token`);
+    expect(html).toContain(`/studio/31337/${boardroom}/grants`);
+    expect(html).toContain(`/studio/31337/${boardroom}/liquidity`);
     expect(html).toContain(`/studio/31337/${boardroom}/close`);
     expect(html).toContain('aria-current="page"');
+  });
+
+  test("renders every retained project and studio workflow through the Boardroom workspace", () => {
+    const state = boardroomState();
+    const locker = lockerState();
+    const form = workspaceForm();
+    const common = {
+      account: state.owner,
+      boardroom: state,
+      canManage: true,
+      canWrite: true,
+      chainId: 31337,
+      form,
+      locker,
+      pendingAction: undefined,
+      setForm: () => undefined,
+      onAction: async () => undefined,
+    } as const;
+    const project = renderToString(<BoardroomWorkspace {...common} mode="project" projectSection="swap" swap={<p>Executable v4 swap</p>} />);
+    expect(project).toContain("Executable v4 swap");
+    expect(project).toContain(`/projects/31337/${boardroom}/transparency`);
+
+    const sections = ["setup", "token", "grants", "liquidity", "close"] as const;
+    const html = sections.map((section) => renderToString(<BoardroomWorkspace {...common} mode="studio" studioSection={section} />)).join("\n");
+    expect(html).toContain("Authority and custody");
+    expect(html).toContain("Share token");
+    expect(html).toContain("Treasury-funded grant");
+    expect(html).toContain("Position custody");
+    expect(html).toContain("Wind down and redeem");
   });
 
   test("only intercepts unmodified primary-button anchor navigation", () => {
@@ -148,6 +186,69 @@ describe("frontend foundation", () => {
   });
 
 });
+
+function boardroomState(): BoardroomState {
+  return {
+    address: boardroom,
+    blockNumber: 10n,
+    factory: "0x1000000000000000000000000000000000000001",
+    owner: "0x1000000000000000000000000000000000000002",
+    wrappedNative: "0x1000000000000000000000000000000000000003",
+    shareToken: "0x1000000000000000000000000000000000000004",
+    redemptionExcessRecipient: "0x1000000000000000000000000000000000000005",
+    status: 0,
+    launched: true,
+    windDownDelay: 100n,
+    windDownStartedAt: 0n,
+    totalShareSupply: 1_000n,
+    treasuryShareBalance: 10n,
+    redeemableAssetCount: 1n,
+    snapshotAssetCount: 0n,
+    snapshotCursor: 0n,
+    snapshotFrozen: false,
+    redemptionSupply: 0n,
+    redemptionSupplyFrozen: false,
+    activeObligationCount: 1n,
+    activeGrantCount: 0n,
+    activeLiquidityCount: 1n,
+    liquidityMutationAllowed: true,
+    lockedLiquidityExitAllowed: false,
+  };
+}
+
+function lockerState(): LiquidityLockerState {
+  return {
+    address: "0x2000000000000000000000000000000000000001",
+    boardroom,
+    shareToken: "0x1000000000000000000000000000000000000004",
+    quoteAsset: "0x2000000000000000000000000000000000000002",
+    currency0: "0x1000000000000000000000000000000000000004",
+    currency1: "0x2000000000000000000000000000000000000002",
+    protocolFeeRouter: "0x2000000000000000000000000000000000000003",
+    positionManager: "0x2000000000000000000000000000000000000004",
+    poolFee: 3000,
+    tickSpacing: 60,
+    tokenId: 7n,
+    pendingTokenId: 0n,
+    positionRegistered: true,
+    transferPrepared: false,
+    closed: false,
+    positionLiquidity: 500n,
+  };
+}
+
+function workspaceForm(): BoardroomWorkspaceForm {
+  return {
+    mintTo: "",
+    mintAmount: "1",
+    snapshotMaximum: "32",
+    grant: defaultBoardroomGrantForm(),
+    locker: defaultLiquidityLockerForm(),
+    position: defaultLiquidityPositionForm(),
+    exit: defaultLiquidityExitForm(),
+    windDown: defaultWindDownForm(),
+  };
+}
 
 function cssColor(css: string, token: string): string {
   const match = css.match(new RegExp(`${token}\\s*:\\s*(#[0-9a-fA-F]{6})`));

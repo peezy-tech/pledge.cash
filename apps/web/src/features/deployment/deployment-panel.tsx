@@ -79,7 +79,7 @@ function summarizeDeployment({
   localProtocolFeeRecipient: Address | undefined;
 }): DeploymentSummary {
   return {
-    protocolFeeRecipient: deployment?.pledgeV4ProtocolFeeRecipient ?? localProtocolFeeRecipient,
+    protocolFeeRecipient: deployment?.protocolFeeRouterRecipient ?? localProtocolFeeRecipient,
     liquidityState: describeLiquidityState(deployment),
     boardroomState: describeBoardroomState(deployment),
     factoryOwner: factorySnapshot.owner ?? deployment?.tokenGrantFactoryOwner,
@@ -124,8 +124,8 @@ function deploymentFacts({
       value: addressValue(summary.protocolFeeRecipient, "Not configured"),
     },
     {
-      label: "PledgeV4LiquidityFactory",
-      value: addressValue(deployment?.pledgeV4LiquidityFactory, "Not in artifact"),
+      label: "LiquidityLockerFactory",
+      value: addressValue(deployment?.liquidityLockerFactory, "Not in artifact"),
     },
     { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
     {
@@ -148,8 +148,8 @@ function describeBoardroomState(deployment: PledgeCashDeployment | undefined): s
 }
 
 function describeLiquidityState(deployment: PledgeCashDeployment | undefined): string {
-  if (deployment?.uniswapUniversalRouter && deployment.pledgeV4LiquidityFactory) {
-    return "Canonical pool and router ready";
+  if (deployment?.uniswapUniversalRouter && deployment.liquidityLockerFactory) {
+    return "Position locker and router ready";
   }
 
   if (deployment?.uniswapV4PoolManager) {

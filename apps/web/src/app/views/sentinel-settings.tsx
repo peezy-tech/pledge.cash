@@ -2,10 +2,9 @@ import { LogOut, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Panel, WorkspaceHeader } from "../../components/shell";
 import { Button } from "../../components/ui/button";
-import { AlertsIdentity } from "../../features/notifications/alerts-identity";
-import { alertsViewState } from "../../features/notifications/alerts-view-state";
-import { useSentinelSession } from "../../features/notifications/hooks";
+import { IdentityAccess } from "../../features/notifications/alerts-identity";
 import { WalletLink } from "../../features/notifications/wallet-link";
+import { useIdentitySession } from "../../hooks/use-identity-session";
 import { getSentinelBaseUrl, type SentinelAuthCapabilities } from "../../lib/sentinel";
 import type { WalletState } from "../../lib/types";
 
@@ -15,7 +14,7 @@ type SentinelSettingsViewProps = {
 
 export function SentinelSettingsView({ wallet }: SentinelSettingsViewProps): React.JSX.Element | null {
   const baseUrl = getSentinelBaseUrl();
-  const session = useSentinelSession();
+  const session = useIdentitySession();
   const [authCapabilities, setAuthCapabilities] = useState<SentinelAuthCapabilities>({
     socialProviders: [],
     walletlessSocialSignIn: false,
@@ -67,12 +66,11 @@ export function SentinelSettingsView({ wallet }: SentinelSettingsViewProps): Rea
       {session.loading && !session.me ? <Panel title="Wallet identity"><p className="m-0 p-4 text-sm text-zinc-500">Checking access</p></Panel> : null}
       {session.error ? <Panel title="Identity service"><p className="m-0 p-4 text-sm text-red-200">{session.error}</p></Panel> : null}
       {!session.loading && !session.error && session.client ? (
-        <AlertsIdentity
+        <IdentityAccess
           client={session.client}
           onChanged={session.refresh}
           session={session.me}
           socialProviders={authCapabilities.socialProviders}
-          state={alertsViewState(wallet, session.me)}
           wallet={wallet}
           walletlessSocialSignIn={authCapabilities.walletlessSocialSignIn}
         />

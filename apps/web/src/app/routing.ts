@@ -1,13 +1,9 @@
 import type { Address } from "@pledge.cash/sdk";
 import { isAddress } from "viem";
-import type { SentinelEnv } from "../lib/sentinel";
-
-export type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "notifications" | "advanced";
 
 export type PrimaryDestination = "explore" | "portfolio" | "studio";
-export type ProjectSection = "overview" | "participate" | "governance" | "transparency";
-export type StudioSection = "setup" | "token" | "grants" | "distributions" | "liquidity" | "governance" | "close";
-export type LegacyProjectSection = ProjectSection | StudioSection;
+export type ProjectSection = "overview" | "swap" | "transparency";
+export type StudioSection = "setup" | "token" | "grants" | "liquidity" | "close";
 
 export type CanonicalAppRoute =
   | { kind: "explore"; chainId?: number | undefined }
@@ -16,63 +12,14 @@ export type CanonicalAppRoute =
   | { kind: "project"; chainId: number; boardroom: Address; section: ProjectSection }
   | { kind: "studio-project"; chainId: number; boardroom: Address; section: StudioSection }
   | { kind: "grant"; chainId: number; grant: Address; returnBoardroom?: Address | undefined }
-  | { kind: "alerts" }
+  | { kind: "identity" }
   | { kind: "tools" };
 
-export type AppRoute =
-  | CanonicalAppRoute
-  | { kind: "legacy-project"; section: LegacyProjectSection; surface: "project" | "studio" }
-  | { kind: "not-found" };
+export type AppRoute = CanonicalAppRoute | { kind: "not-found" };
+export type RouteEnvironment = { readonly BASE_URL?: string | undefined };
 
-export type RouteEnvironment = SentinelEnv & { BASE_URL?: string | undefined };
-
-const DEFAULT_VIEW: AppView = "project";
-const PROJECT_SECTIONS = new Set<ProjectSection>(["overview", "participate", "governance", "transparency"]);
-const STUDIO_SECTIONS = new Set<StudioSection>([
-  "setup",
-  "token",
-  "grants",
-  "distributions",
-  "liquidity",
-  "governance",
-  "close",
-]);
-
-const VIEW_BY_PROJECT_SECTION: Record<ProjectSection, AppView> = {
-  governance: "activity",
-  overview: "project",
-  participate: "market",
-  transparency: "activity",
-};
-
-const LEGACY_ROUTE_BY_SEGMENT: Record<string, AppRoute> = {
-  activity: { kind: "legacy-project", section: "transparency", surface: "project" },
-  advanced: { kind: "tools" },
-  boardroom: { kind: "legacy-project", section: "overview", surface: "project" },
-  "boardroom-tools": { kind: "legacy-project", section: "setup", surface: "studio" },
-  direct: { kind: "tools" },
-  discovery: { kind: "tools" },
-  grant: { kind: "portfolio" },
-  grants: { kind: "portfolio" },
-  manage: { kind: "legacy-project", section: "setup", surface: "studio" },
-  market: { kind: "legacy-project", section: "participate", surface: "project" },
-  positions: { kind: "portfolio" },
-  project: { kind: "legacy-project", section: "overview", surface: "project" },
-  swap: { kind: "legacy-project", section: "participate", surface: "project" },
-  tools: { kind: "tools" },
-  wallet: { kind: "portfolio" },
-};
-
-const PATH_BY_VIEW: Record<AppView, string> = {
-  activity: "activity",
-  advanced: "tools",
-  grants: "grants",
-  manage: "manage",
-  market: "market",
-  notifications: "notifications",
-  project: "project",
-  wallet: "portfolio",
-};
+const PROJECT_SECTIONS = new Set<ProjectSection>(["overview", "swap", "transparency"]);
+const STUDIO_SECTIONS = new Set<StudioSection>(["setup", "token", "grants", "liquidity", "close"]);
 
 export function initialRoute(env: RouteEnvironment = import.meta.env): AppRoute {
   if (typeof window === "undefined") return { kind: "explore" };
@@ -100,18 +47,14 @@ export function routeFromPath(pathname: string, env: RouteEnvironment = import.m
   if (segments.length === 0) return { kind: "explore" };
 
   const [first, ...rest] = segments;
-  if (!first) return { kind: "explore" };
-
   if (first === "explore" && rest.length === 0) return { kind: "explore" };
   if (first === "portfolio" && rest.length === 0) return { kind: "portfolio" };
   if (first === "studio") return studioRoute(rest);
   if (first === "projects") return projectRoute(rest);
-  if (first === "settings" && rest.length === 1 && rest[0] === "alerts") return { kind: "alerts" };
-  if ((first === "notifications" || first === "sentinel") && rest.length === 0) return { kind: "alerts" };
   if (first === "grants" && rest.length === 2) return grantRoute(rest);
-  if (rest.length > 0) return { kind: "not-found" };
-
-  return LEGACY_ROUTE_BY_SEGMENT[first] ?? { kind: "not-found" };
+  if (first === "settings" && rest.length === 1 && rest[0] === "identity") return { kind: "identity" };
+  if (first === "tools" && rest.length === 0) return { kind: "tools" };
+  return { kind: "not-found" };
 }
 
 export function appRouteHref(route: CanonicalAppRoute, baseUrl = import.meta.env.BASE_URL || "/"): string {
@@ -159,79 +102,22 @@ export function studioRouteHref(
   return appRouteHref({ kind: "studio-project", chainId, boardroom, section }, baseUrl);
 }
 
-export function governanceWatchHref(
-  chainId: number,
-  boardroom: Address,
-  returnHref: string,
-  baseUrl = import.meta.env.BASE_URL || "/",
-): string {
-  const href = appRouteHref({ kind: "alerts" }, baseUrl);
-  const query = new URLSearchParams({
-    boardroom: boardroom.toLowerCase(),
-    chain: chainId.toString(),
-    return: returnHref,
-  });
-  return `${href}?${query.toString()}`;
-}
-
 export function primaryDestination(route: AppRoute): PrimaryDestination | undefined {
   switch (route.kind) {
     case "explore":
     case "project":
-    case "legacy-project":
-      return route.kind === "legacy-project" && route.surface === "studio" ? "studio" : "explore";
+      return "explore";
     case "portfolio":
     case "grant":
       return "portfolio";
     case "studio":
     case "studio-project":
       return "studio";
-    default:
+    case "identity":
+    case "tools":
+    case "not-found":
       return undefined;
   }
-}
-
-export function initialView(): AppView {
-  if (typeof window === "undefined") return DEFAULT_VIEW;
-  return viewFromPath(window.location.pathname);
-}
-
-/** Compatibility adapter for the legacy workspace coordinator. */
-export function viewFromPath(pathname: string, env: SentinelEnv = import.meta.env): AppView {
-  const route = routeFromPath(pathname, env);
-  switch (route.kind) {
-    case "portfolio":
-    case "grant":
-      return "wallet";
-    case "studio":
-    case "studio-project":
-      return "manage";
-    case "project":
-      return VIEW_BY_PROJECT_SECTION[route.section];
-    case "legacy-project":
-      if (route.surface === "studio") return "manage";
-      return PROJECT_SECTIONS.has(route.section as ProjectSection)
-        ? VIEW_BY_PROJECT_SECTION[route.section as ProjectSection]
-        : "project";
-    case "alerts":
-      return "notifications";
-    case "tools":
-      return "advanced";
-    case "explore":
-    case "not-found":
-      return DEFAULT_VIEW;
-  }
-}
-
-/** Compatibility adapter for the legacy workspace coordinator. */
-export function viewHref(view: AppView): string {
-  const base = normalizeBaseUrl(import.meta.env.BASE_URL || "/");
-  const search = typeof window === "undefined" ? "" : window.location.search;
-  return `${base}${PATH_BY_VIEW[view]}${search}`;
-}
-
-export function viewUsesProjectDashboard(view: AppView): boolean {
-  return view === "project" || view === "manage" || view === "activity";
 }
 
 function projectRoute(segments: string[]): AppRoute {
@@ -330,8 +216,8 @@ function routePath(route: CanonicalAppRoute): string {
       return `studio/${route.chainId.toString()}/${route.boardroom.toLowerCase()}/${route.section}`;
     case "grant":
       return `grants/${route.chainId.toString()}/${route.grant.toLowerCase()}`;
-    case "alerts":
-      return "settings/alerts";
+    case "identity":
+      return "settings/identity";
     case "tools":
       return "tools";
   }

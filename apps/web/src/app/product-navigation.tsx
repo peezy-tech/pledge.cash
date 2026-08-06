@@ -39,8 +39,7 @@ const PRIMARY_NAVIGATION_ITEMS: PrimaryNavigationItem[] = [
 
 const PROJECT_SECTIONS: { section: ProjectSection; label: string }[] = [
   { section: "overview", label: "Overview" },
-  { section: "participate", label: "Participate" },
-  { section: "governance", label: "Governance" },
+  { section: "swap", label: "Swap" },
   { section: "transparency", label: "Transparency" },
 ];
 
@@ -48,9 +47,7 @@ const STUDIO_SECTIONS: { section: StudioSection; label: string }[] = [
   { section: "setup", label: "Setup" },
   { section: "token", label: "Token" },
   { section: "grants", label: "Grants" },
-  { section: "distributions", label: "Distributions" },
   { section: "liquidity", label: "Liquidity" },
-  { section: "governance", label: "Governance" },
   { section: "close", label: "Close" },
 ];
 
@@ -126,7 +123,7 @@ export function ProjectSectionNav({
     <nav
       aria-label="Project sections"
       className={cn(
-        "grid grid-cols-2 border-b border-[var(--pc-border)] sm:grid-cols-4 md:flex md:gap-6",
+        "grid grid-cols-3 border-b border-[var(--pc-border)] md:flex md:gap-6",
         className,
       )}
     >

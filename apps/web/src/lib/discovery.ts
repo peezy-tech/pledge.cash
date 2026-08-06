@@ -9,7 +9,7 @@ const WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS = 600n;
 const DEPLOYMENT_DISCOVERY_FIELDS = [
   "boardroomFactory",
   "tokenGrantFactory",
-  "pledgeV4LiquidityFactory",
+  "liquidityLockerFactory",
 ] as const;
 
 export type DiscoveryScanRange = {
@@ -29,7 +29,6 @@ export function emptyDiscoverySnapshot(): DiscoverySnapshot {
     errors: [],
     boardroomsByAddress: {},
     grantsByAddress: {},
-    distributionsByAddress: {},
     lockersByAddress: {},
   };
 }

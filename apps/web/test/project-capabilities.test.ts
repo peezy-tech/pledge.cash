@@ -8,184 +8,96 @@ import {
 } from "../src/features/capabilities/project-capabilities";
 
 const owner = "0x1000000000000000000000000000000000000000" as Address;
-const proposer = "0x2000000000000000000000000000000000000000" as Address;
-const holder = "0x3000000000000000000000000000000000000000" as Address;
+const holder = "0x2000000000000000000000000000000000000000" as Address;
 
 function context(overrides: Partial<ProjectCapabilityContext> = {}): ProjectCapabilityContext {
   return {
     account: owner,
     routeChainId: 31337,
     walletChainId: 31337,
-    project: {
-      owner,
-      proposer,
-      launched: false,
-      status: "active",
-      launchReady: true,
-      windDownBlockers: 0,
-    },
+    project: { owner, status: "active", windDownBlockers: 0 },
+    wallet: { shareBalance: 0n },
     ...overrides,
   };
 }
 
-describe("project capability resolver", () => {
-  test("turns an available public opportunity into connect, switch, or enabled states", () => {
-    const opportunity = {
-      "participate.dutchAuction.buy": { available: true },
-      "participate.fixedSale.buy": { available: true },
+describe("lean project capability resolver", () => {
+  test("turns public grant and swap opportunities into connect, switch, and enabled states", () => {
+    const opportunities = {
+      "swap.execute": { available: true },
+      "grant.settle": { available: true },
+      "grant.halt": { available: false, reason: "Grant is closed." },
     } as const;
+    const anonymous = resolveProjectCapabilities(context({ account: undefined, walletChainId: undefined, opportunities }));
+    const wrongChain = resolveProjectCapabilities(context({ walletChainId: 1, opportunities }));
+    const ready = resolveProjectCapabilities(context({ opportunities }));
 
-    const anonymous = resolveProjectCapabilities(context({ account: undefined, walletChainId: undefined, opportunities: opportunity }));
-    expect(anonymous["participate.fixedSale.buy"]).toEqual({ status: "connect", reason: "Connect a wallet to continue." });
-
-    const wrongChain = resolveProjectCapabilities(context({ walletChainId: 1, opportunities: opportunity }));
-    expect(wrongChain["participate.fixedSale.buy"].status).toBe("switch");
-    expect(wrongChain["participate.fixedSale.buy"].reason).toContain("31337");
-
-    const ready = resolveProjectCapabilities(context({ opportunities: opportunity }));
-    expect(capabilityAllowsAction(ready["participate.fixedSale.buy"])).toBe(true);
-    expect(capabilityAllowsAction(ready["participate.dutchAuction.buy"])).toBe(true);
-    expect(ready["participate.curve.buy"].status).toBe("hidden");
+    expect(anonymous["swap.execute"].status).toBe("connect");
+    expect(wrongChain["grant.settle"].status).toBe("switch");
+    expect(ready["swap.execute"].status).toBe("enabled");
+    expect(ready["grant.halt"]).toEqual({ status: "blocked", reason: "Grant is closed." });
   });
 
-  test("keeps a relevant but unavailable opportunity visible with its reason", () => {
-    const capabilities = resolveProjectCapabilities(context({
-      opportunities: {
-        "participate.curve.buy": { available: false, reason: "The curve has reached its graduation target." },
-      },
-    }));
+  test("gives active Boardroom mutation only to the flat owner", () => {
+    const ownerCapabilities = resolveProjectCapabilities(context());
+    const holderCapabilities = resolveProjectCapabilities(context({ account: holder }));
 
-    expect(capabilities["participate.curve.buy"]).toEqual({
+    expect(ownerCapabilities["studio.mint"].status).toBe("enabled");
+    expect(ownerCapabilities["studio.createGrant"].status).toBe("enabled");
+    expect(ownerCapabilities["studio.manageLiquidity"].status).toBe("enabled");
+    expect(holderCapabilities["studio.mint"]).toEqual({
       status: "blocked",
-      reason: "The curve has reached its graduation target.",
+      reason: "Only the Boardroom owner can perform this action.",
     });
   });
 
-  test("does not enable a surfaced opportunity before project state loads", () => {
-    const capabilities = resolveProjectCapabilities(context({
-      project: undefined,
-      opportunities: { "participate.fixedSale.buy": { available: true } },
+  test("gates wind-down snapshotting on obligations, delay, and cursor completion", () => {
+    const blocked = resolveProjectCapabilities(context({
+      project: { owner, status: "winding-down", windDownBlockers: 1, windDownMatured: true },
     }));
-    expect(capabilities["participate.fixedSale.buy"]).toEqual({
-      status: "blocked",
-      reason: "Project state is still loading.",
-    });
+    const waiting = resolveProjectCapabilities(context({
+      project: { owner, status: "winding-down", windDownBlockers: 0, windDownMatured: false },
+    }));
+    const ready = resolveProjectCapabilities(context({
+      project: { owner, status: "winding-down", windDownBlockers: 0, windDownMatured: true },
+    }));
+    const snapshotting = resolveProjectCapabilities(context({
+      project: { owner, status: "snapshotting", snapshotComplete: false },
+    }));
+    const complete = resolveProjectCapabilities(context({
+      project: { owner, status: "snapshotting", snapshotComplete: true },
+    }));
+
+    expect(blocked["windDown.beginSnapshot"].reason).toContain("Close every grant and liquidity obligation");
+    expect(waiting["windDown.beginSnapshot"].reason).toContain("delay has not elapsed");
+    expect(ready["windDown.beginSnapshot"].status).toBe("enabled");
+    expect(snapshotting["windDown.processSnapshot"].status).toBe("enabled");
+    expect(complete["windDown.openRedemptions"].status).toBe("enabled");
   });
 
-  test("gives pre-launch operations to the owner and respects launch readiness", () => {
-    const ready = resolveProjectCapabilities(context());
-    expect(ready["studio.mint"].status).toBe("enabled");
-    expect(ready["governance.launch"].status).toBe("enabled");
-    expect(ready["governance.schedule"].status).toBe("hidden");
-
-    const blockedLaunch = resolveProjectCapabilities(context({
-      project: {
-        owner,
-        proposer,
-        launched: false,
-        status: "active",
-        launchReady: false,
-        launchBlockedReason: "Distribute the minimum circulating supply first.",
-      },
-    }));
-    expect(blockedLaunch["governance.launch"]).toEqual({
-      status: "blocked",
-      reason: "Distribute the minimum circulating supply first.",
-    });
-  });
-
-  test("moves post-launch scheduling to the controller proposer", () => {
-    const launchedProject = {
-      owner,
-      proposer,
-      launched: true,
-      status: "active" as const,
-      windDownBlockers: 0,
-    };
-    const ownerCapabilities = resolveProjectCapabilities(context({ project: launchedProject }));
-    expect(ownerCapabilities["studio.createGrant"].status).toBe("blocked");
-    expect(ownerCapabilities["studio.createGrant"].reason).toContain("proposer");
-
-    const proposerCapabilities = resolveProjectCapabilities(context({ account: proposer, project: launchedProject }));
-    expect(proposerCapabilities["studio.createGrant"].status).toBe("enabled");
-    expect(proposerCapabilities["governance.schedule"].status).toBe("enabled");
-    expect(proposerCapabilities["governance.launch"].status).toBe("hidden");
-  });
-
-  test("separates staker veto authority from permissionless ready execution", () => {
-    const project = { owner, proposer, launched: true, status: "active" as const };
-    const eligible = resolveProjectCapabilities(context({
-      account: holder,
-      project,
-      wallet: { vetoEligible: true },
-      governance: { scheduledOperationCount: 1, readyActionCount: 1 },
-    }));
-    expect(eligible["governance.veto"].status).toBe("enabled");
-    expect(eligible["governance.executeReady"].status).toBe("enabled");
-
-    const ineligible = resolveProjectCapabilities(context({
-      account: holder,
-      project,
-      wallet: { vetoEligible: false },
-      governance: { scheduledOperationCount: 1, readyActionCount: 1 },
-    }));
-    expect(ineligible["governance.veto"].status).toBe("blocked");
-    expect(ineligible["governance.executeReady"].status).toBe("enabled");
-  });
-
-  test("allows authorized wind-down before obligations are cleaned up", () => {
-    const ownerCanStart = resolveProjectCapabilities(context({
-      project: { owner, proposer, launched: false, status: "active", windDownBlockers: 2 },
-    }));
-    expect(ownerCanStart["windDown.start"].status).toBe("enabled");
-
-    const holderCanStart = resolveProjectCapabilities(context({
-      account: holder,
-      project: { owner, proposer, launched: true, status: "active", windDownBlockers: 0 },
-      wallet: { windDownEligible: true },
-    }));
-    expect(holderCanStart["windDown.start"].status).toBe("enabled");
-  });
-
-  test("freezes launched asset registration and exposes bounded Snapshotting progress", () => {
-    const ineligibleHolder = resolveProjectCapabilities(context({
-      account: holder,
-      project: { owner, proposer, launched: true, status: "winding-down", windDownBlockers: 0 },
-      wallet: { windDownEligible: false },
-    }));
-
-    expect(ineligibleHolder["windDown.registerAsset"].status).toBe("hidden");
-    expect(ineligibleHolder["windDown.beginSnapshot"].status).toBe("enabled");
-    expect(ineligibleHolder["windDown.openRedemptions"].status).toBe("hidden");
-
-    const anonymous = resolveProjectCapabilities(context({
-      account: undefined,
-      walletChainId: undefined,
-      project: { owner, proposer, launched: true, status: "snapshotting", snapshotComplete: true },
-    }));
-    expect(anonymous["windDown.openRedemptions"].status).toBe("connect");
-  });
-
-  test("allows redemption only with an open window and a nonzero share balance", () => {
-    const noShares = resolveProjectCapabilities(context({
-      account: holder,
-      project: { owner, proposer, launched: true, status: "redemptions-open" },
+  test("allows redemption only with an open window and nonzero share balance", () => {
+    const empty = resolveProjectCapabilities(context({
+      project: { owner, status: "redemptions-open" },
       wallet: { shareBalance: 0n },
     }));
-    expect(noShares["redemption.redeem"].status).toBe("blocked");
-
-    const hasShares = resolveProjectCapabilities(context({
+    const holderReady = resolveProjectCapabilities(context({
       account: holder,
-      project: { owner, proposer, launched: true, status: "redemptions-open" },
-      wallet: { shareBalance: 1n },
+      project: { owner, status: "redemptions-open" },
+      wallet: { shareBalance: 5n },
     }));
-    expect(hasShares["redemption.redeem"].status).toBe("enabled");
+
+    expect(empty["redemption.redeem"].status).toBe("blocked");
+    expect(holderReady["redemption.redeem"].status).toBe("enabled");
   });
 
   test("exposes wallet remediation states to action components", () => {
-    const connect = resolveProjectCapabilities(context({ account: undefined, walletChainId: undefined }))["governance.launch"];
-    const switchNetwork = resolveProjectCapabilities(context({ walletChainId: 1 }))["governance.launch"];
+    const connect = resolveProjectCapabilities(context({ account: undefined, walletChainId: undefined }))["studio.mint"];
+    const switchChain = resolveProjectCapabilities(context({ walletChainId: 1 }))["studio.mint"];
+    const enabled = resolveProjectCapabilities(context())["studio.mint"];
+
     expect(capabilityNeedsWalletAction(connect)).toBe(true);
-    expect(capabilityNeedsWalletAction(switchNetwork)).toBe(true);
+    expect(capabilityNeedsWalletAction(switchChain)).toBe(true);
+    expect(capabilityNeedsWalletAction(enabled)).toBe(false);
+    expect(capabilityAllowsAction(enabled)).toBe(true);
   });
 });
