@@ -9,17 +9,6 @@ type Artifact = {
   abi?: unknown;
 };
 
-type AbiParameter = {
-  type?: unknown;
-  components?: unknown;
-};
-
-type AbiItem = {
-  type?: unknown;
-  name?: unknown;
-  inputs?: unknown;
-};
-
 type DeploymentFieldKind = "address" | "bigint" | "boolean" | "number" | "string";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -27,80 +16,17 @@ const repoRoot = resolve(scriptDir, "../../..");
 const outFile = join(repoRoot, "packages/sdk/src/generated.ts");
 
 const contracts = [
-  [
-    "Boardroom",
-    "packages/contracts/out/IBoardroom.sol/IBoardroom.json",
-    "boardroomAbi",
-  ],
-  [
-    "BoardroomController",
-    "packages/contracts/out/BoardroomController.sol/BoardroomController.json",
-    "boardroomControllerAbi",
-  ],
-  [
-    "BoardroomControllerFactory",
-    "packages/contracts/out/BoardroomControllerFactory.sol/BoardroomControllerFactory.json",
-    "boardroomControllerFactoryAbi",
-  ],
-  [
-    "BoardroomFactory",
-    "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json",
-    "boardroomFactoryAbi",
-  ],
-  [
-    "BoardroomPolicyRegistry",
-    "packages/contracts/out/BoardroomPolicyRegistry.sol/BoardroomPolicyRegistry.json",
-    "boardroomPolicyRegistryAbi",
-  ],
-  [
-    "BoardroomToken",
-    "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json",
-    "boardroomTokenAbi",
-  ],
+  ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
+  ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
+  ["BoardroomToken", "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json", "boardroomTokenAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
-  ["IBoardroomCallPolicy", "packages/contracts/out/IBoardroomCallPolicy.sol/IBoardroomCallPolicy.json", "boardroomCallPolicyAbi"],
-  [
-    "IBoardroomPolicyRegistry",
-    "packages/contracts/out/IBoardroomPolicyRegistry.sol/IBoardroomPolicyRegistry.json",
-    "boardroomPolicyRegistryInterfaceAbi",
-  ],
-  [
-    "PledgeV4LiquidityFactory",
-    "packages/contracts/out/PledgeV4LiquidityFactory.sol/PledgeV4LiquidityFactory.json",
-    "pledgeV4LiquidityFactoryAbi",
-  ],
-  [
-    "PledgeV4LiquidityVault",
-    "packages/contracts/out/PledgeV4LiquidityVault.sol/PledgeV4LiquidityVault.json",
-    "pledgeV4LiquidityVaultAbi",
-  ],
-  ["PledgeV4Hook", "packages/contracts/out/PledgeV4Hook.sol/PledgeV4Hook.json", "pledgeV4HookAbi"],
+  ["LiquidityLocker", "packages/contracts/out/LiquidityLocker.sol/LiquidityLocker.json", "liquidityLockerAbi"],
+  ["LiquidityLockerFactory", "packages/contracts/out/LiquidityLockerFactory.sol/LiquidityLockerFactory.json", "liquidityLockerFactoryAbi"],
+  ["PositionManager", "packages/contracts/out/IPositionManager.sol/IPositionManager.json", "positionManagerAbi"],
   ["ProtocolFeeRouter", "packages/contracts/out/ProtocolFeeRouter.sol/ProtocolFeeRouter.json", "protocolFeeRouterAbi"],
+  ["PledgeCashDeterministicDeployer", "packages/contracts/out/PledgeCashDeterministicDeployer.sol/PledgeCashDeterministicDeployer.json", "pledgeCashDeterministicDeployerAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
-  [
-    "TokenGrantFactory",
-    "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json",
-    "tokenGrantFactoryAbi",
-  ],
-  [
-    "BoardroomKernel",
-    "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
-    "boardroomKernelAbi",
-  ],
-  [
-    "ProtocolFacetRegistry",
-    "packages/contracts/out/ProtocolFacetRegistry.sol/ProtocolFacetRegistry.json",
-    "protocolFacetRegistryAbi",
-  ],
-] as const;
-
-const boardroomDiamondSupplementArtifacts = [
-  "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
-  "packages/contracts/out/BoardroomAuthorityFacet.sol/BoardroomAuthorityFacet.json",
-  "packages/contracts/out/BoardroomExecutionFacet.sol/BoardroomExecutionFacet.json",
-  "packages/contracts/out/BoardroomMarketFacet.sol/BoardroomMarketFacet.json",
-  "packages/contracts/out/BoardroomRedemptionFacet.sol/BoardroomRedemptionFacet.json",
-  "packages/contracts/out/BoardroomViewFacet.sol/BoardroomViewFacet.json",
+  ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
 ] as const;
 
 const deploymentFields = [
@@ -117,26 +43,10 @@ const deploymentFields = [
   ["deterministicDeployerOwner", "address"],
   ["create2Factory", "address"],
   ["boardroomFactory", "address"],
-  ["boardroomControllerFactory", "address"],
-  ["boardroomControllerLogic", "address"],
-  ["boardroomGovernanceLogic", "address"],
-  ["boardroomMarketLogic", "address"],
-  ["boardroomRedemptionPayout", "address"],
-  ["protocolFacetRegistry", "address"],
-  ["boardroomKernel", "address"],
-  ["authorityFacet", "address"],
-  ["executionFacet", "address"],
-  ["marketFacet", "address"],
-  ["redemptionFacet", "address"],
-  ["viewFacet", "address"],
-  ["activeFacetSetHash", "string"],
-  ["activeRelease", "bigint"],
-  ["requiredStorageVersion", "bigint"],
-  ["requiredStorageLayoutHash", "string"],
+  ["boardroomImplementation", "address"],
   ["manifestHash", "string"],
-  ["kernelSelectorSetHash", "string"],
-  ["selectorCount", "bigint"],
-  ["boardroomPolicyRegistry", "address"],
+  ["boardroomArchitectureCodeHash", "string"],
+  ["moduleArchitectureCodeHash", "string"],
   ["protocolFeeRouter", "address"],
   ["uniswapV4PoolManager", "address"],
   ["uniswapUniversalRouter", "address"],
@@ -144,19 +54,12 @@ const deploymentFields = [
   ["uniswapV4StateView", "address"],
   ["uniswapV4PositionManager", "address"],
   ["permit2", "address"],
-  ["pledgeV4LiquidityFactory", "address"],
-  ["pledgeV4LiquidityVaultImplementation", "address"],
-  ["pledgeV4Hook", "address"],
-  ["pledgeV4HookSalt", "string"],
-  ["pledgeV4ProtocolFeeRecipient", "address"],
+  ["liquidityLockerFactory", "address"],
   ["tokenGrantFactory", "address"],
   ["tokenGrantLogic", "address"],
   ["wrappedNative", "address"],
   ["deployer", "address"],
-  ["protocolFacetRegistryOwner", "address"],
-  ["boardroomPolicyRegistryOwner", "address"],
   ["tokenGrantFactoryOwner", "address"],
-  ["protocolGovernance", "address"],
   ["protocolTreasury", "address"],
   ["protocolFeeRouterOwner", "address"],
   ["protocolFeeRouterRecipient", "address"],
@@ -165,26 +68,13 @@ const deploymentFields = [
   ["deploymentBlock", "bigint"],
   ["deploymentTimestamp", "bigint"],
   ["deterministicDeployerCodeHash", "string"],
-  ["boardroomPolicyRegistryCodeHash", "string"],
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],
-  ["boardroomControllerFactoryCodeHash", "string"],
-  ["boardroomControllerLogicCodeHash", "string"],
-  ["boardroomGovernanceLogicCodeHash", "string"],
-  ["boardroomMarketLogicCodeHash", "string"],
-  ["boardroomRedemptionPayoutCodeHash", "string"],
-  ["protocolFacetRegistryCodeHash", "string"],
-  ["boardroomKernelCodeHash", "string"],
-  ["authorityFacetCodeHash", "string"],
-  ["executionFacetCodeHash", "string"],
-  ["marketFacetCodeHash", "string"],
-  ["redemptionFacetCodeHash", "string"],
-  ["viewFacetCodeHash", "string"],
+  ["boardroomImplementationCodeHash", "string"],
   ["tokenGrantFactoryCodeHash", "string"],
   ["tokenGrantLogicCodeHash", "string"],
-  ["pledgeV4LiquidityFactoryCodeHash", "string"],
-  ["pledgeV4LiquidityVaultImplementationCodeHash", "string"],
-  ["pledgeV4HookCodeHash", "string"],
+  ["liquidityLockerFactoryCodeHash", "string"],
+  ["liquidityLockerCodeHash", "string"],
   ["uniswapV4PoolManagerCodeHash", "string"],
   ["uniswapUniversalRouterCodeHash", "string"],
   ["uniswapV4QuoterCodeHash", "string"],
@@ -306,46 +196,6 @@ async function readAbi(path: string): Promise<unknown[]> {
   return artifact.abi;
 }
 
-function canonicalAbiParameterType(parameter: unknown): string {
-  if (typeof parameter !== "object" || parameter === null) return "";
-  const typed = parameter as AbiParameter;
-  if (typeof typed.type !== "string") return "";
-  if (!typed.type.startsWith("tuple")) return typed.type;
-  const suffix = typed.type.slice("tuple".length);
-  const components = Array.isArray(typed.components)
-    ? typed.components.map(canonicalAbiParameterType).join(",")
-    : "";
-  return `(${components})${suffix}`;
-}
-
-function abiItemKey(item: unknown): string {
-  if (typeof item !== "object" || item === null) return JSON.stringify(item);
-  const typed = item as AbiItem;
-  const inputs = Array.isArray(typed.inputs) ? typed.inputs.map(canonicalAbiParameterType).join(",") : "";
-  return `${String(typed.type)}:${String(typed.name)}(${inputs})`;
-}
-
-async function readBoardroomDiamondAbi(path: string): Promise<unknown[]> {
-  const aggregate = await readAbi(path);
-  const result = [...aggregate];
-  const seen = new Set(result.map(abiItemKey));
-
-  for (const supplementPath of boardroomDiamondSupplementArtifacts) {
-    const supplement = await readAbi(supplementPath);
-    for (const item of supplement) {
-      if (typeof item !== "object" || item === null) continue;
-      const type = (item as AbiItem).type;
-      if (type !== "event" && type !== "error") continue;
-      const key = abiItemKey(item);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(item);
-    }
-  }
-
-  return result;
-}
-
 async function deploymentEntries(): Promise<string[]> {
   const deploymentDir = join(repoRoot, "packages/contracts/deployments");
   const files = await readdir(deploymentDir).catch(() => []);
@@ -366,9 +216,7 @@ const abiExports: string[] = [];
 const abiMapEntries: string[] = [];
 
 for (const [contractName, artifactPath, exportName] of contracts) {
-  const abi = exportName === "boardroomAbi"
-    ? await readBoardroomDiamondAbi(artifactPath)
-    : await readAbi(artifactPath);
+  const abi = await readAbi(artifactPath);
   abiExports.push(`export const ${exportName} = ${literal(abi)} as const;`);
   abiMapEntries.push(`${contractName}: ${exportName}`);
 }

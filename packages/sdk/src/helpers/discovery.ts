@@ -1,27 +1,27 @@
 import { getAbiItem, isHex, type Address, type Hex } from "viem";
 import {
   boardroomFactoryAbi,
-  pledgeV4LiquidityFactoryAbi,
+  liquidityLockerFactoryAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import { pledgeCashErrorMessage } from "./errors";
 import {
   readBoardroomState,
   readGrantState,
-  readProtocolLiquidityVaultState,
+  readLiquidityLockerState,
 } from "./readers";
 import type {
   BoardroomState,
   DiscoveredBoardroom,
   DiscoveredGrant,
-  DiscoveredProtocolLiquidity,
+  DiscoveredLiquidityLocker,
   DiscoveryError,
   DiscoveryRange,
   DiscoveryResult,
   EnrichedDiscovery,
   GrantDiscoveryRange,
   GrantState,
-  ProtocolLiquidityVaultState,
+  LiquidityLockerState,
   PledgeCashBlockReadClient,
   PledgeCashLogClient,
   PledgeCashReadClient,
@@ -43,7 +43,10 @@ const boardroomCreatedEvent = getAbiItem({
   abi: boardroomFactoryAbi,
   name: "BoardroomCreated",
 });
-const protocolLiquidityCreatedEvent = getAbiItem({ abi: pledgeV4LiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
+const liquidityLockerCreatedEvent = getAbiItem({
+  abi: liquidityLockerFactoryAbi,
+  name: "LiquidityLockerCreated",
+});
 
 export async function queryGrantHistory(
   client: PledgeCashLogClient,
@@ -156,20 +159,17 @@ export async function discoverBoardrooms(
     const boardroom = addressArg(args, "boardroom");
     const owner = addressArg(args, "owner");
     const shareToken = addressArg(args, "shareToken");
-    const facetSetHash = hexArg(args, "facetSetHash");
-    if (!boardroom || !owner || !shareToken || !facetSetHash) continue;
+    if (!boardroom || !owner || !shareToken) continue;
     if (input.owner && !sameAddress(owner, input.owner)) continue;
 
     boardrooms.set(addressKey(boardroom), {
       boardroom,
       owner,
-      policyRegistry: addressArg(args, "policyRegistry") ?? ZERO_ADDRESS,
       wrappedNative: addressArg(args, "wrappedNative") ?? ZERO_ADDRESS,
       shareToken,
       name: stringArg(args, "name") ?? "",
       symbol: stringArg(args, "symbol") ?? "",
       salt: hexArg(args, "salt") ?? "0x",
-      facetSetHash,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -182,33 +182,28 @@ export async function discoverBoardrooms(
   );
 }
 
-export async function discoverBoardroomProtocolLiquidity(
+export async function discoverLiquidityLockers(
   client: PledgeCashLogClient,
   input: DiscoveryRange & { factory: Address; boardroom?: Address },
-): Promise<DiscoveryResult<DiscoveredProtocolLiquidity>> {
-  const result = await getLogs(client, input, input.factory, protocolLiquidityCreatedEvent);
-  const vaults = new Map<string, DiscoveredProtocolLiquidity>();
+): Promise<DiscoveryResult<DiscoveredLiquidityLocker>> {
+  const result = await getLogs(client, input, input.factory, liquidityLockerCreatedEvent);
+  const lockers = new Map<string, DiscoveredLiquidityLocker>();
 
   for (const log of [...result.logs].sort(compareLogs)) {
     const args = log.args ?? {};
-    const vault = addressArg(args, "vault");
+    const locker = addressArg(args, "locker");
     const boardroom = addressArg(args, "boardroom");
-    const poolId = hexArg(args, "poolId");
-    if (!vault || !boardroom || !poolId) continue;
+    if (!locker || !boardroom) continue;
     if (input.boardroom && !sameAddress(boardroom, input.boardroom)) continue;
 
-    vaults.set(addressKey(vault), {
-      vault,
+    lockers.set(addressKey(locker), {
+      locker,
       boardroom,
       factory: input.factory,
-      poolId,
       quoteAsset: addressArg(args, "quoteAsset") ?? ZERO_ADDRESS,
-      amountA: bigintArg(args, "amountA") ?? 0n,
-      amountB: bigintArg(args, "amountB") ?? 0n,
-      liquidity: bigintArg(args, "liquidity") ?? 0n,
-      sqrtPriceX96: bigintArg(args, "sqrtPriceX96") ?? 0n,
+      poolFee: numberArg(args, "poolFee") ?? 0,
+      tickSpacing: numberArg(args, "tickSpacing") ?? 0,
       salt: hexArg(args, "salt") ?? "0x",
-      curve: addressArg(args, "curve") ?? ZERO_ADDRESS,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -216,7 +211,7 @@ export async function discoverBoardroomProtocolLiquidity(
 
   return discoveryResult(
     input,
-    [...vaults.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
+    [...lockers.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
     [result],
   );
 }
@@ -251,16 +246,16 @@ export async function enrichDiscoveredGrants(
   );
 }
 
-export async function enrichDiscoveredProtocolLiquidity(
+export async function enrichDiscoveredLiquidityLockers(
   client: PledgeCashReadClient,
-  vaults: readonly DiscoveredProtocolLiquidity[],
-): Promise<EnrichedDiscovery<DiscoveredProtocolLiquidity, ProtocolLiquidityVaultState>[]> {
+  lockers: readonly DiscoveredLiquidityLocker[],
+): Promise<EnrichedDiscovery<DiscoveredLiquidityLocker, LiquidityLockerState>[]> {
   return await Promise.all(
-    vaults.map(async (vault) => {
+    lockers.map(async (locker) => {
       try {
-        return { ...vault, state: await readProtocolLiquidityVaultState(client, vault.vault), stale: false };
+        return { ...locker, state: await readLiquidityLockerState(client, locker.locker), stale: false };
       } catch (error) {
-        return { ...vault, stale: true, error: error instanceof Error ? error.message : String(error) };
+        return { ...locker, stale: true, error: error instanceof Error ? error.message : String(error) };
       }
     }),
   );
@@ -519,6 +514,13 @@ function bigintArg(args: Record<string, unknown>, name: string): bigint | undefi
   const value = args[name];
   if (typeof value === "bigint") return value;
   if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  return undefined;
+}
+
+function numberArg(args: Record<string, unknown>, name: string): number | undefined {
+  const value = args[name];
+  if (typeof value === "number" && Number.isSafeInteger(value)) return value;
+  if (typeof value === "bigint" && value <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(value);
   return undefined;
 }
 

@@ -2,92 +2,51 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import {
   boardroomAbi,
-  boardroomControllerAbi,
-  boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
-  boardroomTokenAbi,
+  liquidityLockerAbi,
+  liquidityLockerFactoryAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
   pledgeCashNetworkProfiles,
   pledgeCashNetworkSupportPolicy,
-  pledgeV4HookAbi,
-  pledgeV4LiquidityFactoryAbi,
-  pledgeV4LiquidityVaultAbi,
-  protocolFacetRegistryAbi,
+  positionManagerAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../src";
 
 describe("generated SDK exports", () => {
-  test("includes core contract ABIs", () => {
-    expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
+  test("contains only the lean protocol ABI inventory", () => {
+    expect(Object.keys(pledgeCashAbis)).toEqual([
+      "Boardroom",
+      "BoardroomFactory",
+      "BoardroomToken",
+      "ERC20",
+      "LiquidityLocker",
+      "LiquidityLockerFactory",
+      "PositionManager",
+      "ProtocolFeeRouter",
+      "PledgeCashDeterministicDeployer",
+      "TokenGrant",
+      "TokenGrantFactory",
+    ]);
     expect(pledgeCashAbis.Boardroom).toBe(boardroomAbi);
-    expect(pledgeCashAbis.BoardroomController).toBe(boardroomControllerAbi);
-    expect(pledgeCashAbis.BoardroomControllerFactory).toBe(boardroomControllerFactoryAbi);
     expect(pledgeCashAbis.BoardroomFactory).toBe(boardroomFactoryAbi);
-    expect(pledgeCashAbis.PledgeV4LiquidityFactory).toBe(pledgeV4LiquidityFactoryAbi);
-    expect(pledgeCashAbis.PledgeV4LiquidityVault).toBe(pledgeV4LiquidityVaultAbi);
-    expect(pledgeCashAbis.PledgeV4Hook).toBe(pledgeV4HookAbi);
-    expect(pledgeCashAbis.ProtocolFacetRegistry).toBe(protocolFacetRegistryAbi);
-    expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
-    expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
-    expect(pledgeV4LiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createProtocolLiquidity")).toBe(true);
-    expect(pledgeV4LiquidityVaultAbi.some((item) => item.type === "function" && item.name === "depositLiquidityForClaims")).toBe(true);
-    expect(pledgeV4HookAbi.some((item) => item.type === "function" && item.name === "beforeInitialize")).toBe(true);
-    expect("DistributionFactory" in pledgeCashAbis).toBe(false);
-    expect("BoardroomRewards" in pledgeCashAbis).toBe(false);
-    expect("BondMarket" in pledgeCashAbis).toBe(false);
+    expect(pledgeCashAbis.LiquidityLocker).toBe(liquidityLockerAbi);
+    expect(pledgeCashAbis.LiquidityLockerFactory).toBe(liquidityLockerFactoryAbi);
+    expect(pledgeCashAbis.PositionManager).toBe(positionManagerAbi);
+    expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
   });
 
-  test("includes governance functions consumed by helpers", () => {
+  test("tracks the frozen lifecycle, grant, and locker functions", () => {
     expect(functionNames(boardroomAbi)).toEqual(expect.arrayContaining([
-      "appliedStorageVersion",
+      "beginSnapshot",
       "claimRedemptionAsset",
       "execute",
-      "facetRegistry",
-      "facetSetHash",
-      "kernelSelectorSetHash",
-      "migrateBoardroom",
-      "migrationRequired",
+      "executeBatch",
+      "executeObligation",
+      "openRedemptions",
       "redeem",
       "startWindDown",
-    ]));
-    expect(functionNames(protocolFacetRegistryAbi)).toEqual(expect.arrayContaining([
-      "activeFacetSetHash",
-      "activeRelease",
-      "activeStorageVersion",
-      "facetSetMetadata",
-      "facetSetRoute",
-      "facetSetSelectors",
-      "facets",
-      "kernelSelectorSetHash",
-    ]));
-    expect(functionNames(boardroomFactoryAbi)).toEqual(expect.arrayContaining([
-      "createBoardroom",
-      "predictBoardroomAddress",
-    ]));
-    expect(functionNames(boardroomControllerAbi)).toEqual(expect.arrayContaining([
-      "ERC1271_ENVELOPE_SCHEME",
-      "executeBoardroomOperation",
-      "hashBoardroomOperation",
-      "hashERC1271Digest",
-      "isValidSignature",
-      "scheduleBoardroomOperation",
-    ]));
-    expect(functionNames(boardroomControllerAbi)).toEqual(expect.arrayContaining([
-      "executeBoardroomOperation",
-      "executeControllerOperation",
-      "hashBoardroomOperation",
-      "isValidSignature",
-      "scheduleBoardroomOperation",
-      "scheduleControllerOperation",
-      "updateConfiguration",
-    ]));
-    expect(functionNames(boardroomTokenAbi)).toEqual(expect.arrayContaining([
-      "getPastBalance",
-      "getPastGovernanceEligibleSupply",
-      "governanceEligibleSupply",
-      "isEncumberedAccount",
     ]));
     expect(functionNames(tokenGrantAbi)).toEqual(expect.arrayContaining([
       "getSettlementCost",
@@ -95,37 +54,47 @@ describe("generated SDK exports", () => {
       "isQuarantined",
       "transferable",
     ]));
+    expect(functionNames(tokenGrantFactoryAbi)).toEqual(expect.arrayContaining([
+      "createGrant",
+      "predictGrantAddress",
+    ]));
+    expect(functionNames(liquidityLockerFactoryAbi)).toEqual(expect.arrayContaining([
+      "createLocker",
+      "predictLockerAddress",
+    ]));
+    expect(functionNames(liquidityLockerAbi)).toEqual(expect.arrayContaining([
+      "collectFees",
+      "exit",
+      "preparePositionTransfer",
+      "registerPosition",
+    ]));
   });
 
-  test("includes Boardroom lifecycle events and routed errors", () => {
-    expect(itemNames(boardroomAbi, "event")).toEqual(expect.arrayContaining([
-      "BoardroomInitialized",
-      "BoardroomLaunched",
-      "BoardroomWindDownStarted",
-      "RedeemableAssetRegistered",
-    ]));
-    expect(itemNames(boardroomAbi, "error")).toEqual(expect.arrayContaining([
-      "FacetCodeHashMismatch",
-      "FacetSetHashMismatch",
-      "StorageMigrationRequired",
-      "Unauthorized",
-    ]));
+  test("excludes removed diamond, governance, distribution, and P4LP artifacts", () => {
+    for (const removed of [
+      "BoardroomController",
+      "BoardroomKernel",
+      "ProtocolFacetRegistry",
+      "PledgeV4Hook",
+      "PledgeV4LiquidityFactory",
+      "PledgeV4LiquidityVault",
+      "DistributionFactory",
+      "BoardroomRewards",
+      "BondMarket",
+    ]) {
+      expect(removed in pledgeCashAbis).toBe(false);
+    }
   });
 
-  test("includes checked-in deployment metadata", () => {
+  test("includes pending deployment metadata and canonical network profiles", () => {
     const supportedChainIds = [11155111, 84532, 1, 8453, 42161, 4663];
     expect(Object.keys(pledgeCashDeployments).map(Number)).toEqual(expect.arrayContaining(supportedChainIds));
     for (const chainId of supportedChainIds) {
       const deployment = pledgeCashDeployments[chainId as keyof typeof pledgeCashDeployments];
-      expect(deployment?.chainId).toBe(chainId);
-      expect(deployment?.status).toBe("pending");
-      expect(deployment?.protocolVersion).toBe("pledge.cash.protocol.v1");
-      expect(deployment?.tokenGrantFactory).toBeUndefined();
+      expect(deployment).toMatchObject({ chainId, status: "pending", protocolVersion: "pledge.cash.protocol.v1" });
       expect(deployment?.boardroomFactory).toBeUndefined();
+      expect(deployment?.liquidityLockerFactory).toBeUndefined();
     }
-  });
-
-  test("generates the approved network profiles from the canonical manifest", () => {
     expect(pledgeCashNetworkSupportPolicy).toEqual({
       defaultChainId: 11155111,
       testnetChainIds: [11155111, 84532],
@@ -139,30 +108,19 @@ describe("generated SDK exports", () => {
       "arbitrum",
       "robinhood-chain",
     ]);
-    expect(pledgeCashNetworkProfiles.every((profile) => profile.uniswap.routerEncoding === "universal-router-2.0-v4-exact-input-single")).toBe(true);
   });
 
-  test("marks generated source as generated", async () => {
+  test("marks generated source and lean deployment fields", async () => {
     const source = await readFile(new URL("../src/generated.ts", import.meta.url), "utf8");
     expect(source).toContain("This file is generated by packages/sdk/scripts/generate.ts.");
-    expect(source).toContain("protocolVersion?: string;");
-    expect(source).toContain("protocolReleaseCodeHash?: string;");
-    expect(source).toContain("protocolFacetRegistryOwner?: Address;");
-    expect(source).toContain("boardroomPolicyRegistryOwner?: Address;");
-    expect(source).toContain("tokenGrantFactoryOwner?: Address;");
-    expect(source).toContain("kernelSelectorSetHash?: string;");
-    expect(source).toContain("selectorCount?: bigint;");
-    expect(source).not.toContain("  boardroomStatus?: string;");
-    expect(source).not.toContain("  boardroomReason?: string;");
-    expect(source).not.toContain("  factoryOwner?: Address;");
-    expect(source).not.toContain("  policyRegistryOwner?: Address;");
+    expect(source).toContain("liquidityLockerFactory?: Address;");
+    expect(source).toContain("liquidityLockerFactoryCodeHash?: string;");
+    expect(source).not.toContain("boardroomControllerFactory?: Address;");
+    expect(source).not.toContain("activeFacetSetHash?: string;");
+    expect(source).not.toContain("pledgeV4LiquidityFactory?: Address;");
   });
 });
 
 function functionNames(abi: readonly { type: string; name?: string }[]): string[] {
   return abi.flatMap((item) => item.type === "function" && item.name ? [item.name] : []);
-}
-
-function itemNames(abi: readonly { type: string; name?: string }[], type: string): string[] {
-  return abi.flatMap((item) => item.type === type && item.name ? [item.name] : []);
 }

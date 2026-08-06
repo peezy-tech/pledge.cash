@@ -17,26 +17,10 @@ export type PledgeCashDeployment = {
   deterministicDeployerOwner?: Address;
   create2Factory?: Address;
   boardroomFactory?: Address;
-  boardroomControllerFactory?: Address;
-  boardroomControllerLogic?: Address;
-  boardroomGovernanceLogic?: Address;
-  boardroomMarketLogic?: Address;
-  boardroomRedemptionPayout?: Address;
-  protocolFacetRegistry?: Address;
-  boardroomKernel?: Address;
-  authorityFacet?: Address;
-  executionFacet?: Address;
-  marketFacet?: Address;
-  redemptionFacet?: Address;
-  viewFacet?: Address;
-  activeFacetSetHash?: string;
-  activeRelease?: bigint;
-  requiredStorageVersion?: bigint;
-  requiredStorageLayoutHash?: string;
+  boardroomImplementation?: Address;
   manifestHash?: string;
-  kernelSelectorSetHash?: string;
-  selectorCount?: bigint;
-  boardroomPolicyRegistry?: Address;
+  boardroomArchitectureCodeHash?: string;
+  moduleArchitectureCodeHash?: string;
   protocolFeeRouter?: Address;
   uniswapV4PoolManager?: Address;
   uniswapUniversalRouter?: Address;
@@ -44,19 +28,12 @@ export type PledgeCashDeployment = {
   uniswapV4StateView?: Address;
   uniswapV4PositionManager?: Address;
   permit2?: Address;
-  pledgeV4LiquidityFactory?: Address;
-  pledgeV4LiquidityVaultImplementation?: Address;
-  pledgeV4Hook?: Address;
-  pledgeV4HookSalt?: string;
-  pledgeV4ProtocolFeeRecipient?: Address;
+  liquidityLockerFactory?: Address;
   tokenGrantFactory?: Address;
   tokenGrantLogic?: Address;
   wrappedNative?: Address;
   deployer?: Address;
-  protocolFacetRegistryOwner?: Address;
-  boardroomPolicyRegistryOwner?: Address;
   tokenGrantFactoryOwner?: Address;
-  protocolGovernance?: Address;
   protocolTreasury?: Address;
   protocolFeeRouterOwner?: Address;
   protocolFeeRouterRecipient?: Address;
@@ -65,26 +42,13 @@ export type PledgeCashDeployment = {
   deploymentBlock?: bigint;
   deploymentTimestamp?: bigint;
   deterministicDeployerCodeHash?: string;
-  boardroomPolicyRegistryCodeHash?: string;
   protocolFeeRouterCodeHash?: string;
   boardroomFactoryCodeHash?: string;
-  boardroomControllerFactoryCodeHash?: string;
-  boardroomControllerLogicCodeHash?: string;
-  boardroomGovernanceLogicCodeHash?: string;
-  boardroomMarketLogicCodeHash?: string;
-  boardroomRedemptionPayoutCodeHash?: string;
-  protocolFacetRegistryCodeHash?: string;
-  boardroomKernelCodeHash?: string;
-  authorityFacetCodeHash?: string;
-  executionFacetCodeHash?: string;
-  marketFacetCodeHash?: string;
-  redemptionFacetCodeHash?: string;
-  viewFacetCodeHash?: string;
+  boardroomImplementationCodeHash?: string;
   tokenGrantFactoryCodeHash?: string;
   tokenGrantLogicCodeHash?: string;
-  pledgeV4LiquidityFactoryCodeHash?: string;
-  pledgeV4LiquidityVaultImplementationCodeHash?: string;
-  pledgeV4HookCodeHash?: string;
+  liquidityLockerFactoryCodeHash?: string;
+  liquidityLockerCodeHash?: string;
   uniswapV4PoolManagerCodeHash?: string;
   uniswapUniversalRouterCodeHash?: string;
   uniswapV4QuoterCodeHash?: string;
@@ -528,8 +492,54 @@ export type PledgeCashNetworkKey = typeof pledgeCashNetworkProfiles[number]["key
 
 export const boardroomAbi = [
   {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "factory_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "wrappedNative_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
     "type": "function",
     "name": "MAX_BATCH_CALLS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_OBLIGATION_ASSETS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_PRUNE_BATCH",
     "inputs": [],
     "outputs": [
       {
@@ -555,19 +565,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_WIND_DOWN_DELAY",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "MIN_WIND_DOWN_DELAY",
     "inputs": [],
     "outputs": [
@@ -578,34 +575,6 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activateProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -627,12 +596,12 @@ export const boardroomAbi = [
       {
         "name": "kind",
         "type": "uint8",
-        "internalType": "enum BoardroomObligationStorage.Kind"
+        "internalType": "enum IBoardroom.ObligationKind"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "count",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -656,35 +625,9 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "shares",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "appliedStorageLayoutHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "appliedStorageVersion",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -701,7 +644,7 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "count",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -734,39 +677,14 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "beginSnapshot",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "bondingCurve",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "burnTreasuryShares",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [
       {
         "name": "burned",
@@ -779,13 +697,7 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "cancelOwnershipHandover",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "payable"
   },
@@ -793,11 +705,6 @@ export const boardroomAbi = [
     "type": "function",
     "name": "claimRedemptionAsset",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "asset",
         "type": "address",
@@ -825,44 +732,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "closeProtocolLiquidityAfterWindDown",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "closeProtocolLiquidityFromFactory",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "completeOwnershipHandover",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "pendingOwner",
         "type": "address",
@@ -876,11 +747,6 @@ export const boardroomAbi = [
     "type": "function",
     "name": "contributeTreasuryAsset",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "asset",
         "type": "address",
@@ -902,62 +768,13 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "controller",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "controllerFactory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "controllerGeneration",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "execute",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "call_",
         "type": "tuple",
-        "internalType": "struct BoardroomFacetTypes.Call",
+        "internalType": "struct IBoardroom.Call",
         "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
           {
             "name": "target",
             "type": "address",
@@ -990,20 +807,10 @@ export const boardroomAbi = [
     "name": "executeBatch",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "calls",
         "type": "tuple[]",
-        "internalType": "struct BoardroomFacetTypes.Call[]",
+        "internalType": "struct IBoardroom.Call[]",
         "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
           {
             "name": "target",
             "type": "address",
@@ -1033,95 +840,17 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "executeGovernance",
+    "name": "executeObligation",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "authority",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct BoardroomCall[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "results",
-        "type": "bytes[]",
-        "internalType": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "executeWindDownCall",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "call_",
-        "type": "tuple",
-        "internalType": "struct BoardroomFacetTypes.Call",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
@@ -1135,90 +864,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "exitProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "facetRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceEpoch",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceLogic",
+    "name": "factory",
     "inputs": [],
     "outputs": [
       {
@@ -1234,76 +880,23 @@ export const boardroomAbi = [
     "name": "initialize",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "owner_",
+        "type": "address",
+        "internalType": "address"
       },
       {
-        "name": "initializationData",
-        "type": "bytes",
-        "internalType": "bytes"
+        "name": "name_",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "symbol_",
+        "type": "string",
+        "internalType": "string"
       }
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "isControllerDeploymentAuthorized",
-    "inputs": [
-      {
-        "name": "expectedController",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "generation",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isIssuedDistribution",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1355,7 +948,7 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "registered",
         "type": "bool",
         "internalType": "bool"
       }
@@ -1364,79 +957,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "kernelSelectorSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "launch",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "config",
-        "type": "tuple",
-        "internalType": "struct BoardroomFacetTypes.LaunchConfig",
-        "components": [
-          {
-            "name": "proposer",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "predictedController",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "protectionStaker",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "expectedRewardPool",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "expectedRedemptionExcessRecipient",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "controllerDelay",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "windDownDelay",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "gracePeriod",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "generation",
-            "type": "uint64",
-            "internalType": "uint64"
-          }
-        ]
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -1468,98 +990,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "liquidityPoolId",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "liquidityQuoteAsset",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "liquidityStatus",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "enum BoardroomLiquidityStorage.Status"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "liquidityVault",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "lockedLiquidityExitAllowed",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "marketLogic",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "migrateBoardroom",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "migrationRequired",
     "inputs": [],
     "outputs": [
       {
@@ -1574,11 +1005,6 @@ export const boardroomAbi = [
     "type": "function",
     "name": "mint",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "to",
         "type": "address",
@@ -1648,14 +1074,14 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "policy",
+        "name": "registrar",
         "type": "address",
         "internalType": "address"
       },
       {
         "name": "kind",
         "type": "uint8",
-        "internalType": "enum BoardroomObligationStorage.Kind"
+        "internalType": "enum IBoardroom.ObligationKind"
       },
       {
         "name": "active",
@@ -1672,33 +1098,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "obligationPolicyOf",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "openRedemptions",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -1727,7 +1128,7 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "result",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1736,65 +1137,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "policyRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "primaryMarketMode",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "primaryMarketQuoteAsset",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "protectionStaker",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "pruneObligation",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "obligation",
         "type": "address",
@@ -1815,11 +1159,6 @@ export const boardroomAbi = [
     "name": "pruneObligations",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "obligations",
         "type": "address[]",
         "internalType": "address[]"
@@ -1838,11 +1177,6 @@ export const boardroomAbi = [
     "type": "function",
     "name": "redeem",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "shares",
         "type": "uint256",
@@ -1927,7 +1261,7 @@ export const boardroomAbi = [
       {
         "name": "",
         "type": "uint8",
-        "internalType": "enum BoardroomAssetStorage.SnapshotStatus"
+        "internalType": "enum IBoardroom.SnapshotStatus"
       }
     ],
     "stateMutability": "view"
@@ -1944,12 +1278,12 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "snapshotBalance",
+        "name": "balance",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "paid",
+        "name": "amountPaid",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1968,7 +1302,7 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "shares",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1978,19 +1312,6 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "redemptionExcessRecipient",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "redemptionPayoutLogic",
     "inputs": [],
     "outputs": [
       {
@@ -2021,13 +1342,31 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "registerRedeemableAsset",
+    "name": "registerObligation",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
       },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IBoardroom.ObligationKind"
+      },
+      {
+        "name": "assets",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "registerRedeemableAsset",
+    "inputs": [
       {
         "name": "asset",
         "type": "address",
@@ -2039,36 +1378,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "releaseBMigrationState",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "migrationMarker",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "migratedAt",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "migratedFromVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "removeRedeemableAsset",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "asset",
         "type": "address",
@@ -2081,94 +1392,21 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "renounceOwnership",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "replaceController",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedCurrentController",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expectedNextController",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "nextProposer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "nextDelay",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "nextGracePeriod",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "nextGeneration",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "requestOwnershipHandover",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "requireBondingCurveForfeitureVetoPower",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
   },
   {
     "type": "function",
     "name": "reserveRedeemableAsset",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "asset",
         "type": "address",
@@ -2180,45 +1418,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "returnProtocolLiquidityClaims",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "claims",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "rewardPool",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "setRedemptionExcessRecipient",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "recipient",
         "type": "address",
@@ -2246,11 +1447,6 @@ export const boardroomAbi = [
     "name": "snapshotAssets",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "maximum",
         "type": "uint256",
         "internalType": "uint256"
@@ -2268,13 +1464,7 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "startWindDown",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -2286,7 +1476,7 @@ export const boardroomAbi = [
       {
         "name": "",
         "type": "uint8",
-        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
+        "internalType": "enum IBoardroom.Status"
       }
     ],
     "stateMutability": "view"
@@ -2295,11 +1485,6 @@ export const boardroomAbi = [
     "type": "function",
     "name": "sweepRedemptionExcess",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "asset",
         "type": "address",
@@ -2320,11 +1505,6 @@ export const boardroomAbi = [
     "name": "transferOwnership",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "newOwner",
         "type": "address",
         "internalType": "address"
@@ -2332,52 +1512,6 @@ export const boardroomAbi = [
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "validatePrimaryMarketTransfer",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "veto",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -2408,13 +1542,7 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "wrapNativeBalance",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -2432,382 +1560,9 @@ export const boardroomAbi = [
     "stateMutability": "view"
   },
   {
-    "type": "error",
-    "name": "ActiveReleaseChanged",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "actualStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "expectedStorageLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualStorageLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "AlreadyMigrated",
-    "inputs": [
-      {
-        "name": "appliedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "AppliedStorageLayoutMismatch",
-    "inputs": [
-      {
-        "name": "appliedLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "requiredLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetCodeHashMismatch",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetSetHashMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidFacet",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationMigrationRoute",
-    "inputs": [
-      {
-        "name": "expectedFacet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "routeFacet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationRoute",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationState",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidKernelSelectorSetHash",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRegistry",
-    "inputs": [
-      {
-        "name": "registry",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRouteKind",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidViewRollbackEnvelope",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "KernelMetadataCorrupted",
-    "inputs": [
-      {
-        "name": "initialized",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "initializing",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "migrating",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationPostconditionFailed",
-    "inputs": [
-      {
-        "name": "expectedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "actualVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "expectedLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationReentrancy",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "MissingExpectedFacetSetHash",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NotInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "RegistryCallFailed",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "RouteStorageVersionMismatch",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "StorageMigrationRequired",
-    "inputs": [
-      {
-        "name": "appliedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requiredVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnknownSelector",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ViewDispatchDidNotRollback",
-    "inputs": []
-  },
-  {
     "type": "event",
     "name": "BoardroomCallExecuted",
     "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
       {
         "name": "target",
         "type": "address",
@@ -2823,7 +1578,7 @@ export const boardroomAbi = [
       {
         "name": "authority",
         "type": "address",
-        "indexed": false,
+        "indexed": true,
         "internalType": "address"
       },
       {
@@ -2843,59 +1598,10 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomControllerReplaced",
-    "inputs": [
-      {
-        "name": "oldController",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newController",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "generation",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "controllerDelay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "BoardroomInitialized",
     "inputs": [
       {
         "name": "owner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "policyRegistry",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -2909,7 +1615,7 @@ export const boardroomAbi = [
       {
         "name": "wrappedNative",
         "type": "address",
-        "indexed": false,
+        "indexed": true,
         "internalType": "address"
       },
       {
@@ -2932,46 +1638,10 @@ export const boardroomAbi = [
     "name": "BoardroomLaunched",
     "inputs": [
       {
-        "name": "controller",
+        "name": "owner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "protectionStaker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "controllerGeneration",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "controllerDelay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "windDownDelay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -3006,7 +1676,7 @@ export const boardroomAbi = [
         "internalType": "address"
       },
       {
-        "name": "policy",
+        "name": "registrar",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -3015,7 +1685,7 @@ export const boardroomAbi = [
         "name": "kind",
         "type": "uint8",
         "indexed": true,
-        "internalType": "enum BoardroomObligationStorage.Kind"
+        "internalType": "enum IBoardroom.ObligationKind"
       }
     ],
     "anonymous": false
@@ -3031,7 +1701,7 @@ export const boardroomAbi = [
         "internalType": "address"
       },
       {
-        "name": "policy",
+        "name": "registrar",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -3040,26 +1710,7 @@ export const boardroomAbi = [
         "name": "kind",
         "type": "uint8",
         "indexed": true,
-        "internalType": "enum BoardroomObligationStorage.Kind"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomOperationVetoed",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "staker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "internalType": "enum IBoardroom.ObligationKind"
       }
     ],
     "anonymous": false
@@ -3120,19 +1771,19 @@ export const boardroomAbi = [
     "name": "BoardroomWindDownStarted",
     "inputs": [
       {
-        "name": "caller",
+        "name": "owner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "epoch",
+        "name": "startedAt",
         "type": "uint256",
-        "indexed": true,
+        "indexed": false,
         "internalType": "uint256"
       },
       {
-        "name": "windDownDelay",
+        "name": "delay",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -3142,37 +1793,18 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BondingCurvePrecommitted",
+    "name": "NativeWrappedForWindDown",
     "inputs": [
       {
-        "name": "curve",
+        "name": "wrappedNative",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "fundingAmount",
+        "name": "amount",
         "type": "uint256",
         "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "GovernanceEpochAdvanced",
-    "inputs": [
-      {
-        "name": "epoch",
-        "type": "uint256",
-        "indexed": true,
         "internalType": "uint256"
       }
     ],
@@ -3219,143 +1851,6 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PrimaryMarketModeChanged",
-    "inputs": [
-      {
-        "name": "mode",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityActivated",
-    "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityClosed",
-    "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityReservationReleased",
-    "inputs": [
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "expectedVault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityReserved",
-    "inputs": [
-      {
-        "name": "expectedVault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "expectedPoolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -3420,6 +1915,43 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
+    "name": "RedemptionAssetClaimed",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RedemptionExcessRecipientSet",
     "inputs": [
       {
@@ -3427,6 +1959,31 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionExcessSwept",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -3443,6 +2000,25 @@ export const boardroomAbi = [
       },
       {
         "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SharesRedeemed",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -3476,13 +2052,26 @@ export const boardroomAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "TreasurySharesBurned",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
-    "name": "BoardroomAlreadyLaunched",
+    "name": "AlreadyInitialized",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "BoardroomNotLaunched",
+    "name": "AlreadyLaunched",
     "inputs": []
   },
   {
@@ -3498,31 +2087,10 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "CallNotAllowed",
+    "name": "DuplicateObligationAsset",
     "inputs": [
       {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ControllerAlreadyDeployed",
-    "inputs": [
-      {
-        "name": "controller",
+        "name": "asset",
         "type": "address",
         "internalType": "address"
       }
@@ -3546,15 +2114,20 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "GovernanceEpochMismatch",
+    "name": "InsufficientRedemptionAmount",
     "inputs": [
       {
-        "name": "expected",
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountOut",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "actual",
+        "name": "minAmountOut",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -3563,7 +2136,13 @@ export const boardroomAbi = [
   {
     "type": "error",
     "name": "InvalidAddress",
-    "inputs": []
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -3572,10 +2151,10 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidController",
+    "name": "InvalidExecutionContext",
     "inputs": [
       {
-        "name": "controller",
+        "name": "caller",
         "type": "address",
         "internalType": "address"
       }
@@ -3583,34 +2162,19 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidControllerReplacement",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidExecutionContext",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationContext",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidLaunchConfiguration",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidLaunchSupply",
+    "name": "InvalidExecutionTarget",
     "inputs": [
       {
-        "name": "circulatingSupply",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidMetadata",
+    "inputs": []
   },
   {
     "type": "error",
@@ -3625,28 +2189,12 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidObligationPolicy",
+    "name": "InvalidObligationKind",
     "inputs": [
       {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidPrimaryMarketTransition",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidProtectionStaker",
-    "inputs": [
-      {
-        "name": "staker",
-        "type": "address",
-        "internalType": "address"
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IBoardroom.ObligationKind"
       }
     ]
   },
@@ -3689,12 +2237,12 @@ export const boardroomAbi = [
       {
         "name": "expected",
         "type": "uint8",
-        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
+        "internalType": "enum IBoardroom.Status"
       },
       {
         "name": "actual",
         "type": "uint8",
-        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
+        "internalType": "enum IBoardroom.Status"
       }
     ]
   },
@@ -3714,6 +2262,17 @@ export const boardroomAbi = [
     "inputs": [
       {
         "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ObligationAlreadyClosed",
+    "inputs": [
+      {
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -3754,34 +2313,13 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "OwnershipLockedAfterLaunch",
+    "name": "OnlyFactory",
     "inputs": []
   },
   {
     "type": "error",
     "name": "OwnershipRenunciationDisabled",
     "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "PrimaryMarketTransferRestricted",
-    "inputs": [
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
   },
   {
     "type": "error",
@@ -3875,7 +2413,7 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "TooManyObligationDependencies",
+    "name": "TooManyObligationAssets",
     "inputs": [
       {
         "name": "requested",
@@ -3925,1045 +2463,16 @@ export const boardroomAbi = [
     "type": "error",
     "name": "Unauthorized",
     "inputs": []
-  }
-] as const;
-
-export const boardroomControllerAbi = [
-  {
-    "type": "constructor",
-    "inputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "BOARDROOM_CONTROL_PROOF_TYPEHASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "EIP712_DOMAIN_TYPEHASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "EIP712_NAME_HASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "EIP712_VERSION_HASH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ERC1271_ENVELOPE_SCHEME",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ERC1271_INVALID_VALUE",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ERC1271_MAGIC_VALUE",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_BATCH_CALLS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_DELAY",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_GRACE_PERIOD",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MIN_DELAY",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MIN_GRACE_PERIOD",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "boardroom",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "cancelOperation",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "configurationEpoch",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "configurationHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "delay",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "executeBoardroomOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct BoardroomCall[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "results",
-        "type": "bytes[]",
-        "internalType": "bytes[]"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "executeControllerOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "factory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "generation",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "gracePeriod",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hashBoardroomOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct BoardroomCall[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hashControllerOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hashERC1271Digest",
-    "inputs": [
-      {
-        "name": "hash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "boardroom_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "boardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "controllerGeneration",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "initialize",
-    "inputs": [
-      {
-        "name": "boardroom_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "proposer_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay_",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod_",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "generation_",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "isValidSignature",
-    "inputs": [
-      {
-        "name": "hash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "signature",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "operationState",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "operationStatus",
-        "type": "uint8",
-        "internalType": "enum BoardroomController.OperationStatus"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "proposer",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "scheduleBoardroomOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct BoardroomCall[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "scheduleControllerOperation",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedBoardroomEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expectedConfigurationEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updateConfiguration",
-    "inputs": [
-      {
-        "name": "proposer_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay_",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod_",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "event",
-    "name": "BoardroomOperationScheduled",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "boardroomEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "controllerGeneration",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "configurationEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "callsHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ConfigurationUpdated",
-    "inputs": [
-      {
-        "name": "oldProposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newProposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "oldDelay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "newDelay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "oldGracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "newGracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "configurationEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ControllerInitialized",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "generation",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "delay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "configurationEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ControllerOperationScheduled",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "boardroomEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "controllerGeneration",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "configurationEpoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "dataHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Initialized",
-    "inputs": [
-      {
-        "name": "version",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OperationCancelled",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OperationExecuted",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "executor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
   },
   {
     "type": "error",
-    "name": "BoardroomEpochMismatch",
+    "name": "UnexpectedRedeemableAssetBalanceChange",
     "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
       {
         "name": "expected",
         "type": "uint256",
@@ -4978,17 +2487,7 @@ export const boardroomControllerAbi = [
   },
   {
     "type": "error",
-    "name": "BoardroomMigrationRequired",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "BoardroomNotActive",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ConfigurationEpochMismatch",
+    "name": "UnexpectedWrappedNativeBalanceChange",
     "inputs": [
       {
         "name": "expected",
@@ -4997,457 +2496,6 @@ export const boardroomControllerAbi = [
       },
       {
         "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ControllerNotActive",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "FacetSetMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidConfiguration",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitialization",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotInitializing",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyBoardroom",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyFactory",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyProposer",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlySelf",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OperationAlreadyKnown",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OperationContextMismatch",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OperationExpired",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OperationNotPending",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OperationNotReady",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "Reentrancy",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "SelfOperationFailed",
-    "inputs": [
-      {
-        "name": "operationId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyCalls",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnsupportedSelfOperation",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  }
-] as const;
-
-export const boardroomControllerFactoryAbi = [
-  {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "boardroomFactory_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "boardroomFactory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "boardroomOfController",
-    "inputs": [
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "controllerImplementation",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "deployController",
-    "inputs": [
-      {
-        "name": "expectedController",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "generation",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "generationOfController",
-    "inputs": [
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "generation",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isController",
-    "inputs": [
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "canonical",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "predictControllerAddress",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "generation",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "ControllerDeployed",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "controller",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "generation",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "delay",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "ControllerAddressOccupied",
-    "inputs": [
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ControllerPredictionMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actual",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidGeneration",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyCanonicalBoardroom",
-    "inputs": [
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnauthorizedDeploymentContext",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "controller",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "generation",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -5460,37 +2508,7 @@ export const boardroomFactoryAbi = [
     "type": "constructor",
     "inputs": [
       {
-        "name": "facetRegistry_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "policyRegistry_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "wrappedNative_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "boardroomKernelLogic_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "redemptionPayoutLogic_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "governanceLogic_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "marketLogic_",
         "type": "address",
         "internalType": "address"
       }
@@ -5531,20 +2549,7 @@ export const boardroomFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "boardroomKernelLogic",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "controllerFactory",
+    "name": "boardroomImplementation",
     "inputs": [],
     "outputs": [
       {
@@ -5559,11 +2564,6 @@ export const boardroomFactoryAbi = [
     "type": "function",
     "name": "createBoardroom",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "owner",
         "type": "address",
@@ -5593,32 +2593,6 @@ export const boardroomFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "facetRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IProtocolFacetRegistry"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceLogic",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -5660,32 +2634,6 @@ export const boardroomFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "marketLogic",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "policyRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "predictBoardroomAddress",
     "inputs": [
       {
@@ -5709,19 +2657,6 @@ export const boardroomFactoryAbi = [
         "internalType": "bytes32"
       }
     ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "redemptionPayoutLogic",
-    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -5761,15 +2696,9 @@ export const boardroomFactoryAbi = [
         "internalType": "address"
       },
       {
-        "name": "policyRegistry",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
         "name": "shareToken",
         "type": "address",
-        "indexed": false,
+        "indexed": true,
         "internalType": "address"
       },
       {
@@ -5795,31 +2724,9 @@ export const boardroomFactoryAbi = [
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
       }
     ],
     "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "FacetSetHashMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
   },
   {
     "type": "error",
@@ -5831,495 +2738,6 @@ export const boardroomFactoryAbi = [
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidKernelRegistry",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actual",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidKernelSelectorSetHash",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  }
-] as const;
-
-export const boardroomPolicyRegistryAbi = [
-  {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "owner_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "authorizeCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "canonicalPolicy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "cancelOwnershipHandover",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "completeOwnershipHandover",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "isModulePolicy",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isPolicyAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isPolicyLifecycleAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "owner",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ownershipHandoverExpiresAt",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "policyStatus",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "enum BoardroomPolicyRegistry.PolicyStatus"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "registerModulePolicy",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "renounceOwnership",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "requestOwnershipHandover",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "setPolicyAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "allowed",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setPolicyStatus",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "status",
-        "type": "uint8",
-        "internalType": "enum BoardroomPolicyRegistry.PolicyStatus"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "transferOwnership",
-    "inputs": [
-      {
-        "name": "newOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "event",
-    "name": "ModulePolicyRegistered",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipHandoverCanceled",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipHandoverRequested",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipTransferred",
-    "inputs": [
-      {
-        "name": "oldOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PolicyAllowedSet",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "allowed",
-        "type": "bool",
-        "indexed": false,
-        "internalType": "bool"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PolicyStatusSet",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "status",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum BoardroomPolicyRegistry.PolicyStatus"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "CallNotAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ModulePolicyAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ModulePolicyRequired",
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NewOwnerIsZeroAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NoHandoverRequest",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ObligationPolicyMismatch",
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expectedPolicy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actualPolicy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "PolicyNotAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "Unauthorized",
-    "inputs": []
   }
 ] as const;
 
@@ -6408,25 +2826,6 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "function",
-    "name": "balanceCheckpointCount",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "balanceOf",
     "inputs": [
       {
@@ -6484,189 +2883,6 @@ export const boardroomTokenAbi = [
         "name": "",
         "type": "uint8",
         "internalType": "uint8"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "disableRewardLocks",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "encumberedSupply",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "encumberedSupplyCheckpointCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getPastBalance",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "blockNumber",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getPastEncumberedSupply",
-    "inputs": [
-      {
-        "name": "blockNumber",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getPastGovernanceEligibleSupply",
-    "inputs": [
-      {
-        "name": "blockNumber",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getPastTotalSupply",
-    "inputs": [
-      {
-        "name": "blockNumber",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceEligibleSupply",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isEncumberedAccount",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "lockStake",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "lockedStakeBalance",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -6766,58 +2982,6 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "function",
-    "name": "registerEncumberedAccount",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "registerRewardLocker",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "rewardLocker",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "rewardLocksDisabled",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "symbol",
     "inputs": [],
     "outputs": [
@@ -6836,19 +3000,6 @@ export const boardroomTokenAbi = [
     "outputs": [
       {
         "name": "result",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "totalSupplyCheckpointCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -6909,43 +3060,6 @@ export const boardroomTokenAbi = [
     "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "transferableBalanceOf",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "unlockStake",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
     "type": "event",
     "name": "Approval",
     "inputs": [
@@ -6963,94 +3077,6 @@ export const boardroomTokenAbi = [
       },
       {
         "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "EncumberedAccountRegistered",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "balance",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RewardLockerRegistered",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RewardLocksDisabled",
-    "inputs": [],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "StakeBalanceLocked",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "lockedBalance",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "StakeBalanceUnlocked",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "lockedBalance",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -7095,44 +3121,6 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "error",
-    "name": "CheckpointValueOverflow",
-    "inputs": [
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "EncumberedAccountAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FutureCheckpointLookup",
-    "inputs": [
-      {
-        "name": "requestedBlock",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentBlock",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "InsufficientAllowance",
     "inputs": []
   },
@@ -7140,48 +3128,6 @@ export const boardroomTokenAbi = [
     "type": "error",
     "name": "InsufficientBalance",
     "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InsufficientLockedStake",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "available",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InsufficientUnlockedBalance",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "available",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
   },
   {
     "type": "error",
@@ -7195,39 +3141,12 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidEncumberedAccount",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "InvalidPermit",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "InvalidRewardLocker",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "OnlyBoardroom",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyRewardLocker",
     "inputs": []
   },
   {
@@ -7238,22 +3157,6 @@ export const boardroomTokenAbi = [
   {
     "type": "error",
     "name": "PermitExpired",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "RewardLockerAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RewardLocksAreDisabled",
     "inputs": []
   },
   {
@@ -7603,174 +3506,44 @@ export const erc20Abi = [
   }
 ] as const;
 
-export const boardroomCallPolicyAbi = [
-  {
-    "type": "function",
-    "name": "canCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  }
-] as const;
-
-export const boardroomPolicyRegistryInterfaceAbi = [
-  {
-    "type": "function",
-    "name": "authorizeCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "canonicalPolicy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isModulePolicy",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isPolicyAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isPolicyLifecycleAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  }
-] as const;
-
-export const pledgeV4LiquidityFactoryAbi = [
+export const liquidityLockerAbi = [
   {
     "type": "constructor",
     "inputs": [
       {
-        "name": "poolManager_",
-        "type": "address",
-        "internalType": "contract IPoolManager"
-      },
-      {
-        "name": "boardroomFactory_",
+        "name": "boardroom_",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "protocolFeeRecipient_",
+        "name": "positionManager_",
+        "type": "address",
+        "internalType": "contract IPositionManager"
+      },
+      {
+        "name": "protocolFeeRouter_",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "hookAuthority_",
+        "name": "shareToken_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "quoteAsset_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "poolFee_",
+        "type": "uint24",
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing_",
+        "type": "int24",
+        "internalType": "int24"
       }
     ],
     "stateMutability": "nonpayable"
@@ -7790,20 +3563,7 @@ export const pledgeV4LiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_SEED_SLIPPAGE_BPS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "POOL_FEE",
+    "name": "MAX_STATIC_POOL_FEE",
     "inputs": [],
     "outputs": [
       {
@@ -7816,20 +3576,7 @@ export const pledgeV4LiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "REQUIRED_HOOK_FLAGS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint160",
-        "internalType": "uint160"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "TICK_SPACING",
+    "name": "MAX_TICK_SPACING",
     "inputs": [],
     "outputs": [
       {
@@ -7842,1266 +3589,11 @@ export const pledgeV4LiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "addProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct PledgeV4LiquidityFactory.AddParams",
-        "components": [
-          {
-            "name": "tokenA",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "tokenB",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amountADesired",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBDesired",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountAMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "deadline",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "boardroomFactory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "canCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "closeProtocolLiquidity",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "createProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct PledgeV4LiquidityFactory.CreateParams",
-        "components": [
-          {
-            "name": "tokenA",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "tokenB",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amountADesired",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBDesired",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountAMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "sqrtPriceX96",
-            "type": "uint160",
-            "internalType": "uint160"
-          },
-          {
-            "name": "deadline",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "deployHook",
-    "inputs": [
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "deployed",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "finalizeWindDownClosure",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "hook",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract PledgeV4Hook"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hookAuthority",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hookInitCodeHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hookSalt",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "initializingPoolId",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isLifecycleCallAllowed",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isPoolInitializationAuthorized",
-    "inputs": [
-      {
-        "name": "sender",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "key",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isVault",
-    "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "canonical",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "obligationForCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "obligation",
-        "type": "tuple",
-        "internalType": "struct IBoardroomObligationPolicy.Obligation",
-        "components": [
-          {
-            "name": "kind",
-            "type": "uint8",
-            "internalType": "enum IBoardroomObligationPolicy.ObligationKind"
-          },
-          {
-            "name": "account",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "aux",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "poolIdFor",
-    "inputs": [
-      {
-        "name": "tokenA",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "poolKeyFor",
-    "inputs": [
-      {
-        "name": "tokenA",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "key",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "poolManager",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IPoolManager"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "positionOfBoardroom",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "status",
-        "type": "uint8",
-        "internalType": "enum PledgeV4LiquidityFactory.PositionStatus"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "predictHookAddress",
-    "inputs": [
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "predicted",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "predictLiquidityVaultAddress",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "protocolFeeRecipient",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "removeProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct PledgeV4LiquidityFactory.RemoveParams",
-        "components": [
-          {
-            "name": "liquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountAMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "deadline",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "vaultBoardroom",
-    "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "vaultForPoolId",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "vaultImplementation",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "PledgeV4HookDeployed",
-    "inputs": [
-      {
-        "name": "hook",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "initCodeHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityAdded",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityCreated",
-    "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "sqrtPriceX96",
-        "type": "uint160",
-        "indexed": false,
-        "internalType": "uint160"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityPositionClosed",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityRemoved",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "vault",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "HookAlreadyDeployed",
-    "inputs": [
-      {
-        "name": "hook",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "HookNotDeployed",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidAmount",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidBoardroom",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidBoardroomFactory",
-    "inputs": [
-      {
-        "name": "factory",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidHookFlags",
-    "inputs": [
-      {
-        "name": "predicted",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actualFlags",
-        "type": "uint160",
-        "internalType": "uint160"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidPair",
-    "inputs": [
-      {
-        "name": "tokenA",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidPosition",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OnlyHookAuthority",
-    "inputs": [
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "PoolAlreadyInitialized",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "PositionAlreadyConfigured",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "Reentrancy",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedTokenBalanceChange",
-    "inputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnsafeLiquidityMinimums",
-    "inputs": [
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "requiredAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "requiredBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  }
-] as const;
-
-export const pledgeV4LiquidityVaultAbi = [
-  {
-    "type": "constructor",
-    "inputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "BPS_DENOMINATOR",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "DOMAIN_SEPARATOR",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "PROTOCOL_FEE_SHARE_BPS",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "addLiquidity",
-    "inputs": [
-      {
-        "name": "amountADesired",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBDesired",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint128",
-        "internalType": "uint128"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "allowance",
-    "inputs": [
-      {
-        "name": "owner",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "spender",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "approve",
-    "inputs": [
-      {
-        "name": "spender",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "balanceOf",
-    "inputs": [
-      {
-        "name": "owner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -9123,7 +3615,21 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "claimFees",
+    "name": "cancel",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "cancelPositionTransfer",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "collectFees",
     "inputs": [],
     "outputs": [
       {
@@ -9147,13 +3653,6 @@ export const pledgeV4LiquidityVaultAbi = [
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "close",
-    "inputs": [],
-    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -9184,84 +3683,17 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "decimals",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "depositLiquidityForClaims",
+    "name": "exit",
     "inputs": [
       {
-        "name": "amountADesired",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBDesired",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
+        "name": "amount0Min",
         "type": "uint128",
         "internalType": "uint128"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "exitToBoardroom",
-    "inputs": [
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
       },
       {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "amount1Min",
+        "type": "uint128",
+        "internalType": "uint128"
       },
       {
         "name": "deadline",
@@ -9271,105 +3703,16 @@ export const pledgeV4LiquidityVaultAbi = [
     ],
     "outputs": [
       {
-        "name": "amountA",
+        "name": "amount0",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
+        "name": "amount1",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "factory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hook",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "initialize",
-    "inputs": [
-      {
-        "name": "factory_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "boardroom_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolManager_",
-        "type": "address",
-        "internalType": "contract IPoolManager"
-      },
-      {
-        "name": "protocolFeeRecipient_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenA_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolFee_",
-        "type": "uint24",
-        "internalType": "uint24"
-      },
-      {
-        "name": "tickSpacing_",
-        "type": "int24",
-        "internalType": "int24"
-      },
-      {
-        "name": "hook_",
-        "type": "address",
-        "internalType": "contract IHooks"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -9387,104 +3730,50 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "liquidityState",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "enum PledgeV4LiquidityVault.LiquidityState"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "lockedLiquidity",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "name",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "nonces",
+    "name": "onERC721Received",
     "inputs": [
       {
-        "name": "owner",
+        "name": "",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "receivedTokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
       {
-        "name": "result",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
       }
     ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "permit",
-    "inputs": [
-      {
-        "name": "owner",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "spender",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "v",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "r",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "s",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pendingTokenId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -9501,99 +3790,46 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "poolId",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "poolKey",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "poolManager",
+    "name": "positionManager",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract IPoolManager"
+        "internalType": "contract IPositionManager"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "positionLiquidity",
+    "name": "positionRegistered",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "uint128",
-        "internalType": "uint128"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "positionSalt",
-    "inputs": [],
-    "outputs": [
+    "name": "preparePositionTransfer",
+    "inputs": [
       {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "expectedTokenId",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "protocolFeeRecipient",
+    "name": "protocolFeeRouter",
     "inputs": [],
     "outputs": [
       {
@@ -9606,20 +3842,23 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "redeemClaims",
+    "name": "quoteAsset",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recoverUntrackedPosition",
     "inputs": [
       {
-        "name": "claims",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
+        "name": "untrackedTokenId",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -9627,106 +3866,33 @@ export const pledgeV4LiquidityVaultAbi = [
         "name": "recipient",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint128",
-        "internalType": "uint128"
-      }
-    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "releaseClaimsToBoardroom",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "claims",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "removeLiquidityToBoardroom",
+    "name": "registerPosition",
     "inputs": [
       {
-        "name": "liquidity",
-        "type": "uint128",
-        "internalType": "uint128"
-      },
-      {
-        "name": "amountAMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBMin",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
+        "name": "positionTokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "symbol",
+    "name": "shareToken",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "tickLower",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "int24",
-        "internalType": "int24"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -9746,50 +3912,11 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "tickUpper",
+    "name": "tokenId",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "int24",
-        "internalType": "int24"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "tokenA",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "tokenB",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "totalSupply",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "result",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -9798,19 +3925,8 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "function",
-    "name": "transfer",
-    "inputs": [
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
+    "name": "transferPrepared",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -9818,96 +3934,17 @@ export const pledgeV4LiquidityVaultAbi = [
         "internalType": "bool"
       }
     ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "transferFrom",
-    "inputs": [
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "unlockCallback",
-    "inputs": [
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "event",
-    "name": "Approval",
+    "name": "FeesCollected",
     "inputs": [
       {
-        "name": "owner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "spender",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
+        "name": "tokenId",
         "type": "uint256",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "FeesForwarded",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "protocolFeeRecipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       },
       {
         "name": "boardroomAmount0",
@@ -9938,66 +3975,28 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "event",
-    "name": "Initialized",
-    "inputs": [
-      {
-        "name": "version",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      }
-    ],
+    "name": "LockerCancelled",
+    "inputs": [],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "LiquidityAdded",
+    "name": "PositionExited",
     "inputs": [
       {
-        "name": "poolId",
-        "type": "bytes32",
+        "name": "tokenId",
+        "type": "uint256",
         "indexed": true,
-        "internalType": "bytes32"
+        "internalType": "uint256"
       },
       {
-        "name": "amountA",
+        "name": "amount0",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
       },
       {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint128",
-        "indexed": false,
-        "internalType": "uint128"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "LiquidityClaimsMinted",
-    "inputs": [
-      {
-        "name": "depositor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "claims",
+        "name": "amount1",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -10007,81 +4006,13 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "event",
-    "name": "LiquidityClosed",
+    "name": "PositionRegistered",
     "inputs": [
       {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "LiquidityRemoved",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint128",
-        "indexed": false,
-        "internalType": "uint128"
-      },
-      {
-        "name": "amountA",
+        "name": "tokenId",
         "type": "uint256",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PledgeV4LiquidityVaultInitialized",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "poolManager",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "tokenA",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
       },
       {
         "name": "tickLower",
@@ -10094,117 +4025,58 @@ export const pledgeV4LiquidityVaultAbi = [
         "type": "int24",
         "indexed": false,
         "internalType": "int24"
-      },
-      {
-        "name": "positionSalt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "PositionClaimsRedeemed",
+    "name": "PositionTransferPreparationCancelled",
     "inputs": [
       {
-        "name": "holder",
-        "type": "address",
+        "name": "tokenId",
+        "type": "uint256",
         "indexed": true,
-        "internalType": "address"
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionTransferPrepared",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "UntrackedPositionRecovered",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
       },
       {
         "name": "recipient",
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      },
-      {
-        "name": "claims",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint128",
-        "indexed": false,
-        "internalType": "uint128"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PositionClaimsReleased",
-    "inputs": [
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "claims",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Transfer",
-    "inputs": [
-      {
-        "name": "from",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
   },
   {
     "type": "error",
-    "name": "AllowanceOverflow",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "AllowanceUnderflow",
+    "name": "BoardroomExitForbidden",
     "inputs": []
   },
   {
@@ -10214,12 +4086,7 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "BoardroomNotWindingDown",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "Expired",
+    "name": "DeadlineExpired",
     "inputs": [
       {
         "name": "deadline",
@@ -10230,61 +4097,10 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "InsufficientAllowance",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InsufficientBalance",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidAmount",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitialization",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidLiquidityState",
+    "name": "EmptyPosition",
     "inputs": [
       {
-        "name": "expected",
-        "type": "uint8",
-        "internalType": "enum PledgeV4LiquidityVault.LiquidityState"
-      },
-      {
-        "name": "actual",
-        "type": "uint8",
-        "internalType": "enum PledgeV4LiquidityVault.LiquidityState"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidPermit",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidUnlockCallback",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "LiquidityOverflow",
-    "inputs": [
-      {
-        "name": "liquidity",
+        "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -10292,7 +4108,72 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "NotInitializing",
+    "name": "HookedPool",
+    "inputs": [
+      {
+        "name": "hook",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPoolConfiguration",
+    "inputs": [
+      {
+        "name": "poolFee",
+        "type": "uint24",
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing",
+        "type": "int24",
+        "internalType": "int24"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPositionInfo",
+    "inputs": [
+      {
+        "name": "positionInfo",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPositionPair",
+    "inputs": [
+      {
+        "name": "actualCurrency0",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actualCurrency1",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LockerAlreadyClosed",
     "inputs": []
   },
   {
@@ -10308,7 +4189,7 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "OnlyFactory",
+    "name": "OnlyPositionManager",
     "inputs": [
       {
         "name": "caller",
@@ -10319,10 +4200,26 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "OnlyPoolManager",
+    "name": "PositionAlreadyRegistered",
     "inputs": [
       {
-        "name": "caller",
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PositionNotOwned",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "owner",
         "type": "address",
         "internalType": "address"
       }
@@ -10330,20 +4227,15 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "Permit2AllowanceIsFixedAtInfinity",
+    "name": "PositionNotRegistered",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "PermitExpired",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "PositionNotEmpty",
+    "name": "PositionTransferNotPrepared",
     "inputs": [
       {
-        "name": "liquidity",
+        "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -10356,25 +4248,10 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "SlippageExceeded",
+    "name": "SubscribedPosition",
     "inputs": [
       {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minimumA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minimumB",
+        "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -10382,62 +4259,10 @@ export const pledgeV4LiquidityVaultAbi = [
   },
   {
     "type": "error",
-    "name": "TotalSupplyOverflow",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedCurrencyDelta",
+    "name": "TrackedPosition",
     "inputs": [
       {
-        "name": "currency",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delta",
-        "type": "int128",
-        "internalType": "int128"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedPoolManagerTransfer",
-    "inputs": [
-      {
-        "name": "currency",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedSettlement",
-    "inputs": [
-      {
-        "name": "currency",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "paid",
+        "name": "tokenId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -10471,17 +4296,22 @@ export const pledgeV4LiquidityVaultAbi = [
   }
 ] as const;
 
-export const pledgeV4HookAbi = [
+export const liquidityLockerFactoryAbi = [
   {
     "type": "constructor",
     "inputs": [
       {
-        "name": "poolManager_",
+        "name": "boardroomFactory_",
         "type": "address",
-        "internalType": "contract IPoolManager"
+        "internalType": "address"
       },
       {
-        "name": "factory_",
+        "name": "positionManager_",
+        "type": "address",
+        "internalType": "contract IPositionManager"
+      },
+      {
+        "name": "protocolFeeRouter_",
         "type": "address",
         "internalType": "address"
       }
@@ -10490,807 +4320,176 @@ export const pledgeV4HookAbi = [
   },
   {
     "type": "function",
-    "name": "REQUIRED_FLAGS",
+    "name": "allLockers",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "allLockersLength",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "uint160",
-        "internalType": "uint160"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "afterAddLiquidity",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.ModifyLiquidityParams",
-        "components": [
-          {
-            "name": "tickLower",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "tickUpper",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "liquidityDelta",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "afterDonate",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "afterInitialize",
-    "inputs": [
+    "name": "boardroomFactory",
+    "inputs": [],
+    "outputs": [
       {
         "name": "",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "uint160",
-        "internalType": "uint160"
-      },
-      {
-        "name": "",
-        "type": "int24",
-        "internalType": "int24"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "afterRemoveLiquidity",
+    "name": "createLocker",
     "inputs": [
       {
-        "name": "",
+        "name": "quoteAsset",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.ModifyLiquidityParams",
-        "components": [
-          {
-            "name": "tickLower",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "tickUpper",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "liquidityDelta",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "afterSwap",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.SwapParams",
-        "components": [
-          {
-            "name": "zeroForOne",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "amountSpecified",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "sqrtPriceLimitX96",
-            "type": "uint160",
-            "internalType": "uint160"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BalanceDelta"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "",
-        "type": "int128",
-        "internalType": "int128"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforeAddLiquidity",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.ModifyLiquidityParams",
-        "components": [
-          {
-            "name": "tickLower",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "tickUpper",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "liquidityDelta",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforeDonate",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforeInitialize",
-    "inputs": [
-      {
-        "name": "sender",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "key",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "uint160",
-        "internalType": "uint160"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforeRemoveLiquidity",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.ModifyLiquidityParams",
-        "components": [
-          {
-            "name": "tickLower",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "tickUpper",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "liquidityDelta",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforeSwap",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct PoolKey",
-        "components": [
-          {
-            "name": "currency0",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "currency1",
-            "type": "address",
-            "internalType": "Currency"
-          },
-          {
-            "name": "fee",
-            "type": "uint24",
-            "internalType": "uint24"
-          },
-          {
-            "name": "tickSpacing",
-            "type": "int24",
-            "internalType": "int24"
-          },
-          {
-            "name": "hooks",
-            "type": "address",
-            "internalType": "contract IHooks"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct IPoolManager.SwapParams",
-        "components": [
-          {
-            "name": "zeroForOne",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "amountSpecified",
-            "type": "int256",
-            "internalType": "int256"
-          },
-          {
-            "name": "sqrtPriceLimitX96",
-            "type": "uint160",
-            "internalType": "uint160"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "BeforeSwapDelta"
-      },
-      {
-        "name": "",
+        "name": "poolFee",
         "type": "uint24",
         "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing",
+        "type": "int24",
+        "internalType": "int24"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isLocker",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "canonical",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "factory",
+    "name": "lockerOfBoardroom",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "positionManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPositionManager"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "predictLockerAddress",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "poolFee",
+        "type": "uint24",
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing",
+        "type": "int24",
+        "internalType": "int24"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "predicted",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "protocolFeeRouter",
     "inputs": [],
     "outputs": [
       {
@@ -11302,114 +4501,70 @@ export const pledgeV4HookAbi = [
     "stateMutability": "view"
   },
   {
-    "type": "function",
-    "name": "permissions",
-    "inputs": [],
-    "outputs": [
+    "type": "event",
+    "name": "LiquidityLockerCreated",
+    "inputs": [
       {
-        "name": "result",
-        "type": "tuple",
-        "internalType": "struct Hooks.Permissions",
-        "components": [
-          {
-            "name": "beforeInitialize",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterInitialize",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "beforeAddLiquidity",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterAddLiquidity",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "beforeRemoveLiquidity",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterRemoveLiquidity",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "beforeSwap",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterSwap",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "beforeDonate",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterDonate",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "beforeSwapReturnDelta",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterSwapReturnDelta",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterAddLiquidityReturnDelta",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "afterRemoveLiquidityReturnDelta",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ]
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "poolFee",
+        "type": "uint24",
+        "indexed": false,
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing",
+        "type": "int24",
+        "indexed": false,
+        "internalType": "int24"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
       }
     ],
-    "stateMutability": "pure"
+    "anonymous": false
   },
   {
-    "type": "function",
-    "name": "poolManager",
-    "inputs": [],
-    "outputs": [
+    "type": "error",
+    "name": "ActiveLockerExists",
+    "inputs": [
       {
-        "name": "",
+        "name": "boardroom",
         "type": "address",
-        "internalType": "contract IPoolManager"
+        "internalType": "address"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
       }
-    ],
-    "stateMutability": "view"
+    ]
   },
   {
     "type": "error",
     "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyPoolManager",
     "inputs": [
       {
-        "name": "caller",
+        "name": "account",
         "type": "address",
         "internalType": "address"
       }
@@ -11417,25 +4572,152 @@ export const pledgeV4HookAbi = [
   },
   {
     "type": "error",
-    "name": "PoolInitializationNotAuthorized",
+    "name": "InvalidBoardroom",
     "inputs": [
       {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
   {
     "type": "error",
-    "name": "UnsupportedHookCallback",
+    "name": "Reentrancy",
+    "inputs": []
+  }
+] as const;
+
+export const positionManagerAbi = [
+  {
+    "type": "function",
+    "name": "getPoolAndPositionInfo",
     "inputs": [
       {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
       }
-    ]
+    ],
+    "outputs": [
+      {
+        "name": "poolKey",
+        "type": "tuple",
+        "internalType": "struct PoolKey",
+        "components": [
+          {
+            "name": "currency0",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "currency1",
+            "type": "address",
+            "internalType": "Currency"
+          },
+          {
+            "name": "fee",
+            "type": "uint24",
+            "internalType": "uint24"
+          },
+          {
+            "name": "tickSpacing",
+            "type": "int24",
+            "internalType": "int24"
+          },
+          {
+            "name": "hooks",
+            "type": "address",
+            "internalType": "contract IHooks"
+          }
+        ]
+      },
+      {
+        "name": "positionInfo",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPositionLiquidity",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "modifyLiquidities",
+    "inputs": [
+      {
+        "name": "unlockData",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "ownerOf",
+    "inputs": [
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "safeTransferFrom",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   }
 ] as const;
 
@@ -11728,6 +5010,282 @@ export const protocolFeeRouterAbi = [
   {
     "type": "error",
     "name": "Reentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized",
+    "inputs": []
+  }
+] as const;
+
+export const pledgeCashDeterministicDeployerAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "owner_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "cancelOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "completeOwnershipHandover",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "deploy",
+    "inputs": [
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "initCode",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "deployed",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "initCodeHashForSalt",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ownershipHandoverExpiresAt",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "predict",
+    "inputs": [
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "requestOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "event",
+    "name": "DeterministicContractDeployed",
+    "inputs": [
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "deployed",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "initCodeHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverCanceled",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverRequested",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "oldOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptyInitCode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InitCodeHashMismatch",
+    "inputs": [
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NewOwnerIsZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoHandoverRequest",
     "inputs": []
   },
   {
@@ -12720,45 +6278,6 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "canCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "cancelOwnershipHandover",
     "inputs": [],
     "outputs": [],
@@ -12858,87 +6377,6 @@ export const tokenGrantFactoryAbi = [
       }
     ],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "createGrantFromDistribution",
-    "inputs": [
-      {
-        "name": "issuer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct TokenGrantFactory.GrantCreateParams",
-        "components": [
-          {
-            "name": "holder",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "token",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "paymentToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "price",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "expiry",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "vestingCliff",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "vestingEnd",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "transferable",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "transferUnlockTime",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "salt",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -13049,35 +6487,6 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "isLifecycleCallAllowed",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "name",
     "inputs": [],
     "outputs": [
@@ -13088,62 +6497,6 @@ export const tokenGrantFactoryAbi = [
       }
     ],
     "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "obligationForCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "obligation",
-        "type": "tuple",
-        "internalType": "struct IBoardroomObligationPolicy.Obligation",
-        "components": [
-          {
-            "name": "kind",
-            "type": "uint8",
-            "internalType": "enum IBoardroomObligationPolicy.ObligationKind"
-          },
-          {
-            "name": "account",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "aux",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -13859,22 +7212,6 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "error",
-    "name": "UnauthorizedGrantIssuer",
-    "inputs": [
-      {
-        "name": "issuer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "UnexpectedTokenBalanceChange",
     "inputs": [
       {
@@ -13907,1690 +7244,18 @@ export const tokenGrantFactoryAbi = [
   }
 ] as const;
 
-export const boardroomKernelAbi = [
-  {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "facetRegistry_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "fallback",
-    "stateMutability": "payable"
-  },
-  {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "appliedStorageLayoutHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "appliedStorageVersion",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IBoardroomFacetRegistry"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "initialize",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "initData",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "kernelSelectorSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "migrationRequired",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "viewDispatcher",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "error",
-    "name": "ActiveReleaseChanged",
-    "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expectedStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "actualStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "expectedStorageLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualStorageLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "AlreadyMigrated",
-    "inputs": [
-      {
-        "name": "appliedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "AppliedStorageLayoutMismatch",
-    "inputs": [
-      {
-        "name": "appliedLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "requiredLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetCodeHashMismatch",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetSetHashMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidFacet",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationMigrationRoute",
-    "inputs": [
-      {
-        "name": "expectedFacet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "routeFacet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationRoute",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidInitializationState",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidKernelSelectorSetHash",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRegistry",
-    "inputs": [
-      {
-        "name": "registry",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRouteKind",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidViewRollbackEnvelope",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "KernelMetadataCorrupted",
-    "inputs": [
-      {
-        "name": "initialized",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "initializing",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "migrating",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationPostconditionFailed",
-    "inputs": [
-      {
-        "name": "expectedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "actualVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "expectedLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actualLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationReentrancy",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "MissingExpectedFacetSetHash",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NotInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "RegistryCallFailed",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "RouteStorageVersionMismatch",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "routeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "activeVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "StorageMigrationRequired",
-    "inputs": [
-      {
-        "name": "appliedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requiredVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnknownSelector",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ViewDispatchDidNotRollback",
-    "inputs": []
-  }
-] as const;
-
-export const protocolFacetRegistryAbi = [
-  {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "protocolGovernance",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "reservedKernelSelectors_",
-        "type": "bytes4[]",
-        "internalType": "bytes4[]"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "MAX_RESERVED_KERNEL_SELECTORS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_SELECTORS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activateFacetSet",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "activeFacetSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activeMigration",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activeRelease",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activeStorageLayoutHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activeStorageVersion",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "cancelOwnershipHandover",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "completeOwnershipHandover",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "computeFacetSetHash",
-    "inputs": [
-      {
-        "name": "manifest",
-        "type": "tuple",
-        "internalType": "struct ProtocolFacetTypes.FacetSetManifest",
-        "components": [
-          {
-            "name": "release",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "requiredStorageVersion",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "predecessorFacetSetHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "storageLayoutHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "manifestHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "routes",
-            "type": "tuple[]",
-            "internalType": "struct ProtocolFacetTypes.RouteDefinition[]",
-            "components": [
-              {
-                "name": "selector",
-                "type": "bytes4",
-                "internalType": "bytes4"
-              },
-              {
-                "name": "facet",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "codeHash",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
-                "name": "kind",
-                "type": "uint8",
-                "internalType": "enum ProtocolFacetTypes.RouteKind"
-              }
-            ]
-          },
-          {
-            "name": "migrationFacet",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "migrationSelector",
-            "type": "bytes4",
-            "internalType": "bytes4"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "facetAddress",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetAddresses",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetFunctionSelectors",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4[]",
-        "internalType": "bytes4[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetHashForRelease",
-    "inputs": [
-      {
-        "name": "release",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetMetadata",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "published",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "release",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requiredStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "predecessorFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "storageLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "manifestHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "migrationFacet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "migrationSelector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "selectorCount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetRoute",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "codeHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facetSetSelectors",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4[]",
-        "internalType": "bytes4[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "facets",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "tuple[]",
-        "internalType": "struct ProtocolFacetTypes.Facet[]",
-        "components": [
-          {
-            "name": "facetAddress",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "functionSelectors",
-            "type": "bytes4[]",
-            "internalType": "bytes4[]"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isFacetSetPublished",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isReservedKernelSelector",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "reserved",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "kernelSelectorSetHash",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "owner",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ownershipHandoverExpiresAt",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "publishFacetSet",
-    "inputs": [
-      {
-        "name": "manifest",
-        "type": "tuple",
-        "internalType": "struct ProtocolFacetTypes.FacetSetManifest",
-        "components": [
-          {
-            "name": "release",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "requiredStorageVersion",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "predecessorFacetSetHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "storageLayoutHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "manifestHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "routes",
-            "type": "tuple[]",
-            "internalType": "struct ProtocolFacetTypes.RouteDefinition[]",
-            "components": [
-              {
-                "name": "selector",
-                "type": "bytes4",
-                "internalType": "bytes4"
-              },
-              {
-                "name": "facet",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "codeHash",
-                "type": "bytes32",
-                "internalType": "bytes32"
-              },
-              {
-                "name": "kind",
-                "type": "uint8",
-                "internalType": "enum ProtocolFacetTypes.RouteKind"
-              }
-            ]
-          },
-          {
-            "name": "migrationFacet",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "migrationSelector",
-            "type": "bytes4",
-            "internalType": "bytes4"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "renounceOwnership",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "requestOwnershipHandover",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "reservedKernelSelectors",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4[]",
-        "internalType": "bytes4[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "route",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "codeHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "requiredStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "transferOwnership",
-    "inputs": [
-      {
-        "name": "newOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "event",
-    "name": "FacetRoutePublished",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "release",
-        "type": "uint64",
-        "indexed": true,
-        "internalType": "uint64"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "indexed": true,
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "codeHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "indexed": false,
-        "internalType": "enum ProtocolFacetTypes.RouteKind"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "FacetSetActivated",
-    "inputs": [
-      {
-        "name": "previousFacetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "release",
-        "type": "uint64",
-        "indexed": true,
-        "internalType": "uint64"
-      },
-      {
-        "name": "requiredStorageVersion",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      },
-      {
-        "name": "storageLayoutHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "manifestHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "migrationFacet",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "migrationSelector",
-        "type": "bytes4",
-        "indexed": false,
-        "internalType": "bytes4"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "FacetSetPublished",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "release",
-        "type": "uint64",
-        "indexed": true,
-        "internalType": "uint64"
-      },
-      {
-        "name": "requiredStorageVersion",
-        "type": "uint64",
-        "indexed": true,
-        "internalType": "uint64"
-      },
-      {
-        "name": "predecessorFacetSetHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "storageLayoutHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "manifestHash",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "selectorCount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "migrationFacet",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "migrationSelector",
-        "type": "bytes4",
-        "indexed": false,
-        "internalType": "bytes4"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipHandoverCanceled",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipHandoverRequested",
-    "inputs": [
-      {
-        "name": "pendingOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "OwnershipTransferred",
-    "inputs": [
-      {
-        "name": "oldOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newOwner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "FacetCodeHashMismatch",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetSetAlreadyPublished",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FacetSetNotPublished",
-    "inputs": [
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidFacet",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidKernelSelectorSetHash",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "actual",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidManifestHash",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidMigrationRoute",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidPredecessorFacetSet",
-    "inputs": [
-      {
-        "name": "predecessorFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "release",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRelease",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidStorageLayoutHash",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "MigrationRequired",
-    "inputs": [
-      {
-        "name": "currentVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requestedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationRouteContinuityRequired",
-    "inputs": [
-      {
-        "name": "predecessorFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "requiredStorageVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NewOwnerIsZeroAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NoHandoverRequest",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ReleaseAlreadyPublished",
-    "inputs": [
-      {
-        "name": "release",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "facetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ReleaseNotIncreasing",
-    "inputs": [
-      {
-        "name": "currentRelease",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requestedRelease",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ReservedKernelSelector",
-    "inputs": [
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "SelectorsNotStrictlyAscending",
-    "inputs": [
-      {
-        "name": "previous",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      },
-      {
-        "name": "current",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "StorageLayoutChangeRequiresMigration",
-    "inputs": [
-      {
-        "name": "currentLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "requestedLayoutHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "StorageVersionDecreased",
-    "inputs": [
-      {
-        "name": "currentVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "requestedVersion",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManySelectors",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "Unauthorized",
-    "inputs": []
-  }
-] as const;
-
 export const pledgeCashAbis = {
   Boardroom: boardroomAbi,
-  BoardroomController: boardroomControllerAbi,
-  BoardroomControllerFactory: boardroomControllerFactoryAbi,
   BoardroomFactory: boardroomFactoryAbi,
-  BoardroomPolicyRegistry: boardroomPolicyRegistryAbi,
   BoardroomToken: boardroomTokenAbi,
   ERC20: erc20Abi,
-  IBoardroomCallPolicy: boardroomCallPolicyAbi,
-  IBoardroomPolicyRegistry: boardroomPolicyRegistryInterfaceAbi,
-  PledgeV4LiquidityFactory: pledgeV4LiquidityFactoryAbi,
-  PledgeV4LiquidityVault: pledgeV4LiquidityVaultAbi,
-  PledgeV4Hook: pledgeV4HookAbi,
+  LiquidityLocker: liquidityLockerAbi,
+  LiquidityLockerFactory: liquidityLockerFactoryAbi,
+  PositionManager: positionManagerAbi,
   ProtocolFeeRouter: protocolFeeRouterAbi,
+  PledgeCashDeterministicDeployer: pledgeCashDeterministicDeployerAbi,
   TokenGrant: tokenGrantAbi,
-  TokenGrantFactory: tokenGrantFactoryAbi,
-  BoardroomKernel: boardroomKernelAbi,
-  ProtocolFacetRegistry: protocolFacetRegistryAbi
+  TokenGrantFactory: tokenGrantFactoryAbi
 } as const;
 
 export const pledgeCashDeployments = {
