@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "build": "forge build",
-    "check:boardroom-manifests": "bun script/check-boardroom-diamond-manifests.ts",
     "deploy:network": "script/deploy-network.sh",
     "deploy:sepolia": "script/deploy-network.sh 11155111 --broadcast",
     "deploy:base-sepolia": "script/deploy-network.sh 84532 --broadcast",
