@@ -6,7 +6,8 @@ import {BoardroomFactory} from "../boardroom/BoardroomFactory.sol";
 import {BoardroomToken} from "../boardroom/BoardroomToken.sol";
 import {ProtocolFeeRouter} from "../fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
-import {PledgeV4LiquidityFactory} from "../uniswap/PledgeV4LiquidityFactory.sol";
+import {LiquidityLocker} from "../uniswap/LiquidityLocker.sol";
+import {LiquidityLockerFactory} from "../uniswap/LiquidityLockerFactory.sol";
 import {PledgeCashDeterministicDeployer} from "./PledgeCashDeterministicDeployer.sol";
 
 /// @notice Bytecode-bound salts for the sole canonical pledge.cash protocol release.
@@ -39,8 +40,8 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("TokenGrantFactory", keccak256(type(TokenGrantFactory).creationCode));
     }
 
-    function pledgeV4LiquidityFactory() internal pure returns (bytes32) {
-        return _releaseSalt("PledgeV4LiquidityFactory", keccak256(type(PledgeV4LiquidityFactory).creationCode));
+    function liquidityLockerFactory() internal pure returns (bytes32) {
+        return _releaseSalt("LiquidityLockerFactory", keccak256(type(LiquidityLockerFactory).creationCode));
     }
 
     function boardroomArchitectureCodeHash() internal pure returns (bytes32) {
@@ -58,7 +59,8 @@ library PledgeCashDeploymentSalts {
             abi.encode(
                 keccak256(type(ProtocolFeeRouter).creationCode),
                 keccak256(type(TokenGrantFactory).creationCode),
-                keccak256(type(PledgeV4LiquidityFactory).creationCode)
+                keccak256(type(LiquidityLockerFactory).creationCode),
+                keccak256(type(LiquidityLocker).creationCode)
             )
         );
     }

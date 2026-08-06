@@ -1,0 +1,509 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+
+import {Test} from "forge-std/Test.sol";
+import {ERC20} from "solady/tokens/ERC20.sol";
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {Currency} from "v4-core/types/Currency.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
+import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
+import {LiquidityLocker} from "../../src/uniswap/LiquidityLocker.sol";
+import {LiquidityLockerFactory} from "../../src/uniswap/LiquidityLockerFactory.sol";
+import {PositionManagerActions} from "../../src/uniswap/PositionManagerActions.sol";
+import {PositionManagerMock} from "../helpers/PositionManagerMock.sol";
+
+contract LockerTestToken is ERC20 {
+    string internal tokenName;
+    string internal tokenSymbol;
+
+    constructor(string memory name_, string memory symbol_) {
+        tokenName = name_;
+        tokenSymbol = symbol_;
+    }
+
+    function name() public view override returns (string memory) {
+        return tokenName;
+    }
+
+    function symbol() public view override returns (string memory) {
+        return tokenSymbol;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+contract LockerWrappedNative is LockerTestToken {
+    constructor() LockerTestToken("Wrapped Ether", "WETH") {}
+
+    function deposit() external payable {
+        _mint(msg.sender, msg.value);
+    }
+}
+
+contract LockerFeeToken {
+    string public constant name = "Fee Token";
+    string public constant symbol = "FEE";
+    uint8 public constant decimals = 18;
+    uint256 public totalSupply;
+    mapping(address account => uint256 balance) public balanceOf;
+    mapping(address owner => mapping(address spender => uint256 amount)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _move(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        _move(from, to, amount);
+        return true;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function _move(address from, address to, uint256 amount) internal {
+        uint256 fee = amount / 100;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount - fee;
+        totalSupply -= fee;
+    }
+}
+
+contract LiquidityLockerTest is Test {
+    uint256 internal constant TOKEN_ID = 41;
+    bytes32 internal constant BOARDROOM_SALT = keccak256("locker-boardroom");
+    bytes32 internal constant LOCKER_SALT = keccak256("locker");
+
+    LockerWrappedNative internal wrappedNative;
+    LockerTestToken internal quote;
+    BoardroomFactory internal boardroomFactory;
+    Boardroom internal boardroom;
+    PositionManagerMock internal positionManager;
+    ProtocolFeeRouter internal protocolFeeRouter;
+    LiquidityLockerFactory internal lockerFactory;
+    LiquidityLocker internal locker;
+
+    address internal protocolRecipient = makeAddr("protocol-recipient");
+    address internal alice = makeAddr("alice");
+
+    function setUp() public {
+        wrappedNative = new LockerWrappedNative();
+        quote = new LockerTestToken("Quote", "QUOTE");
+        boardroomFactory = new BoardroomFactory(address(wrappedNative));
+        boardroom =
+            Boardroom(payable(boardroomFactory.createBoardroom(address(this), "Pledge", "PLDG", BOARDROOM_SALT)));
+        positionManager = new PositionManagerMock();
+        protocolFeeRouter = new ProtocolFeeRouter(address(this), protocolRecipient);
+        lockerFactory =
+            new LiquidityLockerFactory(address(boardroomFactory), positionManager, address(protocolFeeRouter));
+        locker = _createLocker(boardroom, address(quote), LOCKER_SALT);
+    }
+
+    function testFactoryCreatesDeterministicLockerAndRegistersObligationAtomically() public view {
+        assertEq(
+            address(locker),
+            lockerFactory.predictLockerAddress(address(boardroom), address(quote), 3_000, 60, LOCKER_SALT)
+        );
+        assertTrue(lockerFactory.isLocker(address(locker)));
+        assertEq(lockerFactory.lockerOfBoardroom(address(boardroom)), address(locker));
+        assertEq(lockerFactory.allLockersLength(), 1);
+        assertEq(locker.boardroom(), address(boardroom));
+        assertEq(locker.shareToken(), boardroom.shareToken());
+        assertEq(locker.quoteAsset(), address(quote));
+        assertEq(address(locker.positionManager()), address(positionManager));
+        assertEq(locker.protocolFeeRouter(), address(protocolFeeRouter));
+
+        (address registrar, IBoardroom.ObligationKind kind, bool active, bool everRegistered) =
+            boardroom.obligationOf(address(locker));
+        assertEq(registrar, address(lockerFactory));
+        assertEq(uint256(kind), uint256(IBoardroom.ObligationKind.Liquidity));
+        assertTrue(active);
+        assertTrue(everRegistered);
+        assertEq(boardroom.obligationDependencyCount(address(locker)), 1);
+        assertEq(boardroom.obligationDependencyAt(address(locker), 0), address(quote));
+        assertTrue(boardroom.isRedeemableAsset(address(quote)));
+    }
+
+    function testFactoryRejectsEveryCanonicalBoardroomShareTokenAsQuote() public {
+        Boardroom other = Boardroom(
+            payable(boardroomFactory.createBoardroom(address(this), "Other", "OTHR", keccak256("other-board")))
+        );
+        address otherShareToken = other.shareToken();
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLockerFactory.InvalidAddress.selector, otherShareToken));
+        boardroom.execute(
+            IBoardroom.Call({
+                target: address(lockerFactory),
+                value: 0,
+                data: abi.encodeCall(
+                    lockerFactory.createLocker,
+                    (otherShareToken, uint24(3_000), int24(60), keccak256("invalid-share-quote"))
+                )
+            })
+        );
+    }
+
+    function testConstructorRejectsNonCanonicalPoolParameters() public {
+        address shares = boardroom.shareToken();
+        vm.expectRevert(
+            abi.encodeWithSelector(LiquidityLocker.InvalidPoolConfiguration.selector, uint24(1_000_001), int24(60))
+        );
+        new LiquidityLocker(
+            address(boardroom), positionManager, address(protocolFeeRouter), shares, address(quote), 1_000_001, 60
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(LiquidityLocker.InvalidPoolConfiguration.selector, uint24(3_000), int24(32_768))
+        );
+        new LiquidityLocker(
+            address(boardroom), positionManager, address(protocolFeeRouter), shares, address(quote), 3_000, 32_768
+        );
+    }
+
+    function testDirectCcaMintRequiresBoardroomRegistration() public {
+        _mintPosition(locker, TOKEN_ID, address(0), 100, 200, 1_000);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.OnlyBoardroom.selector, alice));
+        locker.registerPosition(TOKEN_ID);
+
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID)));
+        assertTrue(locker.positionRegistered());
+        assertEq(locker.tokenId(), TOKEN_ID);
+        assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
+    }
+
+    function testPreparedSafeTransferRegistersExactPosition() public {
+        _mintPositionTo(address(this), TOKEN_ID, _poolKey(locker, address(0)), 100, 200, 1_000);
+        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
+        positionManager.safeTransferFrom(address(this), address(locker), TOKEN_ID);
+
+        assertTrue(locker.positionRegistered());
+        assertFalse(locker.transferPrepared());
+        assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
+    }
+
+    function testPreparedSafeTransferCannotBeFrontRunWithAnotherSamePoolNft() public {
+        _mintPositionTo(address(this), TOKEN_ID, _poolKey(locker, address(0)), 100, 200, 1_000);
+        _mintPositionTo(alice, TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
+        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.PositionTransferNotPrepared.selector, TOKEN_ID + 1));
+        positionManager.safeTransferFrom(alice, address(locker), TOKEN_ID + 1);
+        assertEq(positionManager.ownerOf(TOKEN_ID + 1), alice);
+
+        positionManager.safeTransferFrom(address(this), address(locker), TOKEN_ID);
+        assertEq(locker.tokenId(), TOKEN_ID);
+    }
+
+    function testRejectsHookedWrongPairEmptyAndMalformedPositions() public {
+        PoolKey memory hooked = _poolKey(locker, address(0xBEEF));
+        _mintPositionTo(address(locker), 1, hooked, 100, 200, 1_000);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.HookedPool.selector, address(0xBEEF)));
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (1)));
+
+        LockerTestToken wrong = new LockerTestToken("Wrong", "WRONG");
+        PoolKey memory wrongPair = PoolKey({
+            currency0: Currency.wrap(address(wrong) < address(quote) ? address(wrong) : address(quote)),
+            currency1: Currency.wrap(address(wrong) < address(quote) ? address(quote) : address(wrong)),
+            fee: 3_000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
+        _mintPositionTo(address(locker), 2, wrongPair, 100, 200, 1_000);
+        vm.expectPartialRevert(LiquidityLocker.InvalidPositionPair.selector);
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (2)));
+
+        _mintPositionTo(address(locker), 3, _poolKey(locker, address(0)), 100, 200, 0);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.EmptyPosition.selector, 3));
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (3)));
+
+        positionManager.mintDirect(address(locker), 4, _poolKey(locker, address(0)), 100, 100, 1_000, 100, 100);
+        vm.expectPartialRevert(LiquidityLocker.InvalidPositionInfo.selector);
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (4)));
+
+        PoolKey memory wrongFee = _poolKey(locker, address(0));
+        wrongFee.fee = 500;
+        _mintPositionTo(address(locker), 5, wrongFee, 100, 200, 1_000);
+        vm.expectPartialRevert(LiquidityLocker.InvalidPositionInfo.selector);
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (5)));
+
+        PoolKey memory wrongTickSpacing = _poolKey(locker, address(0));
+        wrongTickSpacing.tickSpacing = 10;
+        _mintPositionTo(address(locker), 6, wrongTickSpacing, 100, 200, 1_000);
+        vm.expectPartialRevert(LiquidityLocker.InvalidPositionInfo.selector);
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (6)));
+
+        _mintPositionTo(address(locker), 7, _poolKey(locker, address(0)), 100, 200, 1_000);
+        positionManager.setSubscriberFlag(7, true);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.SubscribedPosition.selector, 7));
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (7)));
+    }
+
+    function testOnePositionOnlyAndOnlyCanonicalManagerCallback() public {
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _mintPositionTo(address(locker), TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.PositionAlreadyRegistered.selector, TOKEN_ID));
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID + 1)));
+
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.OnlyPositionManager.selector, address(this)));
+        locker.onERC721Received(address(this), address(this), TOKEN_ID + 2, "");
+    }
+
+    function testUnsafeTransferCannotFillTrackedSlotAndCanBeRecovered() public {
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _mintPositionTo(alice, TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
+
+        vm.prank(alice);
+        positionManager.transferFrom(alice, address(locker), TOKEN_ID + 1);
+        assertEq(locker.tokenId(), TOKEN_ID);
+        assertTrue(locker.positionRegistered());
+        assertEq(positionManager.ownerOf(TOKEN_ID + 1), address(locker));
+
+        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.TrackedPosition.selector, TOKEN_ID));
+        _executeLocker(locker, abi.encodeCall(locker.recoverUntrackedPosition, (TOKEN_ID, alice)));
+        _executeLocker(locker, abi.encodeCall(locker.recoverUntrackedPosition, (TOKEN_ID + 1, alice)));
+        assertEq(positionManager.ownerOf(TOKEN_ID + 1), alice);
+        assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
+    }
+
+    function testCollectFeesUsesCanonicalActionsExactDeltasAndFloorRounding() public {
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _fundManager(locker, 1_019, 2_039);
+        positionManager.accrueFees(TOKEN_ID, 1_019, 2_039);
+
+        vm.prank(alice);
+        (uint256 boardroom0, uint256 boardroom1, uint256 protocol0, uint256 protocol1) = locker.collectFees();
+        assertEq(protocol0, 50);
+        assertEq(protocol1, 101);
+        assertEq(boardroom0, 969);
+        assertEq(boardroom1, 1_938);
+        _assertCurrencyBalance(locker.currency0(), address(protocolFeeRouter), protocol0);
+        _assertCurrencyBalance(locker.currency1(), address(protocolFeeRouter), protocol1);
+        _assertCurrencyBalance(locker.currency0(), address(boardroom), boardroom0);
+        _assertCurrencyBalance(locker.currency1(), address(boardroom), boardroom1);
+
+        bytes memory actions = positionManager.lastActions();
+        assertEq(uint8(actions[0]), PositionManagerActions.DECREASE_LIQUIDITY);
+        assertEq(uint8(actions[1]), PositionManagerActions.TAKE_PAIR);
+    }
+
+    function testFuzzFeeSplitRounding(uint128 rawFee0, uint128 rawFee1) public {
+        uint128 fee0 = uint128(bound(rawFee0, 1, 1e24));
+        uint128 fee1 = uint128(bound(rawFee1, 1, 1e24));
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _fundManager(locker, fee0, fee1);
+        positionManager.accrueFees(TOKEN_ID, fee0, fee1);
+
+        (uint256 boardroom0, uint256 boardroom1, uint256 protocol0, uint256 protocol1) = locker.collectFees();
+        assertEq(protocol0, uint256(fee0) * 500 / 10_000);
+        assertEq(protocol1, uint256(fee1) * 500 / 10_000);
+        assertEq(boardroom0 + protocol0, fee0);
+        assertEq(boardroom1 + protocol1, fee1);
+    }
+
+    function testReentrantPositionManagerCallbackIsRejected() public {
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _fundManager(locker, 100, 200);
+        positionManager.accrueFees(TOKEN_ID, 100, 200);
+        positionManager.configureReentry(address(locker));
+
+        locker.collectFees();
+        assertTrue(positionManager.reentryAttempted());
+        assertFalse(positionManager.reentrySucceeded());
+    }
+
+    function testFeeOnTransferCurrencyRevertsAtomically() public {
+        LockerFeeToken feeToken = new LockerFeeToken();
+        Boardroom feeBoardroom = Boardroom(
+            payable(boardroomFactory.createBoardroom(address(this), "Fee Pledge", "FPLG", keccak256("fee-board")))
+        );
+        LiquidityLocker feeLocker = _createLocker(feeBoardroom, address(feeToken), keccak256("fee-locker"));
+        _mintPosition(feeLocker, 77, address(0), 100, 200, 1_000);
+        _executeLocker(feeBoardroom, feeLocker, abi.encodeCall(feeLocker.registerPosition, (77)));
+
+        _fundManager(feeBoardroom, feeLocker, feeToken, 1_000, 1_000);
+        positionManager.accrueFees(77, 1_000, 1_000);
+        vm.expectPartialRevert(LiquidityLocker.UnexpectedTokenTransfer.selector);
+        feeLocker.collectFees();
+        (,,,, uint128 fees0, uint128 fees1) = positionManager.positionState(77);
+        assertEq(fees0, 1_000);
+        assertEq(fees1, 1_000);
+    }
+
+    function testLifecycleGatesCollectionRegistrationAndExit() public {
+        _mintAndRegister(TOKEN_ID, 500, 700, 1_000);
+        _fundManager(locker, 550, 770);
+        positionManager.accrueFees(TOKEN_ID, 50, 70);
+
+        vm.expectRevert(LiquidityLocker.BoardroomExitForbidden.selector);
+        _executeLocker(locker, abi.encodeCall(locker.exit, (uint128(0), uint128(0), block.timestamp)));
+
+        boardroom.startWindDown();
+        // Fee collection remains permitted during the wind-down mutation window.
+        locker.collectFees();
+        vm.expectRevert(LiquidityLocker.BoardroomMutationForbidden.selector);
+        _executeObligation(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID)));
+
+        bytes memory actionsBeforeExit = positionManager.lastActions();
+        assertEq(uint8(actionsBeforeExit[0]), PositionManagerActions.DECREASE_LIQUIDITY);
+        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
+        assertTrue(locker.isClosed());
+        assertFalse(boardroom.isLockedLiquidity(address(locker)));
+        assertEq(boardroom.activeObligationCount(), 0);
+        bytes memory actions = positionManager.lastActions();
+        assertEq(uint8(actions[0]), PositionManagerActions.BURN_POSITION);
+        assertEq(uint8(actions[1]), PositionManagerActions.TAKE_PAIR);
+        _assertCurrencyBalance(locker.currency0(), address(locker), 0);
+        _assertCurrencyBalance(locker.currency1(), address(locker), 0);
+    }
+
+    function testExitHonorsMinimumsAndTransfersPrincipalAndUnsolicitedBalances() public {
+        _mintAndRegister(TOKEN_ID, 500, 700, 1_000);
+        _fundManager(locker, 500, 700);
+        _fundLocker(locker, 7, 11);
+        boardroom.startWindDown();
+
+        vm.expectPartialRevert(PositionManagerMock.SlippageExceeded.selector);
+        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(501), uint128(700), block.timestamp + 1)));
+        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
+        _assertCurrencyBalance(locker.currency0(), address(boardroom), 507);
+        _assertCurrencyBalance(locker.currency1(), address(boardroom), 711);
+    }
+
+    function testEmptyLockerCanCloseInActiveOrWindDownAndBeReplacedAfterPrune() public {
+        _executeLocker(locker, abi.encodeCall(locker.cancel, ()));
+        assertTrue(locker.isClosed());
+        vm.expectRevert(LiquidityLocker.LockerAlreadyClosed.selector);
+        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
+        boardroom.pruneObligation(address(locker));
+
+        LiquidityLocker replacement = _createLocker(boardroom, address(quote), keccak256("replacement"));
+        assertTrue(boardroom.isLockedLiquidity(address(replacement)));
+        boardroom.startWindDown();
+        _executeObligation(replacement, abi.encodeCall(replacement.cancel, ()));
+        assertTrue(replacement.isClosed());
+        assertEq(boardroom.activeObligationCount(), 0);
+    }
+
+    function _createLocker(Boardroom boardroom_, address quoteAsset, bytes32 salt)
+        internal
+        returns (LiquidityLocker created)
+    {
+        bytes memory result = boardroom_.execute(
+            IBoardroom.Call({
+                target: address(lockerFactory),
+                value: 0,
+                data: abi.encodeCall(lockerFactory.createLocker, (quoteAsset, uint24(3_000), int24(60), salt))
+            })
+        );
+        created = LiquidityLocker(abi.decode(result, (address)));
+    }
+
+    function _executeLocker(LiquidityLocker locker_, bytes memory data) internal returns (bytes memory) {
+        return _executeLocker(boardroom, locker_, data);
+    }
+
+    function _executeLocker(Boardroom boardroom_, LiquidityLocker locker_, bytes memory data)
+        internal
+        returns (bytes memory)
+    {
+        return boardroom_.execute(IBoardroom.Call({target: address(locker_), value: 0, data: data}));
+    }
+
+    function _executeObligation(LiquidityLocker locker_, bytes memory data) internal returns (bytes memory) {
+        return boardroom.executeObligation(address(locker_), data);
+    }
+
+    function _mintAndRegister(uint256 tokenId_, uint128 principal0, uint128 principal1, uint128 liquidity) internal {
+        _mintPosition(locker, tokenId_, address(0), principal0, principal1, liquidity);
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (tokenId_)));
+    }
+
+    function _mintPosition(
+        LiquidityLocker locker_,
+        uint256 tokenId_,
+        address hook,
+        uint128 principal0,
+        uint128 principal1,
+        uint128 liquidity
+    ) internal {
+        _mintPositionTo(address(locker_), tokenId_, _poolKey(locker_, hook), principal0, principal1, liquidity);
+    }
+
+    function _mintPositionTo(
+        address owner,
+        uint256 tokenId_,
+        PoolKey memory key,
+        uint128 principal0,
+        uint128 principal1,
+        uint128 liquidity
+    ) internal {
+        positionManager.mintDirect(owner, tokenId_, key, -120, 120, liquidity, principal0, principal1);
+    }
+
+    function _poolKey(LiquidityLocker locker_, address hook) internal view returns (PoolKey memory) {
+        return PoolKey({
+            currency0: Currency.wrap(locker_.currency0()),
+            currency1: Currency.wrap(locker_.currency1()),
+            fee: 3_000,
+            tickSpacing: 60,
+            hooks: IHooks(hook)
+        });
+    }
+
+    function _fundManager(LiquidityLocker locker_, uint256 amount0, uint256 amount1) internal {
+        _fundManager(boardroom, locker_, quote, amount0, amount1);
+    }
+
+    function _fundManager(
+        Boardroom boardroom_,
+        LiquidityLocker locker_,
+        LockerFeeToken quote_,
+        uint256 amount0,
+        uint256 amount1
+    ) internal {
+        uint256 shareAmount = locker_.currency0() == boardroom_.shareToken() ? amount0 : amount1;
+        uint256 quoteAmount = locker_.currency0() == address(quote_) ? amount0 : amount1;
+        if (shareAmount != 0) boardroom_.mint(address(positionManager), shareAmount);
+        if (quoteAmount != 0) quote_.mint(address(positionManager), quoteAmount);
+    }
+
+    function _fundManager(
+        Boardroom boardroom_,
+        LiquidityLocker locker_,
+        LockerTestToken quote_,
+        uint256 amount0,
+        uint256 amount1
+    ) internal {
+        uint256 shareAmount = locker_.currency0() == boardroom_.shareToken() ? amount0 : amount1;
+        uint256 quoteAmount = locker_.currency0() == address(quote_) ? amount0 : amount1;
+        if (shareAmount != 0) boardroom_.mint(address(positionManager), shareAmount);
+        if (quoteAmount != 0) quote_.mint(address(positionManager), quoteAmount);
+    }
+
+    function _fundLocker(LiquidityLocker locker_, uint256 amount0, uint256 amount1) internal {
+        uint256 shareAmount = locker_.currency0() == boardroom.shareToken() ? amount0 : amount1;
+        uint256 quoteAmount = locker_.currency0() == address(quote) ? amount0 : amount1;
+        if (shareAmount != 0) boardroom.mint(address(locker_), shareAmount);
+        if (quoteAmount != 0) quote.mint(address(locker_), quoteAmount);
+    }
+
+    function _assertCurrencyBalance(address currency, address account, uint256 expected) internal view {
+        assertEq(ERC20(currency).balanceOf(account), expected);
+    }
+}
