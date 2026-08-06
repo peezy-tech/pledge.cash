@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createSiweMessage } from "viem/siwe";
 
 import type { AuthSnapshot } from "../src/api/auth";
+import { WALLET_LINK_SIWE_STATEMENT } from "../src/api/better-auth";
 import {
   createPeezyIdentityAuthAdapter,
   createPeezyOidcProviderConfig,
@@ -462,7 +463,7 @@ test("rejects mapped wallets whose Identity sign-in credential is disabled", asy
     expirationTime: new Date("2026-07-29T00:05:00.000Z"),
     issuedAt,
     nonce: "abcdef0123456789",
-    statement: "Link this wallet to pledge.cash Sentinel notifications.",
+    statement: WALLET_LINK_SIWE_STATEMENT,
     uri: config.webOrigin,
     version: "1"
   });
@@ -564,13 +565,7 @@ test("rejects oversized Identity credential sets during session hydration withou
     });
   });
   const snapshot: AuthSnapshot = {
-    channels: [],
     providers: [],
-    subscription: {
-      boardrooms: [],
-      minSeverity: "medium",
-      mode: "holdings"
-    },
     wallets: []
   };
 
@@ -687,17 +682,10 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
     });
   });
   const snapshot: AuthSnapshot = {
-    channels: [],
     providers: ["siwe"],
-    subscription: {
-      boardrooms: [],
-      minSeverity: "medium",
-      mode: "holdings"
-    },
     wallets: [
       {
         address,
-        alertsEnabled: true,
         canSignIn: true,
         verifiedAt: "2026-07-29T00:00:00.000Z"
       }
@@ -723,12 +711,6 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
   await expect(
     adapter.hydrateAuthSnapshot?.(subject, snapshot)
   ).resolves.toEqual(expected);
-  await expect(
-    adapter.hydrateWallet?.(subject, snapshot.wallets[0]!)
-  ).resolves.toEqual({
-    ...snapshot.wallets[0],
-    canSignIn: false
-  });
   expect(identityReads).toBe(1);
 });
 
@@ -788,13 +770,7 @@ test("caps presentation reads at 230 to preserve wallet authentication capacity"
     throw new Error("unexpected Identity read");
   });
   const snapshot: AuthSnapshot = {
-    channels: [],
     providers: [],
-    subscription: {
-      boardrooms: [],
-      minSeverity: "medium",
-      mode: "holdings"
-    },
     wallets: []
   };
 

@@ -3,11 +3,9 @@ import {
   createPledgeCashSiweVerifier,
   WALLET_LINK_SIWE_STATEMENT,
 } from "./api/better-auth";
-import { createDrizzleBoardroomControlStore } from "./api/boardroom-control-store";
 import { createApp } from "./api/server";
 import { createPeezyIdentityAuthAdapter, discardOAuthTokensForSharedIdentity } from "./api/peezy-identity";
 import { createDrizzleApiStore } from "./api/store";
-import { createConfiguredBoardroomControlChainReader } from "./chain/boardroom-control";
 import { resolveClientIp } from "./client-ip";
 import { loadConfig, type Config } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
@@ -55,10 +53,6 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     : createPeezyIdentityAuthAdapter(config, dbClient.db);
   const app = createApp({
     auth,
-    boardroomControl: {
-      chain: createConfiguredBoardroomControlChainReader(config),
-      store: createDrizzleBoardroomControlStore(dbClient.db),
-    },
     config,
     store: createDrizzleApiStore(dbClient.db),
     verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT]),

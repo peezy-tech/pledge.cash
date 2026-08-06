@@ -1,8 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, count, eq, sql } from "drizzle-orm";
@@ -11,7 +7,7 @@ import { createSiweMessage } from "viem/siwe";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 
 import {
-  ALERTS_SIWE_STATEMENT,
+  PRODUCT_SIWE_STATEMENT,
   createBetterAuthAdapter,
   createPledgeCashSiweVerifier,
   WALLET_LINK_SIWE_STATEMENT
@@ -40,7 +36,6 @@ const account = privateKeyToAccount(
 const secondaryAccount = privateKeyToAccount(
   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
 );
-const migrationsDirectory = fileURLToPath(new URL("../drizzle", import.meta.url));
 
 describeWithDatabase("Better Auth Postgres integration", () => {
   let adminSql: Sql;
@@ -63,11 +58,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       BETTER_AUTH_SECRET: "sentinel-auth-integration-secret-0000000000000000",
       BETTER_AUTH_URL: apiOrigin,
       DATABASE_URL: databaseUrl.toString(),
-      SENTINEL_CHAIN_IDS: "31337",
-      SENTINEL_HARNESS: "none",
-      SENTINEL_RPC_URL_31337: "http://127.0.0.1:8545",
-      SENTINEL_WEB_ORIGIN: webOrigin,
-      SENTINEL_TWITTER_ENABLED: "0"
+      SENTINEL_WEB_ORIGIN: webOrigin
     });
     dbClient = createDbClient(config);
     await dbClient.migrate();
@@ -98,7 +89,6 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       wallets: [
         {
           address: account.address.toLowerCase(),
-          alertsEnabled: true,
           canSignIn: true
         }
       ]
@@ -178,8 +168,8 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       expirationTime: new Date(issuedAt.getTime() + 10 * 60 * 1_000),
       issuedAt,
       nonce,
-      statement: ALERTS_SIWE_STATEMENT,
-      uri: "https://attacker.invalid/notifications",
+      statement: PRODUCT_SIWE_STATEMENT,
+      uri: "https://attacker.invalid/account",
       version: "1"
     });
     const signature = await account.signMessage({ message });
@@ -211,50 +201,27 @@ describeWithDatabase("Better Auth Postgres integration", () => {
     expect(await tableCount(dbClient, authSessions)).toBe(sessionsAfterFirst);
   });
 
-  test("makes every linked wallet an equal sign-in credential while preserving alert coverage", async () => {
+  test("makes every linked wallet an equal sign-in credential", async () => {
     const primary = await signInWithWallet(app, 8453);
     const before = await authStorageCounts(dbClient);
 
-    const link = await linkAlertWallet(app, primary.cookie, secondaryAccount, 10);
+    const link = await linkWallet(app, primary.cookie, secondaryAccount, 10);
     expect(link.status).toBe(200);
     expect(await link.json()).toMatchObject({
       wallet: {
         address: secondaryAccount.address.toLowerCase(),
-        alertsEnabled: true,
         canSignIn: true
       }
     });
 
     const afterLink = await authStorageCounts(dbClient);
     expect(afterLink).toEqual({ ...before, wallets: before.wallets + 1 });
-    const [linkedCoverage] = await secondaryCoverageRows(dbClient, primary.userId);
-    expect(linkedCoverage).toEqual({ alertsEnabled: true });
-
     const secondarySignIn = await signInWithWallet(app, 10, secondaryAccount);
     expect(secondarySignIn.userId).toBe(primary.userId);
 
-    const stopWatching = await app.request(`${apiOrigin}/wallets/${secondaryAccount.address}`, {
-      body: JSON.stringify({ alertsEnabled: false }),
-      headers: { "Content-Type": "application/json", Cookie: primary.cookie, Origin: webOrigin },
-      method: "PATCH"
-    });
-    expect(stopWatching.status).toBe(200);
-    expect(await stopWatching.json()).toMatchObject({
-      wallet: { alertsEnabled: false, canSignIn: true }
-    });
-    expect(await secondaryCoverageRows(dbClient, primary.userId)).toEqual([
-      { alertsEnabled: false }
-    ]);
-
-    const secondarySignInAfterStoppingAlerts = await signInWithWallet(app, 10, secondaryAccount);
-    expect(secondarySignInAfterStoppingAlerts.userId).toBe(primary.userId);
-
     const secondarySignInOnAnotherChain = await signInWithWallet(app, 1, secondaryAccount);
     expect(secondarySignInOnAnotherChain.userId).toBe(primary.userId);
-    expect(await secondaryCoverageRows(dbClient, primary.userId)).toEqual([
-      { alertsEnabled: false },
-      { alertsEnabled: false }
-    ]);
+    expect(await walletRows(dbClient, primary.userId, secondaryAccount.address)).toHaveLength(2);
   });
 
   test("prevents the same normalized address from crossing principal ownership", async () => {
@@ -345,139 +312,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
     });
   });
 
-  test("backfills legacy alert wallets into sign-in credentials without reenabling coverage", async () => {
-    if (!adminDatabaseUrl) return;
-
-    const legacyDatabaseName = `sentinel_wallet_migration_${randomBytes(6).toString("hex")}`;
-    const legacyDatabaseUrl = new URL(adminDatabaseUrl);
-    legacyDatabaseUrl.pathname = `/${legacyDatabaseName}`;
-    const legacyMigrationsDirectory = await createLegacyMigrationsDirectory();
-    let legacyClient: SentinelDbClient | undefined;
-
-    try {
-      await adminSql.unsafe(`CREATE DATABASE ${legacyDatabaseName}`);
-      legacyClient = createDbClient(legacyDatabaseUrl.toString());
-      await legacyClient.migrate(legacyMigrationsDirectory);
-
-      const [legacyUser] = await legacyClient.db
-        .insert(users)
-        .values({
-          email: "legacy@wallet.pledge.cash.invalid",
-          emailVerified: false,
-          name: "Legacy wallet account"
-        })
-        .returning({ id: users.id });
-      expect(legacyUser).toBeDefined();
-      const userId = legacyUser?.id ?? "00000000-0000-0000-0000-000000000000";
-
-      await legacyClient.db.insert(authWallets).values({
-        address: account.address,
-        chainId: 8453,
-        isPrimary: true,
-        userId
-      });
-      await legacyClient.db.insert(authAccounts).values({
-        accountId: `${account.address}:8453`,
-        providerId: "siwe",
-        userId
-      });
-      await legacyClient.db.insert(wallets).values({
-        address: secondaryAccount.address.toLowerCase(),
-        alertsEnabled: false,
-        chainId: 10,
-        siweMessage: "legacy alert coverage",
-        userId
-      });
-
-      await legacyClient.migrate();
-
-      const [credential] = await legacyClient.db
-        .select({
-          address: authWallets.address,
-          isPrimary: authWallets.isPrimary,
-          userId: authWallets.userId
-        })
-        .from(authWallets)
-        .where(
-          and(
-            eq(authWallets.chainId, 10),
-            sql`lower(${authWallets.address}) = lower(${secondaryAccount.address})`
-          )
-        )
-        .limit(1);
-      expect(credential).toEqual({
-        address: secondaryAccount.address.toLowerCase(),
-        isPrimary: false,
-        userId
-      });
-
-      const [coverage] = await legacyClient.db
-        .select({ alertsEnabled: wallets.alertsEnabled })
-        .from(wallets)
-        .where(
-          and(
-            eq(wallets.chainId, 10),
-            sql`lower(${wallets.address}) = lower(${secondaryAccount.address})`
-          )
-        )
-        .limit(1);
-      expect(coverage).toEqual({ alertsEnabled: false });
-      expect(await tableCount(legacyClient, authAccounts)).toBe(1);
-
-      const legacyConfig = loadConfig({
-        BETTER_AUTH_SECRET: "sentinel-auth-integration-secret-0000000000000000",
-        BETTER_AUTH_URL: apiOrigin,
-        DATABASE_URL: legacyDatabaseUrl.toString(),
-        SENTINEL_CHAIN_IDS: "31337",
-        SENTINEL_HARNESS: "none",
-        SENTINEL_RPC_URL_31337: "http://127.0.0.1:8545",
-        SENTINEL_WEB_ORIGIN: webOrigin,
-        SENTINEL_TWITTER_ENABLED: "0"
-      });
-      const legacyApp = createApp({
-        auth: createBetterAuthAdapter(legacyConfig, legacyClient.db),
-        config: legacyConfig,
-        store: createDrizzleApiStore(legacyClient.db),
-        verifySiweSignature: createPledgeCashSiweVerifier(legacyConfig, [WALLET_LINK_SIWE_STATEMENT])
-      });
-      const migratedSignIn = await signInWithWallet(legacyApp, 10, secondaryAccount);
-      expect(migratedSignIn.userId).toBe(userId);
-    } finally {
-      await legacyClient?.close();
-      await adminSql.unsafe(`DROP DATABASE IF EXISTS ${legacyDatabaseName} WITH (FORCE)`);
-      await rm(legacyMigrationsDirectory, { force: true, recursive: true });
-    }
-  });
 });
-
-async function createLegacyMigrationsDirectory(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "sentinel-wallet-migrations-"));
-  const metaDirectory = join(directory, "meta");
-  await mkdir(metaDirectory);
-
-  const journal = JSON.parse(
-    await readFile(join(migrationsDirectory, "meta", "_journal.json"), "utf8")
-  ) as {
-    dialect: string;
-    entries: Array<{ idx: number; tag: string; version: string; when: number; breakpoints: boolean }>;
-    version: string;
-  };
-  const entries = journal.entries.filter((entry) => entry.idx <= 5);
-  await writeFile(
-    join(metaDirectory, "_journal.json"),
-    `${JSON.stringify({ ...journal, entries }, null, 2)}\n`
-  );
-  await Promise.all(
-    entries.map((entry) =>
-      copyFile(
-        join(migrationsDirectory, `${entry.tag}.sql`),
-        join(directory, `${entry.tag}.sql`)
-      )
-    )
-  );
-
-  return directory;
-}
 
 async function signInWithWallet(
   app: ReturnType<typeof createApp>,
@@ -485,6 +320,9 @@ async function signInWithWallet(
   signer: PrivateKeyAccount = account
 ): Promise<{ readonly cookie: string; readonly userId: string }> {
   const response = await walletSignInResponse(app, chainId, signer);
+  if (response.status !== 200) {
+    throw new Error(`wallet sign-in failed (${response.status}): ${await response.clone().text()}`);
+  }
   expect(response.status).toBe(200);
   const body = (await response.json()) as { readonly user: { readonly id: string } };
   return { cookie: sessionCookie(response), userId: body.user.id };
@@ -513,8 +351,8 @@ async function walletSignInRequest(
     expirationTime: new Date(issuedAt.getTime() + 10 * 60 * 1_000),
     issuedAt,
     nonce,
-    statement: ALERTS_SIWE_STATEMENT,
-    uri: `${webOrigin}/notifications`,
+    statement: PRODUCT_SIWE_STATEMENT,
+    uri: webOrigin,
     version: "1"
   });
   const signature = await signer.signMessage({ message });
@@ -543,7 +381,7 @@ async function authNonce(
   return body.nonce;
 }
 
-async function linkAlertWallet(
+async function linkWallet(
   app: ReturnType<typeof createApp>,
   cookie: string,
   signer: PrivateKeyAccount,
@@ -599,17 +437,18 @@ async function authStorageCounts(
   return { accounts, sessions, users: userCount, wallets: authWalletCount };
 }
 
-async function secondaryCoverageRows(
+async function walletRows(
   dbClient: SentinelDbClient,
-  userId: string
-): Promise<Array<{ readonly alertsEnabled: boolean }>> {
+  userId: string,
+  address: string
+): Promise<Array<{ readonly chainId: number }>> {
   return dbClient.db
-    .select({ alertsEnabled: wallets.alertsEnabled })
+    .select({ chainId: wallets.chainId })
     .from(wallets)
     .where(
       and(
         eq(wallets.userId, userId),
-        sql`lower(${wallets.address}) = lower(${secondaryAccount.address})`
+        sql`lower(${wallets.address}) = lower(${address})`
       )
     );
 }

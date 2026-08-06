@@ -18,8 +18,8 @@ import type { SentinelDb } from "../db/client";
 import * as schema from "../db/schema";
 import type { AuthAdapter, SiweSignatureVerifier } from "./auth";
 
-export const ALERTS_SIWE_STATEMENT = "Sign in to pledge.cash alerts.";
-export const WALLET_LINK_SIWE_STATEMENT = "Link this wallet to pledge.cash Sentinel notifications.";
+export const PRODUCT_SIWE_STATEMENT = "Sign in to pledge.cash.";
+export const WALLET_LINK_SIWE_STATEMENT = "Link this wallet to pledge.cash.";
 const INTERNAL_AUTH_HEADER_ALLOWLIST = [
   "cookie",
   "origin",
@@ -38,7 +38,7 @@ type TelegramOAuthTokens = {
 };
 
 export function createBetterAuthAdapter(
-  config: Pick<Config, "auth" | "chains" | "webOrigin">,
+  config: Pick<Config, "auth" | "webOrigin">,
   db: SentinelDb
 ): AuthAdapter {
   const socialProviders = configuredSocialProviders(config.auth.socialProviders);
@@ -359,7 +359,7 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
 
 export function createPledgeCashSiweVerifier(
   config: Pick<Config, "webOrigin">,
-  allowedStatements: readonly string[] = [ALERTS_SIWE_STATEMENT, WALLET_LINK_SIWE_STATEMENT]
+  allowedStatements: readonly string[] = [PRODUCT_SIWE_STATEMENT, WALLET_LINK_SIWE_STATEMENT]
 ): SiweSignatureVerifier {
   const expectedOrigin = new URL(config.webOrigin).origin;
   const expectedDomain = new URL(config.webOrigin).host;
@@ -424,7 +424,7 @@ function createWalletSiweVerifier(
   config: Pick<Config, "webOrigin">,
   db: SentinelDb
 ): SiweSignatureVerifier {
-  const verifyEoaSignature = createPledgeCashSiweVerifier(config, [ALERTS_SIWE_STATEMENT]);
+  const verifyEoaSignature = createPledgeCashSiweVerifier(config, [PRODUCT_SIWE_STATEMENT]);
 
   return async (input) => {
     if (!(await verifyEoaSignature(input))) {

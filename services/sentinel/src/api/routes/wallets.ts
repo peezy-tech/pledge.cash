@@ -17,16 +17,11 @@ import {
 } from "../auth";
 import {
   AUTH_SIWE_MAX_MESSAGE_LENGTH,
-  DeleteWalletResponseSchema,
   LinkWalletRequestSchema,
   LinkWalletResponseSchema,
-  WalletAddressParamsSchema,
-  UpdateWalletAlertsRequestSchema,
-  UpdateWalletAlertsResponseSchema,
   WalletNonceRequestSchema,
   WalletNonceResponseSchema,
   type AddressDto,
-  type BoardroomRef,
   type WalletNonceResponse
 } from "../dto";
 
@@ -39,13 +34,6 @@ function webOriginHost(webOrigin: string): string {
 
 export function normalizeAddress(address: string): AddressDto {
   return getAddress(address).toLowerCase() as AddressDto;
-}
-
-export function normalizeBoardrooms(boardrooms: readonly BoardroomRef[]): BoardroomRef[] {
-  return boardrooms.map((boardroom) => ({
-    address: normalizeAddress(boardroom.address),
-    chainId: boardroom.chainId
-  }));
 }
 
 function buildWalletNonceResponse(input: {
@@ -102,15 +90,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         purpose: "link",
         userId: user.id
       });
-      return c.json(
-        WalletNonceResponseSchema.parse({
-          ...challenge,
-          // Identity normalizes its response address to lowercase, but the
-          // exact SIWE message uses checksum casing. Preserve that casing for
-          // pre-rollout clients that still reconstruct the signed message.
-          address: getAddress(challenge.address)
-        })
-      );
+      return c.json(WalletNonceResponseSchema.parse(challenge));
     }
 
     const issuedAt = getNow(deps);
@@ -289,61 +269,6 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     return c.json(LinkWalletResponseSchema.parse({ wallet }));
-  });
-
-  app.patch("/:address", rateLimit, async (c) => {
-    const parsed = WalletAddressParamsSchema.safeParse(c.req.param());
-    if (!parsed.success) {
-      return jsonError(c, 400, "address: Invalid wallet address");
-    }
-
-    const body = await parseJson(c, UpdateWalletAlertsRequestSchema);
-    if (!body.ok) {
-      return body.response;
-    }
-
-    const user = c.get("user");
-    let wallet = await deps.store.setWalletAlerts({
-      address: normalizeAddress(parsed.data.address),
-      alertsEnabled: body.value.alertsEnabled,
-      userId: user.id
-    });
-
-    if (wallet === null) {
-      return jsonError(c, 404, "Wallet link not found");
-    }
-
-    if (deps.auth.hydrateWallet !== undefined) {
-      try {
-        wallet = await deps.auth.hydrateWallet(user.id, wallet);
-      } catch {
-        wallet = { ...wallet, canSignIn: false };
-      }
-    }
-
-    return c.json(UpdateWalletAlertsResponseSchema.parse({ wallet }));
-  });
-
-  // Retain the original route as a backwards-compatible alias for clients built
-  // before alert coverage became an explicit setting. It never unlinks a credential.
-  app.delete("/:address", rateLimit, async (c) => {
-    const parsed = WalletAddressParamsSchema.safeParse(c.req.param());
-    if (!parsed.success) {
-      return jsonError(c, 400, "address: Invalid wallet address");
-    }
-
-    const user = c.get("user");
-    const wallet = await deps.store.setWalletAlerts({
-      address: normalizeAddress(parsed.data.address),
-      alertsEnabled: false,
-      userId: user.id
-    });
-
-    if (wallet === null) {
-      return jsonError(c, 404, "Wallet link not found");
-    }
-
-    return c.json(DeleteWalletResponseSchema.parse({ alertsEnabled: false, ok: true }));
   });
 
   return app;

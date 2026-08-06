@@ -33,7 +33,6 @@
     "format": "bun --cwd packages/contracts format",
     "format:check": "bun --cwd packages/contracts format:check",
     "sentinel:dev": "bun --cwd services/sentinel dev",
-    "sentinel:integration:anvil": "bun --cwd services/sentinel integration:anvil",
     "sentinel:test": "bun --cwd services/sentinel test",
     "simulate:network": "bun --cwd packages/contracts simulate:network",
     "simulate:sepolia": "bun --cwd packages/contracts simulate:sepolia",

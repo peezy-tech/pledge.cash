@@ -4,8 +4,6 @@ import { verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
 
-import type { BoardroomControlChainReader } from "../chain/boardroom-control";
-import type { BoardroomControlStore } from "./boardroom-control-store";
 import { identityQuotaScope } from "./identity-quota";
 
 import {
@@ -17,18 +15,10 @@ import {
   type AddressDto,
   type AuthMeResponse,
   type AuthProviderDto,
-  type BoardroomRef,
-  type ChannelDto,
-  type HealthResponse,
-  type NotificationDeliveriesQuery,
-  type NotificationDeliveriesResponse,
-  type PublicActionsQuery,
-  type PublicActionsResponse,
   type AuthRedirectRequest,
   type AuthRedirectResponse,
   type AuthSiweNonceResponse,
   type SocialProviderDto,
-  type SubscriptionDto,
   type UserDto,
   type WalletDto
 } from "./dto";
@@ -46,9 +36,6 @@ const PUBLIC_SIWE_ATTEMPT_GLOBAL_LIMIT = 300;
 // Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
 // available for authenticated wallet links even if the public sign-in route is abused.
 const PUBLIC_SIWE_GLOBAL_LIMIT = 50;
-const LegacyTelegramAuthRedirectRequestSchema = AuthRedirectRequestSchema
-  .omit({ provider: true })
-  .extend({ providerId: z.literal("telegram") });
 
 export class AuthRateLimitError extends Error {
   constructor(message = "Rate limit exceeded") {
@@ -88,15 +75,7 @@ export class AuthWalletCredentialRejectedError extends Error {
   }
 }
 
-export type ApiChainConfig = {
-  readonly chainId: number;
-};
-
 export type ApiConfig = {
-  readonly chains: readonly ApiChainConfig[];
-  readonly telegram: {
-    readonly botUsername?: string;
-  };
   readonly webOrigin: string;
 };
 
@@ -130,10 +109,6 @@ export type AuthAdapter = {
     userId: string,
     snapshot: AuthSnapshot
   ): Promise<AuthSnapshot>;
-  hydrateWallet?(
-    userId: string,
-    wallet: WalletDto
-  ): Promise<WalletDto>;
   getProviders?(userId: string): Promise<AuthProviderDto[]>;
   getSocialProviders?(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
@@ -162,9 +137,7 @@ export type AuthAdapter = {
 };
 
 export type AuthSnapshot = {
-  readonly channels: ChannelDto[];
   readonly providers: AuthProviderDto[];
-  readonly subscription: SubscriptionDto;
   readonly wallets: WalletDto[];
 };
 
@@ -175,37 +148,18 @@ export type WalletNonceRecord = {
   readonly userId: string;
 };
 
-export type TelegramLinkCodeRecord = {
-  readonly code: string;
-  readonly expiresAt: Date;
-};
-
 export type SentinelApiStore = {
   consumeWalletNonce(input: {
     readonly nonce: string;
     readonly now: Date;
     readonly userId: string;
   }): Promise<boolean>;
-  createTelegramLinkCode(input: {
-    readonly code: string;
-    readonly expiresAt: Date;
-    readonly userId: string;
-  }): Promise<TelegramLinkCodeRecord>;
   createWalletNonce(input: {
     readonly expiresAt: Date;
     readonly nonce: string;
     readonly userId: string;
   }): Promise<WalletNonceRecord>;
-  deleteChannel(input: { readonly id: string; readonly userId: string }): Promise<boolean>;
   getAuthSnapshot(userId: string): Promise<AuthSnapshot>;
-  getChannels(userId: string): Promise<ChannelDto[]>;
-  getCursorLags(chainIds: readonly number[]): Promise<HealthResponse["chains"]>;
-  getNotificationDeliveries(
-    userId: string,
-    query: NotificationDeliveriesQuery
-  ): Promise<NotificationDeliveriesResponse>;
-  getPublicActions(query: PublicActionsQuery): Promise<PublicActionsResponse>;
-  getSubscription(userId: string): Promise<SubscriptionDto>;
   getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;
   linkWallet(input: {
     readonly address: AddressDto;
@@ -215,17 +169,6 @@ export type SentinelApiStore = {
     readonly verifiedAt: Date;
   }): Promise<WalletDto | null>;
   ping(): Promise<void>;
-  putSubscription(input: {
-    readonly boardrooms: readonly BoardroomRef[];
-    readonly minSeverity: SubscriptionDto["minSeverity"];
-    readonly mode: SubscriptionDto["mode"];
-    readonly userId: string;
-  }): Promise<SubscriptionDto>;
-  setWalletAlerts(input: {
-    readonly address: AddressDto;
-    readonly alertsEnabled: boolean;
-    readonly userId: string;
-  }): Promise<WalletDto | null>;
   takeIdentityQuota(input: {
     readonly capacity: number;
     readonly now: Date;
@@ -249,12 +192,7 @@ export type RateLimitConfig = {
 
 export type SentinelApiDeps = {
   readonly auth: AuthAdapter;
-  readonly boardroomControl?: {
-    readonly chain: BoardroomControlChainReader;
-    readonly store: BoardroomControlStore;
-  };
   readonly config: ApiConfig;
-  readonly generateLinkCode?: () => string;
   readonly generateNonce?: () => string;
   readonly now?: () => Date;
   readonly rateLimit?: RateLimitConfig;
@@ -483,8 +421,8 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       socialProviders =
         (await deps.auth.getSocialProviders?.()) ?? socialProviders;
     } catch {
-      // Product sessions and alert delivery remain usable during an Identity
-      // outage; only new central social authentication is unavailable.
+      // Product sessions remain usable during an Identity outage; only new
+      // central social authentication is unavailable.
     }
     return c.json(
       AuthCapabilitiesResponseSchema.parse({
@@ -584,46 +522,6 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       }
     );
 
-    if (deps.auth.usesSharedIdentity === true) {
-      app.post("/sign-in/social", authBodyLimit, async (c) => {
-        const body = await parseJson(c, AuthRedirectRequestSchema);
-        if (!body.ok) return body.response;
-        return start(c, body.value, false);
-      });
-      app.post(
-        "/link-social",
-        createSessionMiddleware(deps),
-        authBodyLimit,
-        async (c) => {
-          const body = await parseJson(c, AuthRedirectRequestSchema);
-          if (!body.ok) return body.response;
-          return start(c, body.value, true, c.get("user").id);
-        }
-      );
-      app.post("/sign-in/oauth2", authBodyLimit, async (c) => {
-        const body = await parseJson(c, LegacyTelegramAuthRedirectRequestSchema);
-        if (!body.ok) return body.response;
-        return start(c, { ...body.value, provider: "telegram" }, false);
-      });
-      app.post(
-        "/oauth2/link",
-        createSessionMiddleware(deps),
-        authBodyLimit,
-        async (c) => {
-          const body = await parseJson(
-            c,
-            LegacyTelegramAuthRedirectRequestSchema
-          );
-          if (!body.ok) return body.response;
-          return start(
-            c,
-            { ...body.value, provider: "telegram" },
-            true,
-            c.get("user").id
-          );
-        }
-      );
-    }
   }
 
   const validateIdentitySiwe: MiddlewareHandler<ApiEnv> = async (c, next) => {
