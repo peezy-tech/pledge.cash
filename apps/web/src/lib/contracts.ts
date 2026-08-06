@@ -37,18 +37,8 @@ export type PledgeCashEnvironmentIdentity = {
 
 export type PledgeCashNetworkEnv = Partial<Record<string, string | undefined>>;
 
-type LegacyNetworkProfile = {
-  chainName: string | undefined;
-  explorerName: string | undefined;
-  explorerUrl: string | undefined;
-  initialChainId: number | undefined;
-  profileChainId: number;
-  rpcUrl: string | undefined;
-  wrappedNativeSymbol: string | undefined;
-};
-
 const pledgeCashEnv = import.meta.env;
-const initialChainIdFromEnv = numericEnv(pledgeCashEnv.VITE_PLEDGE_CASH_CHAIN_ID);
+const initialChainIdFromEnv = numericEnv(pledgeCashEnv.VITE_PLEDGE_CASH_DEFAULT_CHAIN_ID);
 
 export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = createPledgeCashNetworks(pledgeCashEnv);
 
@@ -165,56 +155,43 @@ export function walletRpcUrl(network: PledgeCashNetwork): string {
 }
 
 export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashNetwork[] {
-  const legacy = legacyNetworkProfile(env);
-  const networks: PledgeCashNetwork[] = [
-    ...pledgeCashNetworkProfiles.map((profile) => createCanonicalNetwork(profile, env, legacy)),
-    createLocalAnvilNetwork(env, legacy),
+  return [
+    ...pledgeCashNetworkProfiles.map((profile) => createCanonicalNetwork(profile, env)),
+    createLocalAnvilNetwork(env),
   ];
-
-  const custom = createCustomLegacyNetwork(legacy, networks);
-  if (custom) networks.push(custom);
-
-  return networks;
 }
 
 function createCanonicalNetwork(
   profile: PledgeCashNetworkProfile,
   env: PledgeCashNetworkEnv,
-  legacy: LegacyNetworkProfile,
 ): PledgeCashNetwork {
   const chainId = profile.chainId;
   return createNetwork({
     chainId,
     key: profile.key as PledgeCashNetworkKey,
-    name:
-      env[`VITE_PLEDGE_CASH_CHAIN_NAME_${chainId.toString()}`]
-      ?? legacyProfileName(legacy, chainId, profile.name),
+    name: env[`VITE_PLEDGE_CASH_CHAIN_NAME_${chainId.toString()}`] ?? profile.name,
     environment: profile.environment,
     nativeCurrency: profile.nativeCurrency,
     rpcUrl:
       env[`VITE_PLEDGE_CASH_RPC_URL_${chainId.toString()}`]
-      ?? legacyProfileValue(legacy, chainId, legacy.rpcUrl)
       ?? profile.defaultRpcUrl,
     explorerName:
       env[`VITE_PLEDGE_CASH_EXPLORER_NAME_${chainId.toString()}`]
-      ?? legacyProfileValue(legacy, chainId, legacy.explorerName)
       ?? profile.explorer.name,
     explorerUrl:
       env[`VITE_PLEDGE_CASH_EXPLORER_URL_${chainId.toString()}`]
-      ?? legacyProfileValue(legacy, chainId, legacy.explorerUrl)
       ?? profile.explorer.url,
     wrappedNativeSymbol:
       env[`VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL_${chainId.toString()}`]
-      ?? legacyProfileValue(legacy, chainId, legacy.wrappedNativeSymbol)
       ?? profile.wrappedNative.symbol,
   });
 }
 
-function createLocalAnvilNetwork(env: PledgeCashNetworkEnv, legacy: LegacyNetworkProfile): PledgeCashNetwork {
+function createLocalAnvilNetwork(env: PledgeCashNetworkEnv): PledgeCashNetwork {
   return createNetwork({
     chainId: LOCAL_ANVIL_CHAIN_ID,
     key: "local-anvil",
-    name: legacyProfileName(legacy, LOCAL_ANVIL_CHAIN_ID, "Local Anvil"),
+    name: env.VITE_PLEDGE_CASH_LOCAL_NAME ?? "Local Anvil",
     environment: "local",
     nativeCurrency: {
       decimals: 18,
@@ -223,65 +200,17 @@ function createLocalAnvilNetwork(env: PledgeCashNetworkEnv, legacy: LegacyNetwor
     },
     rpcUrl:
       env.VITE_PLEDGE_CASH_LOCAL_RPC_URL
-      ?? legacyProfileValue(legacy, LOCAL_ANVIL_CHAIN_ID, legacy.rpcUrl)
       ?? defaultLocalRpcUrl(env.BASE_URL),
     explorerName:
       env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME
-      ?? legacyProfileValue(legacy, LOCAL_ANVIL_CHAIN_ID, legacy.explorerName)
       ?? undefined,
     explorerUrl:
       env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL
-      ?? legacyProfileValue(legacy, LOCAL_ANVIL_CHAIN_ID, legacy.explorerUrl)
       ?? undefined,
     wrappedNativeSymbol:
       env.VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL
-      ?? legacyProfileValue(legacy, LOCAL_ANVIL_CHAIN_ID, legacy.wrappedNativeSymbol)
       ?? "WETH",
   });
-}
-
-function createCustomLegacyNetwork(
-  legacy: LegacyNetworkProfile,
-  networks: readonly PledgeCashNetwork[],
-): PledgeCashNetwork | undefined {
-  if (legacy.initialChainId === undefined) return undefined;
-  if (networks.some((network) => network.chainId === legacy.initialChainId)) return undefined;
-
-  const defaultProfile = pledgeCashNetworkProfiles.find((profile) => profile.chainId === DEFAULT_PUBLIC_CHAIN_ID)
-    ?? pledgeCashNetworkProfiles[0]!;
-  return createNetwork({
-    chainId: legacy.initialChainId,
-    key: "custom",
-    name: legacy.chainName ?? defaultProfile.name,
-    environment: "custom",
-    nativeCurrency: defaultProfile.nativeCurrency,
-    rpcUrl: legacy.rpcUrl ?? defaultProfile.defaultRpcUrl,
-    explorerName: legacy.explorerName ?? defaultProfile.explorer.name,
-    explorerUrl: legacy.explorerUrl ?? defaultProfile.explorer.url,
-    wrappedNativeSymbol: legacy.wrappedNativeSymbol ?? defaultProfile.wrappedNative.symbol,
-  });
-}
-
-function legacyNetworkProfile(env: PledgeCashNetworkEnv): LegacyNetworkProfile {
-  const initialChainId = numericEnv(env.VITE_PLEDGE_CASH_CHAIN_ID);
-  return {
-    chainName: env.VITE_PLEDGE_CASH_CHAIN_NAME,
-    explorerName: env.VITE_PLEDGE_CASH_EXPLORER_NAME,
-    explorerUrl: env.VITE_PLEDGE_CASH_EXPLORER_URL,
-    initialChainId,
-    profileChainId: initialChainId ?? DEFAULT_PUBLIC_CHAIN_ID,
-    rpcUrl: env.VITE_PLEDGE_CASH_RPC_URL,
-    wrappedNativeSymbol: env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL,
-  };
-}
-
-function legacyProfileName(legacy: LegacyNetworkProfile, chainId: number, fallback: string): string {
-  if (legacy.profileChainId === chainId && legacy.chainName) return legacy.chainName;
-  return fallback;
-}
-
-function legacyProfileValue<T>(legacy: LegacyNetworkProfile, chainId: number, value: T | undefined): T | undefined {
-  return legacy.profileChainId === chainId ? value : undefined;
 }
 
 function createNetwork(input: {

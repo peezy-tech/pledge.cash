@@ -42,12 +42,7 @@ describe("web network profiles", () => {
     const localByProfileKey = networkEnvironmentIdentity({ chainId: 42_424, key: "local-anvil" });
     const testnet = networkEnvironmentIdentity(networkForChainId(11155111));
     const mainnet = networkEnvironmentIdentity(networkForChainId(1));
-    const customNetwork = createPledgeCashNetworks({
-      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
-      VITE_PLEDGE_CASH_CHAIN_NAME: "Partner chain",
-      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
-    }).find((network) => network.chainId === 424242)!;
-    const custom = networkEnvironmentIdentity(customNetwork);
+    const custom = networkEnvironmentIdentity({ chainId: 424_242, key: "custom", environment: "custom" });
 
     for (const localIdentity of [local, localByChainId, localByProfileKey]) {
       expect(localIdentity).toMatchObject({ kind: "local", label: "Local", hasRealValue: false, resettable: true, seeded: false });
@@ -65,52 +60,26 @@ describe("web network profiles", () => {
     expect(PUBLIC_RPC_RETRY_COUNT).toBe(0);
   });
 
-  test("preserves custom legacy env chain IDs as selectable profiles", () => {
+  test("supports explicit canonical and local overrides", () => {
     const networks = createPledgeCashNetworks({
-      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
-      VITE_PLEDGE_CASH_CHAIN_NAME: "Custom Testnet",
-      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
-      VITE_PLEDGE_CASH_EXPLORER_NAME: "CustomScan",
-      VITE_PLEDGE_CASH_EXPLORER_URL: "https://explorer.custom.test",
-      VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL: "WCUSTOM",
+      VITE_PLEDGE_CASH_CHAIN_NAME_11155111: "Ethereum Sepolia mirror",
+      VITE_PLEDGE_CASH_EXPLORER_URL_11155111: "",
+      VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME: "Local",
+      VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL: "",
+      VITE_PLEDGE_CASH_LOCAL_NAME: "pledge.cash local",
+      VITE_PLEDGE_CASH_LOCAL_RPC_URL: "/pledge-cash/rpc",
     });
-    const custom = networks.find((network) => network.chainId === 424242);
+    const sepolia = networks.find((network) => network.chainId === 11155111);
+    const local = networks.find((network) => network.chainId === LOCAL_ANVIL_CHAIN_ID);
 
-    expect(networks.map((network) => network.chainId)).toEqual([
-      11155111,
-      84532,
-      1,
-      8453,
-      42161,
-      4663,
-      31337,
-      424242,
-    ]);
-    expect(custom?.key).toBe("custom");
-    expect(custom?.name).toBe("Custom Testnet");
-    expect(custom?.rpcUrl).toBe("https://rpc.custom.test");
-    expect(custom?.explorerName).toBe("CustomScan");
-    expect(custom?.explorerUrl).toBe("https://explorer.custom.test");
-    expect(custom?.wrappedNativeSymbol).toBe("WCUSTOM");
-    expect(custom?.chain.id).toBe(424242);
-    expect(custom?.chain.rpcUrls.default.http).toEqual(["https://rpc.custom.test"]);
-    expect(custom?.chain.blockExplorers?.default.url).toBe("https://explorer.custom.test");
-  });
-
-  test("preserves blank legacy explorer overrides as disabled links", () => {
-    const sepolia = createPledgeCashNetworks({
-      VITE_PLEDGE_CASH_EXPLORER_URL: "",
-    }).find((network) => network.chainId === 11155111);
-    const custom = createPledgeCashNetworks({
-      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
-      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
-      VITE_PLEDGE_CASH_EXPLORER_URL: "",
-    }).find((network) => network.chainId === 424242);
-
+    expect(sepolia?.name).toBe("Ethereum Sepolia mirror");
     expect(sepolia?.explorerUrl).toBe("");
     expect(sepolia?.chain.blockExplorers).toBeUndefined();
-    expect(custom?.explorerUrl).toBe("");
-    expect(custom?.chain.blockExplorers).toBeUndefined();
+    expect(local?.name).toBe("pledge.cash local");
+    expect(local?.rpcUrl).toBe("/pledge-cash/rpc");
+    expect(local?.explorerName).toBe("Local");
+    expect(local?.explorerUrl).toBe("");
+    expect(local?.chain.blockExplorers).toBeUndefined();
   });
 
   test("can resolve transaction links against the originating chain", () => {

@@ -43,19 +43,6 @@ export type RuntimeDeploymentRecoveryOptions = {
 
 export const RUNTIME_DEPLOYMENT_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 120_000] as const;
 
-/**
- * Compatibility hook for the existing application coordinator.
- *
- * New surfaces should prefer useRuntimeDeploymentAvailability so loading,
- * pending, missing, and error states are not flattened into an address object.
- */
-export function useRuntimeDeployment(
-  chainId: number,
-  generatedDeployment: PledgeCashDeployment | undefined,
-): PledgeCashDeployment | undefined {
-  return useRuntimeDeploymentAvailability(chainId, generatedDeployment).deployment;
-}
-
 export function useRuntimeDeploymentAvailability(
   chainId: number,
   generatedDeployment: PledgeCashDeployment | undefined,

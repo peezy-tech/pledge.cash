@@ -47,7 +47,7 @@ const networkManifest = JSON.parse(
 const publicDeploymentFiles = new Set(
   networkManifest.profiles.map((profile) => `${profile.chainId.toString()}.json`),
 );
-if (process.env.VITE_PLEDGE_CASH_CHAIN_ID === "31337") {
+if (process.env.VITE_PLEDGE_CASH_DEFAULT_CHAIN_ID === "31337") {
   publicDeploymentFiles.add("31337.json");
 }
 const deploymentFiles = (await readdir(deploymentDir))
