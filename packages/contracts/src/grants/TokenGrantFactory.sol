@@ -8,24 +8,14 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {TokenGrant} from "./TokenGrant.sol";
+import {IBoardroom} from "../boardroom/IBoardroom.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
-import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
-import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
-
-interface ITokenGrantDistributionIssuer {
-    function isIssuedDistribution(address distribution) external view returns (bool);
-}
 
 interface ITokenGrantBoardroomFactory {
     function isBoardroom(address boardroom) external view returns (bool);
 }
 
-interface ITokenGrantBoardroomAssetRegistry {
-    function shareToken() external view returns (address);
-}
-
-contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
-    bytes4 internal constant TRANSFER_OWNERSHIP_SELECTOR = bytes4(keccak256("transferOwnership(address)"));
+contract TokenGrantFactory is Ownable, ERC721 {
     uint256 public constant MAX_BOARDROOM_GRANT_DURATION = 5 * 365 days;
 
     address public immutable boardroomFactory;
@@ -37,21 +27,6 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
 
     struct GrantCreateInput {
         address issuer;
-        address funder;
-        address holder;
-        address token;
-        address paymentToken;
-        uint256 amount;
-        uint256 price;
-        uint256 expiry;
-        uint256 vestingCliff;
-        uint256 vestingEnd;
-        bool transferable;
-        uint256 transferUnlockTime;
-        bytes32 salt;
-    }
-
-    struct GrantCreateParams {
         address holder;
         address token;
         address paymentToken;
@@ -72,7 +47,6 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     error InvalidFeeRecipient();
     error InvalidBoardroomFactory(address factory);
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
-    error UnauthorizedGrantIssuer(address issuer, address caller);
     error BoardroomGrantExpiryTooFar(uint256 expiry, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
@@ -162,7 +136,6 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         grant = _createGrant(
             GrantCreateInput({
                 issuer: msg.sender,
-                funder: msg.sender,
                 holder: holder,
                 token: token,
                 paymentToken: paymentToken,
@@ -179,65 +152,8 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         );
     }
 
-    function createGrantFromDistribution(address issuer, GrantCreateParams calldata params)
-        external
-        returns (address grant)
-    {
-        _requireDistributionIssuer(issuer, msg.sender);
-
-        grant = _createGrant(
-            GrantCreateInput({
-                issuer: issuer,
-                funder: msg.sender,
-                holder: params.holder,
-                token: params.token,
-                paymentToken: params.paymentToken,
-                amount: params.amount,
-                price: params.price,
-                expiry: params.expiry,
-                vestingCliff: params.vestingCliff,
-                vestingEnd: params.vestingEnd,
-                transferable: params.transferable,
-                transferUnlockTime: params.transferUnlockTime,
-                salt: params.salt
-            }),
-            0
-        );
-    }
-
     function predictGrantAddress(address issuer, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(tokenGrantLogic, _deploymentSalt(issuer, salt), address(this));
-    }
-
-    function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
-        external
-        view
-        returns (bool)
-    {
-        bytes4 selector = _selector(data);
-        if (target == address(this)) {
-            return _isAuthorizedFactoryCall(boardroom, selector, value);
-        }
-
-        if (value != 0) return false;
-        return _isAuthorizedLifecycleCall(boardroom, target, selector);
-    }
-
-    function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
-        external
-        view
-        returns (Obligation memory obligation)
-    {
-        if (!_createsGrantObligation(target, data, result)) {
-            return obligation;
-        }
-
-        obligation.kind = ObligationKind.Grant;
-        obligation.account = abi.decode(result, (address));
-    }
-
-    function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
-        return _isAuthorizedLifecycleCall(boardroom, target, selector);
     }
 
     function isCanonicalBoardroom(address account) public view returns (bool) {
@@ -297,70 +213,19 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         return from == address(0) || to == address(0);
     }
 
-    function _isAuthorizedFactoryCall(address boardroom, bytes4 selector, uint256 value) internal view returns (bool) {
-        if (selector == TokenGrantFactory.createGrant.selector) return value == creationFee;
-        if (value != 0 || owner() != boardroom) return false;
-
-        return selector == TokenGrantFactory.setCreationFee.selector
-            || selector == TokenGrantFactory.setFeeRecipient.selector || selector == TRANSFER_OWNERSHIP_SELECTOR;
-    }
-
-    function _isAuthorizedLifecycleCall(address boardroom, address grant, bytes4 selector)
-        internal
-        view
-        returns (bool)
-    {
-        return _isLinkedBoardroomGrant(boardroom, grant) && _isGrantLifecycleSelector(selector);
-    }
-
-    function _isLinkedBoardroomGrant(address boardroom, address grant) internal view returns (bool) {
-        uint256 tokenId = uint256(uint160(grant));
-        if (grantForTokenId[tokenId] != grant) return false;
-        return TokenGrant(grant).issuer() == boardroom;
-    }
-
-    function _isGrantLifecycleSelector(bytes4 selector) internal pure returns (bool) {
-        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
-            || selector == TokenGrant.withdrawExpiredTokens.selector
-            || selector == TokenGrant.quarantineAndClose.selector;
-    }
-
-    function _createsGrantObligation(address target, bytes calldata data, bytes calldata result)
-        internal
-        view
-        returns (bool)
-    {
-        return
-            target == address(this) && _selector(data) == TokenGrantFactory.createGrant.selector && result.length == 32;
-    }
-
     function _createGrant(GrantCreateInput memory input, uint256 fee) internal returns (address grant) {
         if (msg.value != fee) {
             revert InvalidCreationFeePayment(fee, msg.value);
         }
         _requireBoardroomGrantExpiry(input.issuer, input.expiry);
-        // Distribution children are registered atomically by their canonical parent callback.
-        if (input.funder == input.issuer && isCanonicalBoardroom(input.issuer)) {
-            ITokenGrantBoardroomAssetRegistry registry = ITokenGrantBoardroomAssetRegistry(input.issuer);
-            address shares = registry.shareToken();
-            // Reached only when the issuing Boardroom funds its own grant, so the outer
-            // mutating route already bound the caller's release hash.
-            bytes32 expectedFacetSetHash = BoardroomCallbackLib.boundFacetSetHash(input.issuer);
-            if (input.token != shares) {
-                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.token);
-            }
-            if (input.paymentToken != address(0) && input.paymentToken != input.token) {
-                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.paymentToken);
-            }
-        }
-
         grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(input.issuer, input.salt));
         uint256 tokenId = uint256(uint160(grant));
 
         grantForTokenId[tokenId] = grant;
 
         _initializeGrant(grant, input);
-        _checkedTransferFrom(input.token, input.funder, grant, input.amount);
+        _checkedTransferFrom(input.token, input.issuer, grant, input.amount);
+        _registerBoardroomGrant(input, grant);
         _payCreationFee(fee);
         _mint(input.holder, tokenId);
         _emitTokenGrantCreated(grant, tokenId, input.transferable, input.transferUnlockTime, input.salt);
@@ -390,16 +255,26 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
             );
     }
 
-    function _requireDistributionIssuer(address issuer, address caller) internal view {
-        if (!ITokenGrantBoardroomFactory(boardroomFactory).isBoardroom(issuer)) {
-            revert UnauthorizedGrantIssuer(issuer, caller);
+    /// @dev The canonical Boardroom only permits these callbacks while this factory is
+    /// its owner-selected execution target, making funding and obligation registration atomic.
+    function _registerBoardroomGrant(GrantCreateInput memory input, address grant) internal {
+        if (!isCanonicalBoardroom(input.issuer)) return;
+
+        IBoardroom boardroom = IBoardroom(input.issuer);
+        address shares = boardroom.shareToken();
+        bool includeToken = input.token != shares;
+        bool includePayment =
+            input.paymentToken != address(0) && input.paymentToken != input.token && input.paymentToken != shares;
+        uint256 dependencyCount = (includeToken ? 1 : 0) + (includePayment ? 1 : 0);
+        address[] memory dependencies = new address[](dependencyCount);
+        uint256 cursor;
+        if (includeToken) dependencies[cursor++] = input.token;
+        if (includePayment) dependencies[cursor] = input.paymentToken;
+
+        for (uint256 i; i < dependencyCount; ++i) {
+            boardroom.reserveRedeemableAsset(dependencies[i]);
         }
-
-        try ITokenGrantDistributionIssuer(issuer).isIssuedDistribution(caller) returns (bool allowed) {
-            if (allowed) return;
-        } catch {}
-
-        revert UnauthorizedGrantIssuer(issuer, caller);
+        boardroom.registerObligation(grant, IBoardroom.ObligationKind.Grant, dependencies);
     }
 
     function _emitTokenGrantCreated(
@@ -529,10 +404,5 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
 
     function _boolString(bool value) internal pure returns (string memory) {
         return value ? "true" : "false";
-    }
-
-    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
-        if (data.length < 4) return bytes4(0);
-        return bytes4(data[:4]);
     }
 }

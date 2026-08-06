@@ -402,20 +402,10 @@ contract TokenGrantTest is Test {
         factory.setCreationFee(0.01 ether);
     }
 
-    function testBoardroomOwnerPolicyAllowsFeeAndRecipientUpdatesAndOwnershipRotation() public {
+    function testFactoryOwnerCanUpdateFeesAndRotateOwnership() public {
         address boardroom = address(0xB04D);
         address nextOwner = address(0xA0A0);
         factory.transferOwnership(boardroom);
-
-        bytes memory setFeeData = abi.encodeCall(TokenGrantFactory.setCreationFee, (0.02 ether));
-        bytes memory setFeeRecipientData = abi.encodeCall(TokenGrantFactory.setFeeRecipient, (stranger));
-        bytes memory transferOwnershipData = abi.encodeWithSignature("transferOwnership(address)", nextOwner);
-
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeData));
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeRecipientData));
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, transferOwnershipData));
-        assertFalse(factory.canCall(stranger, address(this), address(factory), 0, setFeeData));
-        assertFalse(factory.canCall(boardroom, address(this), address(factory), 1, setFeeData));
 
         vm.prank(boardroom);
         factory.setCreationFee(0.02 ether);
