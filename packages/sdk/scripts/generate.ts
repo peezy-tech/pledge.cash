@@ -74,7 +74,6 @@ const deploymentFields = [
   ["tokenGrantFactoryCodeHash", "string"],
   ["tokenGrantLogicCodeHash", "string"],
   ["liquidityLockerFactoryCodeHash", "string"],
-  ["liquidityLockerCodeHash", "string"],
   ["uniswapV4PoolManagerCodeHash", "string"],
   ["uniswapUniversalRouterCodeHash", "string"],
   ["uniswapV4QuoterCodeHash", "string"],

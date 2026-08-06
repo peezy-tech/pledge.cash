@@ -25,8 +25,6 @@
   "scripts": {
     "build": "bun --cwd packages/contracts build && bun --cwd packages/sdk build && bun --cwd apps/web build",
     "deploy:network": "bun --cwd packages/contracts deploy:network",
-    "deploy:sepolia": "bun --cwd packages/contracts deploy:sepolia",
-    "deploy:base-sepolia": "bun --cwd packages/contracts deploy:base-sepolia",
     "docs:build": "bun --cwd docs build",
     "docs:check": "bun --cwd docs check:types",
     "docs:dev": "bun --cwd docs dev",
@@ -34,6 +32,7 @@
     "format:check": "bun --cwd packages/contracts format:check",
     "sentinel:dev": "bun --cwd services/sentinel dev",
     "sentinel:test": "bun --cwd services/sentinel test",
+    "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
     "simulate:network": "bun --cwd packages/contracts simulate:network",
     "simulate:sepolia": "bun --cwd packages/contracts simulate:sepolia",
     "simulate:base-sepolia": "bun --cwd packages/contracts simulate:base-sepolia",

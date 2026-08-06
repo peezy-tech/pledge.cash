@@ -18,7 +18,6 @@ const STRING_DEPLOYMENT_FIELDS = [
   "tokenGrantFactoryCodeHash",
   "tokenGrantLogicCodeHash",
   "liquidityLockerFactoryCodeHash",
-  "liquidityLockerCodeHash",
   "uniswapV4PoolManagerCodeHash",
   "uniswapUniversalRouterCodeHash",
   "uniswapV4QuoterCodeHash",

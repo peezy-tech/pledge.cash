@@ -48,7 +48,6 @@ export type PledgeCashDeployment = {
   tokenGrantFactoryCodeHash?: string;
   tokenGrantLogicCodeHash?: string;
   liquidityLockerFactoryCodeHash?: string;
-  liquidityLockerCodeHash?: string;
   uniswapV4PoolManagerCodeHash?: string;
   uniswapUniversalRouterCodeHash?: string;
   uniswapV4QuoterCodeHash?: string;
@@ -7262,37 +7261,37 @@ export const pledgeCashDeployments = {
   1: {
     chainId: 1,
     status: "pending",
-    reason: "Ethereum mainnet deployment is not authorized; testnet and release gates remain open",
+    reason: "Lean protocol v1 deployment to Ethereum mainnet is not authorized",
     protocolVersion: "pledge.cash.protocol.v1"
   },
   11155111: {
     chainId: 11155111,
     status: "pending",
-    reason: "Canonical protocol v1 has not been broadcast to Ethereum Sepolia",
+    reason: "Lean protocol v1 has not been broadcast to Ethereum Sepolia",
     protocolVersion: "pledge.cash.protocol.v1"
   },
   42161: {
     chainId: 42161,
     status: "pending",
-    reason: "Arbitrum mainnet deployment is not authorized; testnet and release gates remain open",
+    reason: "Lean protocol v1 deployment to Arbitrum mainnet is not authorized",
     protocolVersion: "pledge.cash.protocol.v1"
   },
   4663: {
     chainId: 4663,
     status: "pending",
-    reason: "Robinhood Chain mainnet deployment is not authorized; testnet and release gates remain open",
+    reason: "Lean protocol v1 deployment to Robinhood Chain mainnet is not authorized",
     protocolVersion: "pledge.cash.protocol.v1"
   },
   8453: {
     chainId: 8453,
     status: "pending",
-    reason: "Base mainnet deployment is not authorized; testnet and release gates remain open",
+    reason: "Lean protocol v1 deployment to Base mainnet is not authorized",
     protocolVersion: "pledge.cash.protocol.v1"
   },
   84532: {
     chainId: 84532,
     status: "pending",
-    reason: "Canonical protocol v1 has not been broadcast to Base Sepolia",
+    reason: "Lean protocol v1 has not been broadcast to Base Sepolia",
     protocolVersion: "pledge.cash.protocol.v1"
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

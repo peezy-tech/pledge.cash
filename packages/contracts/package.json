@@ -7,11 +7,10 @@
   "scripts": {
     "build": "forge build",
     "deploy:network": "script/deploy-network.sh",
-    "deploy:sepolia": "script/deploy-network.sh 11155111 --broadcast",
-    "deploy:base-sepolia": "script/deploy-network.sh 84532 --broadcast",
     "format": "forge fmt",
     "format:check": "forge fmt --check",
     "preflight:network": "script/verify-network-profile-live.sh",
+    "scenario:project-token:local": "forge test --match-contract LeanCoreScenarioTest -vvv",
     "simulate:network": "script/deploy-network.sh",
     "simulate:sepolia": "script/deploy-network.sh 11155111",
     "simulate:base-sepolia": "script/deploy-network.sh 84532",

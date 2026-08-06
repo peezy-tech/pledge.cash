@@ -2,5 +2,5 @@
   "chainId": 8453,
   "status": "pending",
   "protocolVersion": "pledge.cash.protocol.v1",
-  "reason": "Base mainnet deployment is not authorized; testnet and release gates remain open"
+  "reason": "Lean protocol v1 deployment to Base mainnet is not authorized"
 }

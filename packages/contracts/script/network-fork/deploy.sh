@@ -143,7 +143,7 @@ rerun_artifact_path="$CONTRACTS_DIR/$rerun_artifact_relative"
 export FOUNDRY_BROADCAST="$evidence_dir/broadcast"
 export PRIVATE_KEY="$ANVIL_PRIVATE_KEY"
 export PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER="$ANVIL_DEPLOYER"
-export PLEDGE_CASH_PROTOCOL_GOVERNANCE="$ANVIL_DEPLOYER"
+export PLEDGE_CASH_PROTOCOL_OWNER="$ANVIL_DEPLOYER"
 export PLEDGE_CASH_PROTOCOL_TREASURY="$ANVIL_DEPLOYER"
 export CREATE2_FACTORY_ADDRESS="$(jq -r '.create2Factory.address' <<<"$profile")"
 export WRAPPED_NATIVE_ADDRESS="$(jq -r '.wrappedNative.address' <<<"$profile")"
@@ -194,6 +194,7 @@ verify_artifact() {
     ARTIFACT="$artifact_path" \
     RECEIPTS="$receipts_path" \
     RPC_URL="$local_rpc" \
+    PROFILE_CHAIN_ID="$chain_id" \
     REQUIRE_DEPLOYMENT=1 \
     script/verify-testnet-artifact.sh >"$log_path" 2>&1; then
     tail -140 "$log_path" >&2
@@ -214,9 +215,10 @@ jq -e --slurpfile rerun "$rerun_artifact_path" '
   $rerun[0] as $rerun
   | .deterministicDeployer == $rerun.deterministicDeployer
     and .boardroomFactory == $rerun.boardroomFactory
-    and .pledgeV4LiquidityFactory == $rerun.pledgeV4LiquidityFactory
-    and .pledgeV4Hook == $rerun.pledgeV4Hook
-    and .activeFacetSetHash == $rerun.activeFacetSetHash
+    and .protocolFeeRouter == $rerun.protocolFeeRouter
+    and .tokenGrantFactory == $rerun.tokenGrantFactory
+    and .liquidityLockerFactory == $rerun.liquidityLockerFactory
+    and .manifestHash == $rerun.manifestHash
     and .deterministicReleaseCodeHash == $rerun.deterministicReleaseCodeHash
 ' "$artifact_path" >/dev/null || fail "idempotence run changed canonical deployment identity"
 
@@ -246,6 +248,7 @@ echo "Deployment receipts: $(jq '.transactions | length' "$receipts_path")"
 echo "Deployment gas: $total_gas"
 echo "Idempotence transactions: $(jq '.transactions | length' "$broadcast_file")"
 echo "BoardroomFactory: $(jq -r '.boardroomFactory' "$evidence_dir/deployment.json")"
-echo "PledgeV4LiquidityFactory: $(jq -r '.pledgeV4LiquidityFactory' "$evidence_dir/deployment.json")"
-echo "PledgeV4Hook: $(jq -r '.pledgeV4Hook' "$evidence_dir/deployment.json")"
+echo "TokenGrantFactory: $(jq -r '.tokenGrantFactory' "$evidence_dir/deployment.json")"
+echo "LiquidityLockerFactory: $(jq -r '.liquidityLockerFactory' "$evidence_dir/deployment.json")"
+echo "ProtocolFeeRouter: $(jq -r '.protocolFeeRouter' "$evidence_dir/deployment.json")"
 echo "Evidence retained at $evidence_dir"

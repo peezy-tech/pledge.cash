@@ -2,5 +2,5 @@
   "chainId": 42161,
   "status": "pending",
   "protocolVersion": "pledge.cash.protocol.v1",
-  "reason": "Arbitrum mainnet deployment is not authorized; testnet and release gates remain open"
+  "reason": "Lean protocol v1 deployment to Arbitrum mainnet is not authorized"
 }
