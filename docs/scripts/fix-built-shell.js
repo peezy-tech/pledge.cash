@@ -1,10 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { normalizeDocsBasePath } from "../base-path.js";
-import { docsRedirects } from "../redirects.js";
 import { assertValidJavaScriptModule } from "./javascript-syntax.js";
 
 const outDir = resolve(process.env.PLEDGE_CASH_DOCS_OUT_DIR ?? "out");
@@ -311,36 +310,6 @@ const llmsFull = [
 ].join("\n\n");
 await writeFile(join(outDir, "llms-full.txt"), `${llmsFull}\n`);
 
-let redirectPages = 0;
-for (const [from, to] of Object.entries(docsRedirects)) {
-  if (!/^[a-z0-9/-]+$/.test(from) || !/^[a-z0-9/-]+$/.test(to)) {
-    throw new Error(`Invalid docs redirect: ${from} -> ${to}`);
-  }
-  const target = `${basePath}/${to}` || `/${to}`;
-  const redirectDir = join(outDir, from);
-  await mkdir(redirectDir, { recursive: true });
-  await writeFile(join(redirectDir, "index.html"), `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="robots" content="noindex" />
-    <script>window.location.replace(${JSON.stringify(target)} + window.location.search + window.location.hash);</script>
-    <meta http-equiv="refresh" content="1; url=${target}" />
-    <link rel="canonical" href="${target}" />
-    <link rel="icon" href="${faviconPath}" type="image/svg+xml" />
-    <title>Documentation moved | pledge.cash</title>
-  </head>
-  <body>
-    <p>This documentation moved to <a href="${target}">${target}</a>.</p>
-  </body>
-</html>
-`);
-  redirectPages += 1;
-  faviconPages += 1;
-}
+if (faviconPages === 0) throw new Error("Tome produced no HTML pages.");
 
-if (faviconPages === 0 || redirectPages !== Object.keys(docsRedirects).length) {
-  throw new Error("Tome produced no HTML pages or a compatibility redirect was not written.");
-}
-
-console.log(`Fixed Tome shell for ${basePath || "/"}: ${replacements.toString()} search loader reference(s), ${faviconPages.toString()} favicon page(s), ${redirectPages.toString()} compatibility redirect(s).`);
+console.log(`Fixed Tome shell for ${basePath || "/"}: ${replacements.toString()} search loader reference(s), ${faviconPages.toString()} favicon page(s).`);

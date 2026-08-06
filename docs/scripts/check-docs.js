@@ -2,7 +2,6 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { docsRedirects } from "../redirects.js";
 import config from "../tome.config.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -242,14 +241,6 @@ for (const page of navSet) {
 
 for (const page of filePages) {
   if (!navSet.has(page)) errors.push(`Markdown page is missing from navigation: ${page}`);
-}
-
-for (const [from, to] of Object.entries(docsRedirects)) {
-  if (!/^[a-z0-9/-]+$/.test(from) || !/^[a-z0-9/-]+$/.test(to)) {
-    errors.push(`Invalid compatibility redirect: ${from} -> ${to}`);
-  }
-  if (filePages.has(from)) errors.push(`Compatibility redirect still has a source page: ${from}`);
-  if (!filePages.has(to)) errors.push(`Compatibility redirect points to a missing page: ${from} -> ${to}`);
 }
 
 const titles = new Map();

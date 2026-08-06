@@ -2,7 +2,6 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { normalizeDocsBasePath } from "../base-path.js";
-import { docsRedirects } from "../redirects.js";
 import config from "../tome.config.js";
 
 const outDir = resolve(process.env.PLEDGE_CASH_DOCS_OUT_DIR ?? "out");
@@ -142,7 +141,7 @@ if (sourceMarkers.length !== expectedPages) {
 }
 
 const htmlFiles = await filesWithExtension(outDir, ".html");
-const expectedHtml = expectedPages + Object.keys(docsRedirects).length;
+const expectedHtml = expectedPages;
 if (htmlFiles.length !== expectedHtml) {
   errors.push(`Generated output has ${htmlFiles.length.toString()} HTML routes, expected ${expectedHtml.toString()}`);
 }
