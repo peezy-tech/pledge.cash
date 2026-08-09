@@ -306,19 +306,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "burnTreasuryShares",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "burned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "cancelOwnershipHandover",
     "inputs": [],
     "outputs": [],
@@ -365,29 +352,6 @@ export const boardroomAbi = [
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "contributeTreasuryAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -561,32 +525,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "liquidityMutationAllowed",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "lockedLiquidityExitAllowed",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "mint",
     "inputs": [
       {
@@ -713,35 +651,6 @@ export const boardroomAbi = [
     "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "redeemableAssetPage",
-    "inputs": [
-      {
-        "name": "cursor",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "size",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "page",
-        "type": "address[]",
-        "internalType": "address[]"
-      },
-      {
-        "name": "nextCursor",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -990,19 +899,6 @@ export const boardroomAbi = [
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "windDownDelay",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1443,31 +1339,6 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "TreasuryAssetContributed",
-    "inputs": [
-      {
-        "name": "contributor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "TreasurySharesBurned",
     "inputs": [
       {
@@ -1727,11 +1598,6 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "SnapshotAlreadyFrozen",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "SnapshotIncomplete",
     "inputs": [
       {
@@ -1762,38 +1628,6 @@ export const boardroomAbi = [
       },
       {
         "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TreasuryContributionAmountMismatch",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "received",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TreasuryContributionExpired",
-    "inputs": [
-      {
-        "name": "deadline",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1854,38 +1688,6 @@ export const boardroomFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "allBoardrooms",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "allBoardroomsLength",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",

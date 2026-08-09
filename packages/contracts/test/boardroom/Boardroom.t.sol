@@ -406,7 +406,7 @@ contract BoardroomTest is Test {
 
         boardroom.mint(alice, 1 ether);
         boardroom.startWindDown();
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         boardroom.beginSnapshot();
         boardroom.snapshotAssets(32);
 
