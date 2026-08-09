@@ -2,12 +2,11 @@
 pragma solidity ^0.8.30;
 
 import {Ownable} from "solady/auth/Ownable.sol";
-import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 /// @notice Durable protocol-fee custody whose payout destination can outlive any one Boardroom.
 /// @dev Anyone may forward accumulated fees. Only governance can rotate the destination.
-contract ProtocolFeeRouter is Ownable, ReentrancyGuard {
+contract ProtocolFeeRouter is Ownable {
     using SafeTransferLib for address;
 
     address public feeRecipient;
@@ -37,7 +36,7 @@ contract ProtocolFeeRouter is Ownable, ReentrancyGuard {
         emit FeeRecipientSet(previousRecipient, newRecipient);
     }
 
-    function forwardNative() external nonReentrant returns (uint256 amount) {
+    function forwardNative() external returns (uint256 amount) {
         amount = address(this).balance;
         if (amount == 0) return 0;
 
@@ -46,7 +45,7 @@ contract ProtocolFeeRouter is Ownable, ReentrancyGuard {
         emit NativeFeesForwarded(recipient, amount);
     }
 
-    function forwardToken(address token) external nonReentrant returns (uint256 amount) {
+    function forwardToken(address token) external returns (uint256 amount) {
         _requireNonZero(token);
 
         amount = SafeTransferLib.balanceOf(token, address(this));

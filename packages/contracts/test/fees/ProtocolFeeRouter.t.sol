@@ -20,6 +20,29 @@ contract ProtocolFeeRouterToken is ERC20 {
     }
 }
 
+contract ReentrantProtocolFeeRouterToken is ProtocolFeeRouterToken {
+    ProtocolFeeRouter internal immutable router;
+    address internal immutable tokenToForward;
+
+    bool public callbackEntered;
+    uint256 public nativeForwardedDuringCallback;
+    uint256 public tokenForwardedDuringCallback;
+
+    constructor(ProtocolFeeRouter router_, address tokenToForward_) {
+        router = router_;
+        tokenToForward = tokenToForward_;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (!callbackEntered) {
+            callbackEntered = true;
+            tokenForwardedDuringCallback = router.forwardToken(tokenToForward);
+            nativeForwardedDuringCallback = router.forwardNative();
+        }
+        return super.transfer(to, amount);
+    }
+}
+
 contract ProtocolFeeRouterTest is Test {
     address internal governance = address(0xA11CE);
     address internal treasury = address(0xB0B);
@@ -58,6 +81,25 @@ contract ProtocolFeeRouterTest is Test {
         vm.prank(nextTreasury);
         vm.expectRevert(Ownable.Unauthorized.selector);
         router.setFeeRecipient(nextTreasury);
+    }
+
+    function testTokenCallbackCanOnlyForwardOtherAssetsToFixedRecipient() public {
+        ReentrantProtocolFeeRouterToken callbackToken = new ReentrantProtocolFeeRouterToken(router, address(token));
+        callbackToken.mint(address(router), 2 ether);
+        token.mint(address(router), 1 ether);
+        vm.deal(address(router), 3 ether);
+
+        assertEq(router.forwardToken(address(callbackToken)), 2 ether);
+
+        assertTrue(callbackToken.callbackEntered());
+        assertEq(callbackToken.tokenForwardedDuringCallback(), 1 ether);
+        assertEq(callbackToken.nativeForwardedDuringCallback(), 3 ether);
+        assertEq(callbackToken.balanceOf(treasury), 2 ether);
+        assertEq(token.balanceOf(treasury), 1 ether);
+        assertEq(treasury.balance, 3 ether);
+        assertEq(callbackToken.balanceOf(address(router)), 0);
+        assertEq(token.balanceOf(address(router)), 0);
+        assertEq(address(router).balance, 0);
     }
 
     function testRejectsZeroAddressesAndEmptyForwardsAreNoops() public {
