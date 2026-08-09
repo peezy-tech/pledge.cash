@@ -175,6 +175,21 @@ contract LiquidityLockerTest is Test {
         assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
     }
 
+    function testTokenIdZeroHasUnambiguousLifecycle() public {
+        _mintAndRegister(0, 100, 200, 1_000);
+        assertEq(locker.tokenId(), 0);
+        assertTrue(locker.positionRegistered());
+        assertFalse(locker.isClosed());
+
+        _fundManager(locker, 100, 200);
+        boardroom.startWindDown();
+        _executeEscrow(locker, abi.encodeCall(locker.exit, (uint128(100), uint128(200), block.timestamp + 1)));
+
+        assertEq(locker.tokenId(), 0);
+        assertFalse(locker.positionRegistered());
+        assertTrue(locker.isClosed());
+    }
+
     function testRejectsHookedWrongPairEmptyAndMalformedPositions() public {
         PoolKey memory hooked = _poolKey(locker, address(0xBEEF));
         _mintPositionTo(address(locker), 1, hooked, 100, 200, 1_000);

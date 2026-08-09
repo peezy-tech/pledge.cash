@@ -16,6 +16,8 @@ import {PositionManagerActions} from "./PositionManagerActions.sol";
 contract LiquidityLocker is ReentrancyGuard {
     uint24 public constant MAX_STATIC_POOL_FEE = 1_000_000;
     int24 public constant MAX_TICK_SPACING = type(int16).max;
+    uint8 internal constant REGISTERED = 1;
+    uint8 internal constant CLOSED = 2;
 
     address public immutable boardroom;
     address public immutable shareToken;
@@ -28,8 +30,8 @@ contract LiquidityLocker is ReentrancyGuard {
     int24 public immutable tickSpacing;
 
     uint256 public tokenId;
-    bool public positionRegistered;
-    bool public isClosed;
+    // A separate discriminator keeps token ID zero valid without synchronizing two lifecycle flags.
+    uint8 internal lifecycle;
 
     error InvalidAddress(address account);
     error OnlyBoardroom(address caller);
@@ -101,6 +103,14 @@ contract LiquidityLocker is ReentrancyGuard {
         _;
     }
 
+    function positionRegistered() external view returns (bool) {
+        return lifecycle == REGISTERED;
+    }
+
+    function isClosed() external view returns (bool) {
+        return lifecycle == CLOSED;
+    }
+
     /// @notice Registers a position minted directly to this locker by a CCA.
     function registerPosition(uint256 positionTokenId) external onlyBoardroom nonReentrant {
         _requireRegistrationAllowed();
@@ -122,13 +132,13 @@ contract LiquidityLocker is ReentrancyGuard {
     /// @notice Closes an empty pre-launch locker so it cannot block Boardroom wind-down.
     /// @dev Callable by Boardroom.execute while active or executeEscrow while winding down.
     function cancel() external onlyBoardroom nonReentrant {
-        if (isClosed) revert LockerAlreadyClosed();
-        if (positionRegistered) revert PositionAlreadyRegistered(tokenId);
+        if (lifecycle == CLOSED) revert LockerAlreadyClosed();
+        if (lifecycle == REGISTERED) revert PositionAlreadyRegistered(tokenId);
         IBoardroom.Status boardroomStatus = IBoardroom(boardroom).status();
         if (boardroomStatus != IBoardroom.Status.Active && boardroomStatus != IBoardroom.Status.WindingDown) {
             revert BoardroomExitForbidden();
         }
-        isClosed = true;
+        lifecycle = CLOSED;
         emit LockerCancelled();
     }
 
@@ -163,16 +173,15 @@ contract LiquidityLocker is ReentrancyGuard {
         amount0 = balance0After - balance0Before;
         amount1 = balance1After - balance1Before;
 
-        isClosed = true;
-        positionRegistered = false;
+        lifecycle = CLOSED;
         _transferExact(currency0, boardroom, balance0After);
         _transferExact(currency1, boardroom, balance1After);
         emit PositionExited(tokenId, amount0, amount1);
     }
 
     function _registerPosition(uint256 positionTokenId) internal {
-        if (isClosed) revert LockerAlreadyClosed();
-        if (positionRegistered) revert PositionAlreadyRegistered(tokenId);
+        if (lifecycle == CLOSED) revert LockerAlreadyClosed();
+        if (lifecycle == REGISTERED) revert PositionAlreadyRegistered(tokenId);
 
         address actualOwner;
         try positionManager.ownerOf(positionTokenId) returns (address owner_) {
@@ -199,7 +208,7 @@ contract LiquidityLocker is ReentrancyGuard {
         if (positionManager.getPositionLiquidity(positionTokenId) == 0) revert EmptyPosition(positionTokenId);
 
         tokenId = positionTokenId;
-        positionRegistered = true;
+        lifecycle = REGISTERED;
         emit PositionRegistered(positionTokenId, tickLower, tickUpper);
     }
 
@@ -245,7 +254,7 @@ contract LiquidityLocker is ReentrancyGuard {
     }
 
     function _requirePosition() internal view {
-        if (!positionRegistered || isClosed) revert PositionNotRegistered();
+        if (lifecycle != REGISTERED) revert PositionNotRegistered();
     }
 
     function _requireMutationAllowed() internal view {
