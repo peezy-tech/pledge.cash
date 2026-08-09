@@ -31,30 +31,6 @@ type WorkspaceHeaderProps = {
   children?: ReactNode;
 };
 
-type PageHeaderProps = {
-  title: string;
-  description?: string | undefined;
-  eyebrow?: string | undefined;
-  action?: ReactNode;
-  meta?: ReactNode;
-  className?: string | undefined;
-};
-
-type SectionProps = {
-  title?: string | undefined;
-  description?: string | undefined;
-  action?: ReactNode;
-  children: ReactNode;
-  className?: string | undefined;
-};
-
-type StatusNoticeProps = {
-  title: string;
-  children?: ReactNode;
-  tone?: "info" | "success" | "warning" | "danger";
-  className?: string | undefined;
-};
-
 export type FieldControlProps = {
   id: string;
   "aria-describedby"?: string;
@@ -99,12 +75,6 @@ export type ActionButtonProps = React.ComponentProps<typeof Button> & {
   actionId: string;
   pendingAction: string | undefined;
   pendingLabel?: string;
-};
-
-type TabButtonProps = {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
 };
 
 const factGridColumns: Record<FactsColumnCount, string> = {
@@ -158,78 +128,6 @@ export function WorkspaceHeader({
       </div>
       {hasChildren ? <div className="mt-4">{children}</div> : null}
     </section>
-  );
-}
-
-export function PageHeader({
-  action,
-  className,
-  description,
-  eyebrow,
-  meta,
-  title,
-}: PageHeaderProps): React.JSX.Element {
-  return (
-    <header className={cn("border-b border-[var(--pc-border)] pb-5", className)}>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0">
-          {eyebrow ? <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pc-accent)]">{eyebrow}</p> : null}
-          <h1 className={cn("m-0 text-2xl font-semibold tracking-tight text-[var(--pc-text)] sm:text-3xl", eyebrow && "mt-1.5")}>{title}</h1>
-          {description ? <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-[var(--pc-text-muted)]">{description}</p> : null}
-          {meta ? <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div> : null}
-        </div>
-        {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
-      </div>
-    </header>
-  );
-}
-
-export function Section({ action, children, className, description, title }: SectionProps): React.JSX.Element {
-  return (
-    <section className={cn("min-w-0 border-b border-[var(--pc-border)] py-6 last:border-b-0", className)}>
-      {title || description || action ? (
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            {title ? <h2 className="m-0 text-base font-semibold text-[var(--pc-text)]">{title}</h2> : null}
-            {description ? <p className="m-0 mt-1 max-w-2xl text-sm leading-5 text-[var(--pc-text-muted)]">{description}</p> : null}
-          </div>
-          {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
-        </div>
-      ) : null}
-      {children}
-    </section>
-  );
-}
-
-export function StatusNotice({
-  children,
-  className,
-  title,
-  tone = "info",
-}: StatusNoticeProps): React.JSX.Element {
-  const toneClass = {
-    danger: "border-[color:var(--pc-danger)]/35 bg-[color:var(--pc-danger)]/8",
-    info: "border-[color:var(--pc-info)]/35 bg-[color:var(--pc-info)]/8",
-    success: "border-[color:var(--pc-success)]/35 bg-[color:var(--pc-success)]/8",
-    warning: "border-[color:var(--pc-warning)]/35 bg-[color:var(--pc-warning)]/8",
-  }[tone];
-
-  return (
-    <div className={cn("rounded-md border p-3", toneClass, className)} role={tone === "danger" ? "alert" : "status"}>
-      <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">{title}</p>
-      {children ? <div className="mt-1 text-sm leading-5 text-[var(--pc-text-muted)]">{children}</div> : null}
-    </div>
-  );
-}
-
-export function TechnicalDetails({ children, summary = "Technical details" }: { children: ReactNode; summary?: string }): React.JSX.Element {
-  return (
-    <details className="group border-t border-[var(--pc-border)] py-3">
-      <summary className="cursor-pointer select-none text-sm font-medium text-[var(--pc-text-muted)] transition-colors hover:text-[var(--pc-text)]">
-        {summary}
-      </summary>
-      <div className="mt-3 text-sm text-[var(--pc-text-muted)]">{children}</div>
-    </details>
   );
 }
 
@@ -357,28 +255,6 @@ export function ActionButton({
         <span aria-live="polite" className="sr-only" role="status">{pendingLabel}</span>
       ) : null}
     </>
-  );
-}
-
-export function TabButton({
-  active,
-  children,
-  onClick,
-}: TabButtonProps): React.JSX.Element {
-  return (
-    <button
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "min-h-11 shrink-0 border-b-2 px-3 text-sm font-semibold transition-colors",
-        active
-          ? "border-[var(--pc-accent)] text-[var(--pc-text)]"
-          : "border-transparent text-[var(--pc-text-muted)] hover:border-[var(--pc-border-strong)] hover:text-[var(--pc-text)]",
-      )}
-      type="button"
-      onClick={onClick}
-    >
-      {children}
-    </button>
   );
 }
 
