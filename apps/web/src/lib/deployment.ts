@@ -61,15 +61,6 @@ export function deploymentText(deployment: PledgeCashDeployment | undefined): st
   return JSON.stringify(deployment, (_, value: unknown) => (typeof value === "bigint" ? value.toString() : value), 2);
 }
 
-export function deploymentRuntimeIdentity(deployment: PledgeCashDeployment | undefined): string | undefined {
-  if (!deployment) return undefined;
-  return JSON.stringify(
-    Object.entries(deployment)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => [key, typeof value === "bigint" ? value.toString() : value]),
-  );
-}
-
 export function parseDeployment(raw: string): PledgeCashDeployment {
   const json = JSON.parse(raw) as Record<string, unknown>;
   const deployment: PledgeCashDeployment = { chainId: Number(json.chainId) };

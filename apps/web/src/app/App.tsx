@@ -24,7 +24,6 @@ import {
   discoverBoardrooms,
   discoverGrantHistory,
   discoverLiquidityLockers,
-  getPledgeCashDeployment,
   isZeroAddress,
   predictBoardroomAddress,
   predictGrantAddress,
@@ -165,8 +164,7 @@ export function App(): React.JSX.Element {
   const [route, setRoute] = useState<AppRoute>(() => initialRoute());
   const network = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const publicClient = useMemo(() => createPledgeCashPublicClient(network), [network]);
-  const generatedDeployment = useMemo(() => getPledgeCashDeployment(network.chainId), [network.chainId]);
-  const deploymentAvailability = useRuntimeDeploymentAvailability(network.chainId, generatedDeployment);
+  const deploymentAvailability = useRuntimeDeploymentAvailability(network.chainId);
   const deployment = deploymentAvailability.status === "ready" ? deploymentAvailability.deployment : undefined;
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const walletApi = useWagmiWallet({ network, onAccountChanged: () => undefined, pushLog });

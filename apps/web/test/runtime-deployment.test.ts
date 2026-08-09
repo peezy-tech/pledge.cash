@@ -7,7 +7,7 @@ import {
   startRuntimeDeploymentRecovery,
   type RuntimeDeploymentResult,
 } from "../src/hooks/use-runtime-deployment";
-import { deploymentRuntimeIdentity, parseDeployment } from "../src/lib/deployment";
+import { parseDeployment } from "../src/lib/deployment";
 
 const address = (digit: string): `0x${string}` => `0x${digit.repeat(40)}`;
 
@@ -70,45 +70,44 @@ describe("lean runtime deployment artifacts", () => {
     expect(pendingDeploymentReason({ chainId: 998, status: "pending", reason: "Awaiting broadcast" })).toBe("Awaiting broadcast");
   });
 
-  test("keeps a chain-valid generated deployment as a non-ready runtime fallback", () => {
-    const generated = { chainId: 998, boardroomFactory: address("1") };
-    const pending = selectRuntimeDeploymentAvailability(998, generated, {
+  test("uses only runtime artifacts and keeps non-ready states fail-closed", () => {
+    const readyDeployment = { chainId: 998, boardroomFactory: address("1") };
+    const pendingDeployment = { chainId: 998, status: "pending", reason: "Awaiting broadcast" };
+    const ready = selectRuntimeDeploymentAvailability(998, {
       kind: "deployment",
-      deployment: { chainId: 998, status: "pending", reason: "Awaiting broadcast" },
+      deployment: readyDeployment,
     });
-    const missing = selectRuntimeDeploymentAvailability(998, generated, { kind: "missing" });
-    const failed = selectRuntimeDeploymentAvailability(998, generated, { kind: "error", reason: "Offline" });
+    const pending = selectRuntimeDeploymentAvailability(998, {
+      kind: "deployment",
+      deployment: pendingDeployment,
+    });
+    const missing = selectRuntimeDeploymentAvailability(998, { kind: "missing" });
+    const failed = selectRuntimeDeploymentAvailability(998, { kind: "error", reason: "Offline" });
 
-    expect(pending).toEqual({ chainId: 998, status: "pending", deployment: generated, source: "generated", reason: "Awaiting broadcast" });
-    expect(missing.deployment).toBe(generated);
-    expect(failed).toMatchObject({ status: "error", deployment: generated, reason: "Offline" });
+    expect(ready).toEqual({ chainId: 998, status: "ready", deployment: readyDeployment, reason: undefined });
+    expect(pending).toEqual({
+      chainId: 998,
+      status: "pending",
+      deployment: pendingDeployment,
+      reason: "Awaiting broadcast",
+    });
+    expect(missing).toEqual({
+      chainId: 998,
+      status: "missing",
+      deployment: undefined,
+      reason: "No deployment artifact is published for this network.",
+    });
+    expect(failed).toEqual({ chainId: 998, status: "error", deployment: undefined, reason: "Offline" });
   });
 
-  test("rejects mismatched runtime and generated artifacts", () => {
-    const availability = selectRuntimeDeploymentAvailability(8453, { chainId: 998 }, {
+  test("rejects mismatched runtime artifacts", () => {
+    const availability = selectRuntimeDeploymentAvailability(8453, {
       kind: "deployment",
       deployment: { chainId: 998 },
     });
     expect(availability.status).toBe("error");
     expect(availability.deployment).toBeUndefined();
     expect(availability.reason).toContain("not chain 8453");
-  });
-
-  test("runtime identity covers every write-critical lean root and is order-stable", () => {
-    const base = {
-      chainId: 998,
-      boardroomFactory: address("1"),
-      tokenGrantFactory: address("2"),
-      liquidityLockerFactory: address("3"),
-      uniswapUniversalRouter: address("4"),
-      permit2: address("5"),
-      wrappedNative: address("6"),
-      creationFee: 1n,
-    };
-    const identity = deploymentRuntimeIdentity(base);
-    expect(deploymentRuntimeIdentity({ ...base, liquidityLockerFactory: address("7") })).not.toBe(identity);
-    expect(deploymentRuntimeIdentity({ ...base, creationFee: 2n })).not.toBe(identity);
-    expect(deploymentRuntimeIdentity(Object.fromEntries(Object.entries(base).reverse()) as typeof base)).toBe(identity);
   });
 
   test("retries non-ready results and stops cleanly", async () => {

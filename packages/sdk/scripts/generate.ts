@@ -1,5 +1,4 @@
-import { spawnSync } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -83,14 +82,6 @@ const deploymentFields = [
   ["wrappedNativeCodeHash", "string"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
-const optionalCanonicalDeploymentFields = new Set<string>([
-  "status",
-  "reason",
-]);
-const requiredCanonicalDeploymentFields = deploymentFields
-  .map(([field]) => field)
-  .filter((field) => field !== "chainId" && !optionalCanonicalDeploymentFields.has(field));
-
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -103,112 +94,12 @@ function deploymentFieldType(kind: DeploymentFieldKind): string {
   return "string";
 }
 
-function propertyToken(raw: string, key: string): string | undefined {
-  const match = raw.match(new RegExp(`"${key}"\\s*:\\s*("([^"\\\\]|\\\\.)*"|true|false|null|-?\\d+)`));
-  return match?.[1];
-}
-
-function bigintLiteral(raw: string, key: string): string | undefined {
-  const token = propertyToken(raw, key);
-  if (!token || token === "null") return undefined;
-  if (token.startsWith('"')) return `${JSON.parse(token)}n`;
-  return `${token}n`;
-}
-
-function numberLiteral(raw: string, key: string): string | undefined {
-  const token = propertyToken(raw, key);
-  if (!token || token === "null") return undefined;
-  if (token.startsWith('"')) return String(Number(JSON.parse(token)));
-  return token;
-}
-
-function isIgnoredDeploymentFile(file: string): boolean {
-  const result = spawnSync("git", ["check-ignore", "--quiet", "--", join("packages/contracts/deployments", file)], {
-    cwd: repoRoot,
-  });
-  return result.status === 0;
-}
-
-function serializeDeployment(raw: string): string | undefined {
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
-  const chainId = numberLiteral(raw, "chainId");
-  if (!chainId) return undefined;
-
-  if (parsed.status === "pending") {
-    const reason =
-      typeof parsed.reason === "string"
-        ? parsed.reason
-        : "Canonical protocol deployment is pending.";
-    const lines = [
-      `chainId: ${chainId}`,
-      `status: ${literal("pending")}`,
-      `reason: ${literal(reason)}`,
-    ];
-    if (typeof parsed.protocolVersion === "string") {
-      lines.push(`protocolVersion: ${literal(parsed.protocolVersion)}`);
-    }
-    return `${chainId}: {\n    ${lines.join(",\n    ")}\n  }`;
-  }
-
-  const missingCanonicalFields = requiredCanonicalDeploymentFields.filter(
-    (field) => propertyToken(raw, field) === undefined,
-  );
-  if (missingCanonicalFields.length > 0) {
-    throw new Error(
-      `Deployment ${chainId} is not explicitly pending and is missing canonical protocol fields (${missingCanonicalFields.join(
-        ", ",
-      )}).`,
-    );
-  }
-
-  const lines = [`chainId: ${chainId}`];
-  for (const [field, kind] of deploymentFields) {
-    if (field === "chainId") continue;
-    if (propertyToken(raw, field) === undefined) continue;
-
-    if (kind === "address") {
-      lines.push(`${field}: ${literal(parsed[field])} as Address`);
-      continue;
-    }
-    if (kind === "bigint") {
-      const value = bigintLiteral(raw, field);
-      if (value) lines.push(`${field}: ${value}`);
-      continue;
-    }
-    if (kind === "number") {
-      const value = numberLiteral(raw, field);
-      if (value) lines.push(`${field}: ${value}`);
-      continue;
-    }
-
-    lines.push(`${field}: ${literal(parsed[field])}`);
-  }
-
-  return `${chainId}: {\n    ${lines.join(",\n    ")}\n  }`;
-}
-
 async function readAbi(path: string): Promise<unknown[]> {
   const artifact = JSON.parse(await readFile(join(repoRoot, path), "utf8")) as Artifact;
   if (!Array.isArray(artifact.abi)) {
     throw new Error(`Missing ABI in ${path}`);
   }
   return artifact.abi;
-}
-
-async function deploymentEntries(): Promise<string[]> {
-  const deploymentDir = join(repoRoot, "packages/contracts/deployments");
-  const files = await readdir(deploymentDir).catch(() => []);
-  const entries: string[] = [];
-
-  for (const file of files.sort()) {
-    if (!/^\d+\.json$/.test(file)) continue;
-    if (isIgnoredDeploymentFile(file)) continue;
-    const raw = await readFile(join(deploymentDir, file), "utf8");
-    const entry = serializeDeployment(raw);
-    if (entry) entries.push(entry);
-  }
-
-  return entries;
 }
 
 const abiExports: string[] = [];
@@ -220,7 +111,6 @@ for (const [contractName, artifactPath, exportName] of contracts) {
   abiMapEntries.push(`${contractName}: ${exportName}`);
 }
 
-const deployments = await deploymentEntries();
 const networkManifest = await loadNetworkManifest();
 const deploymentTypeFields = deploymentFields
   .map(([field, kind]) => `  ${field}${field === "chainId" ? "" : "?"}: ${deploymentFieldType(kind)};`)
@@ -293,10 +183,6 @@ ${abiExports.join("\n\n")}
 export const pledgeCashAbis = {
   ${abiMapEntries.join(",\n  ")}
 } as const;
-
-export const pledgeCashDeployments = {
-  ${deployments.join(",\n  ")}
-} as const satisfies Record<number, PledgeCashDeployment>;
 `;
 
 await mkdir(dirname(outFile), { recursive: true });

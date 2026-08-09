@@ -6,7 +6,6 @@ import {
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
   pledgeCashAbis,
-  pledgeCashDeployments,
   pledgeCashNetworkProfiles,
   pledgeCashNetworkSupportPolicy,
   positionManagerAbi,
@@ -85,15 +84,7 @@ describe("generated SDK exports", () => {
     }
   });
 
-  test("includes pending deployment metadata and canonical network profiles", () => {
-    const supportedChainIds = [11155111, 84532, 1, 8453, 42161, 4663];
-    expect(Object.keys(pledgeCashDeployments).map(Number)).toEqual(expect.arrayContaining(supportedChainIds));
-    for (const chainId of supportedChainIds) {
-      const deployment = pledgeCashDeployments[chainId as keyof typeof pledgeCashDeployments];
-      expect(deployment).toMatchObject({ chainId, status: "pending", protocolVersion: "pledge.cash.protocol.v1" });
-      expect(deployment?.boardroomFactory).toBeUndefined();
-      expect(deployment?.liquidityLockerFactory).toBeUndefined();
-    }
+  test("includes canonical network profiles without embedding deployment artifacts", async () => {
     expect(pledgeCashNetworkSupportPolicy).toEqual({
       defaultChainId: 11155111,
       testnetChainIds: [11155111, 84532],
@@ -107,6 +98,9 @@ describe("generated SDK exports", () => {
       "arbitrum",
       "robinhood-chain",
     ]);
+
+    const source = await readFile(new URL("../src/generated.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("pledgeCashDeployments");
   });
 
   test("marks generated source and lean deployment fields", async () => {

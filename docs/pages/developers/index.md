@@ -13,9 +13,9 @@ The integration surface is intentionally small:
 - [Deployment and local scenarios](developers/deployment-and-local-scenarios) for profiles,
   artifacts, simulation, forks, and end-to-end proof.
 
-Use the generated SDK ABIs in `packages/sdk/src/abis/` and chain-specific artifacts
-rather than copying an interface from prose. Canonical identity always includes chain,
-release artifact, factory relationship, and runtime code.
+Use the generated SDK ABIs and the runtime `/deployments/<chainId>.json` artifacts
+rather than copying an interface or deployment address from prose. Canonical identity
+always includes chain, release artifact, factory relationship, and runtime code.
 
 The protocol does not expose diamond facets, governance controllers, distributions,
 bonds, staking, rewards, custom AMM pools, hooks, or legacy aliases. Treat an ABI or

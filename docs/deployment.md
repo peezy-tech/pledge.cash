@@ -26,6 +26,11 @@ A release artifact identifies:
 Removed governance, diamond, distribution, rewards, bond, hook, and position-vault
 contracts are not valid artifact fields.
 
+The checked-in `packages/contracts/deployments/<chainId>.json` files are the canonical
+runtime source. The web build copies public-network artifacts to
+`/deployments/<chainId>.json` and loads them at runtime; the SDK does not embed a second
+deployment catalog.
+
 ## Local proof
 
 From the repository root:
