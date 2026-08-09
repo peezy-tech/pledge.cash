@@ -16,8 +16,8 @@ make an artifact live.
 
 ## A project or grant is not recognized
 
-Check chain and address formatting, then verify the factory mapping. An event, saved
-shortcut, or hosted identity cannot replace current factory provenance.
+Check chain and address formatting, then verify the factory mapping. An event or hosted
+identity cannot replace current factory provenance.
 
 ## A grant will not settle
 

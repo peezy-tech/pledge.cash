@@ -23,5 +23,4 @@ product and run every local proof without sending a public-network transaction.
 - [Open Explore](../explore) to inspect the current app surface.
 
 The chain, deployment artifact, factory relationship, and contract state are the source
-of truth. Names, saved shortcuts, hosted identity, and project descriptions are context
-only.
+of truth. Names, hosted identity, and project descriptions are context only.

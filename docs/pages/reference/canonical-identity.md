@@ -19,8 +19,8 @@ live deployment artifact and factory relationships.
 | Swap path | Artifact's Universal Router, Permit2, Quoter, StateView, and exact PoolKey |
 
 Events support discovery and history, but current mappings and contract reads decide
-whether a relationship still holds. Hosted identity, names, icons, project copy, saved
-addresses, and URLs are never sufficient provenance.
+whether a relationship still holds. Hosted identity, names, icons, project copy, and
+URLs are never sufficient provenance.
 
 If a public artifact is pending, there is no canonical pledge.cash contract identity on
 that network.

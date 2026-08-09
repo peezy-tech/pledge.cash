@@ -19,9 +19,9 @@ Before signing:
 5. Wait for a receipt before retrying. A rejected signature, replaced transaction, and
    reverted receipt need different recovery steps.
 
-Treat project metadata, hosted identity, search results, and saved browser shortcuts as
-untrusted context. Never paste a seed phrase or private key. Revoke approvals you no
-longer need through a trusted chain explorer or wallet tool.
+Treat project metadata, hosted identity, and search results as untrusted context. Never
+paste a seed phrase or private key. Revoke approvals you no longer need through a
+trusted chain explorer or wallet tool.
 
 Wind-down, grant settlement, locker exit, share redemption, and ownership transfer have
 lasting consequences. Read the relevant guide and contract state first.
