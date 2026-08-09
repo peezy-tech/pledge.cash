@@ -154,10 +154,6 @@ contract Deploy is Script {
         );
         bytes32 salt = PledgeCashDeploymentSalts.deterministicDeployer();
         address expected = vm.computeCreate2Address(salt, keccak256(initCode), state.create2Factory);
-        address configured = vm.envOr("PLEDGE_CASH_DETERMINISTIC_DEPLOYER", address(0));
-        if (configured != address(0) && configured != expected) {
-            revert DeterministicDeployerMismatch(expected, configured);
-        }
 
         if (expected.code.length == 0) {
             state.deterministicDeployer =

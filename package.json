@@ -34,10 +34,6 @@
     "sentinel:test": "bun --cwd services/sentinel test",
     "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
     "simulate:network": "bun --cwd packages/contracts simulate:network",
-    "simulate:sepolia": "bun --cwd packages/contracts simulate:sepolia",
-    "simulate:base-sepolia": "bun --cwd packages/contracts simulate:base-sepolia",
-    "test:sepolia-fork:deployment": "bun --cwd packages/contracts test:sepolia-fork:deployment",
-    "test:base-sepolia-fork:deployment": "bun --cwd packages/contracts test:base-sepolia-fork:deployment",
     "test:testnet-forks:deployment": "bun --cwd packages/contracts test:testnet-forks:deployment",
     "validate:networks": "bun --cwd packages/contracts validate:networks",
     "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"

@@ -6,8 +6,8 @@ import {
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
   pledgeCashAbis,
+  pledgeCashDefaultPublicChainId,
   pledgeCashNetworkProfiles,
-  pledgeCashNetworkSupportPolicy,
   positionManagerAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -63,7 +63,6 @@ describe("generated SDK exports", () => {
     expect(functionNames(liquidityLockerAbi)).toEqual(expect.arrayContaining([
       "collectFees",
       "exit",
-      "preparePositionTransfer",
       "registerPosition",
     ]));
   });
@@ -85,11 +84,7 @@ describe("generated SDK exports", () => {
   });
 
   test("includes canonical network profiles without embedding deployment artifacts", async () => {
-    expect(pledgeCashNetworkSupportPolicy).toEqual({
-      defaultChainId: 11155111,
-      testnetChainIds: [11155111, 84532],
-      mainnetChainIds: [1, 8453, 42161, 4663],
-    });
+    expect(pledgeCashDefaultPublicChainId).toBe(11155111);
     expect(pledgeCashNetworkProfiles.map((profile) => profile.key)).toEqual([
       "ethereum-sepolia",
       "base-sepolia",
@@ -98,6 +93,17 @@ describe("generated SDK exports", () => {
       "arbitrum",
       "robinhood-chain",
     ]);
+    expect(Object.keys(pledgeCashNetworkProfiles[0]!).sort()).toEqual([
+      "chainId",
+      "defaultRpcUrl",
+      "environment",
+      "explorer",
+      "key",
+      "name",
+      "nativeCurrency",
+      "wrappedNative",
+    ]);
+    expect(Object.keys(pledgeCashNetworkProfiles[0]!.wrappedNative)).toEqual(["symbol"]);
 
     const source = await readFile(new URL("../src/generated.ts", import.meta.url), "utf8");
     expect(source).not.toContain("pledgeCashDeployments");

@@ -4,9 +4,9 @@ export * from "./generated";
 export * from "./helpers";
 export type { Address };
 
-import { pledgeCashNetworkSupportPolicy } from "./generated";
+import { pledgeCashDefaultPublicChainId } from "./generated";
 
-export const DEFAULT_PUBLIC_CHAIN_ID = pledgeCashNetworkSupportPolicy.defaultChainId;
+export const DEFAULT_PUBLIC_CHAIN_ID = pledgeCashDefaultPublicChainId;
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
 

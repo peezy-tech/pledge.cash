@@ -111,6 +111,18 @@ for (const [contractName, artifactPath, exportName] of contracts) {
 }
 
 const networkManifest = await loadNetworkManifest();
+const publicNetworkProfiles = networkManifest.profiles.map((profile) => ({
+  chainId: profile.chainId,
+  key: profile.key,
+  name: profile.name,
+  environment: profile.environment,
+  defaultRpcUrl: profile.defaultRpcUrl,
+  explorer: profile.explorer,
+  nativeCurrency: profile.nativeCurrency,
+  wrappedNative: {
+    symbol: profile.wrappedNative.symbol,
+  },
+}));
 const deploymentTypeFields = deploymentFields
   .map(([field, kind]) => `  ${field}${field === "chainId" ? "" : "?"}: ${deploymentFieldType(kind)};`)
   .join("\n");
@@ -124,15 +136,11 @@ export type PledgeCashDeployment = {
 ${deploymentTypeFields}
 };
 
-export type PledgeCashNetworkEnvironment = "testnet" | "mainnet";
-
 export type PledgeCashNetworkProfile = {
   readonly chainId: number;
   readonly key: string;
   readonly name: string;
-  readonly environment: PledgeCashNetworkEnvironment;
-  readonly deploymentPhase: "testnet-candidate" | "mainnet-planned";
-  readonly rpcEnv: string;
+  readonly environment: "testnet" | "mainnet";
   readonly defaultRpcUrl: string;
   readonly explorer: {
     readonly name: string;
@@ -143,38 +151,15 @@ export type PledgeCashNetworkProfile = {
     readonly symbol: string;
     readonly decimals: number;
   };
-  readonly confirmations: number;
-  readonly observedAt: {
-    readonly blockNumber: number;
-    readonly checkedAt: string;
-  };
-  readonly create2Factory: {
-    readonly address: Address;
-    readonly codeHash: \`0x\${string}\`;
-  };
   readonly wrappedNative: {
     readonly symbol: string;
-    readonly address: Address;
-    readonly codeHash: \`0x\${string}\`;
-  };
-  readonly uniswap: {
-    readonly routerEncoding: "universal-router-2.0-v4-exact-input-single";
-    readonly poolManager: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
-    readonly universalRouter: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
-    readonly quoter: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
-    readonly stateView: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
-    readonly positionManager: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
-    readonly permit2: { readonly address: Address; readonly codeHash: \`0x\${string}\` };
   };
 };
 
-export const pledgeCashNetworkSupportPolicy = ${literal(networkManifest.supportPolicy)} as const;
+export const pledgeCashDefaultPublicChainId = ${networkManifest.supportPolicy.defaultChainId} as const;
 
-export const pledgeCashNetworkSources = ${literal(networkManifest.sources)} as const;
+export const pledgeCashNetworkProfiles = ${literal(publicNetworkProfiles)} as const satisfies readonly PledgeCashNetworkProfile[];
 
-export const pledgeCashNetworkProfiles = ${literal(networkManifest.profiles)} as const satisfies readonly PledgeCashNetworkProfile[];
-
-export type PledgeCashPublicChainId = typeof pledgeCashNetworkProfiles[number]["chainId"];
 export type PledgeCashNetworkKey = typeof pledgeCashNetworkProfiles[number]["key"];
 
 ${abiExports.join("\n\n")}

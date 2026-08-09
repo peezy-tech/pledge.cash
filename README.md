@@ -64,8 +64,8 @@ Run the deployment and retained-lifecycle proof:
 
 ```sh
 bun run validate:networks
-bun run simulate:sepolia
-bun run simulate:base-sepolia
+bun run simulate:network -- 11155111
+bun run simulate:network -- 84532
 bun run test:testnet-forks:deployment
 bun run scenario:project-token:local
 ```
