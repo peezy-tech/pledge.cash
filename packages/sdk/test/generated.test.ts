@@ -23,8 +23,6 @@ describe("generated SDK exports", () => {
       "LiquidityLocker",
       "LiquidityLockerFactory",
       "PositionManager",
-      "ProtocolFeeRouter",
-      "PledgeCashDeterministicDeployer",
       "TokenGrant",
       "TokenGrantFactory",
     ]);
@@ -34,6 +32,8 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.LiquidityLockerFactory).toBe(liquidityLockerFactoryAbi);
     expect(pledgeCashAbis.PositionManager).toBe(positionManagerAbi);
     expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
+    expect("ProtocolFeeRouter" in pledgeCashAbis).toBe(false);
+    expect("PledgeCashDeterministicDeployer" in pledgeCashAbis).toBe(false);
   });
 
   test("tracks the frozen lifecycle, grant, and locker functions", () => {

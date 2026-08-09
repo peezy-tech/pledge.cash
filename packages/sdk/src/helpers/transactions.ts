@@ -5,7 +5,6 @@ import {
   erc20Abi,
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
-  protocolFeeRouterAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
@@ -452,19 +451,6 @@ export function buildBoardroomLiquidityLockerExitTransaction(input: {
     escrow: input.locker,
     data,
   });
-}
-
-export function buildProtocolFeeForwardTokenTransaction(input: { router: Address; token: Address }) {
-  return {
-    address: input.router,
-    abi: protocolFeeRouterAbi,
-    functionName: "forwardToken" as const,
-    args: [input.token] as const,
-  };
-}
-
-export function buildProtocolFeeForwardNativeTransaction(input: { router: Address }) {
-  return { address: input.router, abi: protocolFeeRouterAbi, functionName: "forwardNative" as const };
 }
 
 export function buildUniswapV4SwapExactInputSingleTransaction(input: {

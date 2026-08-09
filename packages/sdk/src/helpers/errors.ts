@@ -5,8 +5,6 @@ import {
   boardroomTokenAbi,
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
-  pledgeCashDeterministicDeployerAbi,
-  protocolFeeRouterAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
@@ -18,8 +16,6 @@ const pledgeCashErrorAbis: readonly Abi[] = [
   boardroomTokenAbi,
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
-  pledgeCashDeterministicDeployerAbi,
-  protocolFeeRouterAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 ];

@@ -16,6 +16,8 @@ The integration surface is intentionally small:
 Use the generated SDK ABIs and the runtime `/deployments/<chainId>.json` artifacts
 rather than copying an interface or deployment address from prose. Canonical identity
 always includes chain, release artifact, factory relationship, and runtime code.
+The SDK publishes product integration ABIs only; deployment tooling verifies the
+operator-only deterministic deployer and fee router directly from contract artifacts.
 
 The protocol does not expose diamond facets, governance controllers, distributions,
 bonds, staking, rewards, custom AMM pools, hooks, or legacy aliases. Treat an ABI or

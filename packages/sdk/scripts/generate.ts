@@ -22,8 +22,6 @@ const contracts = [
   ["LiquidityLocker", "packages/contracts/out/LiquidityLocker.sol/LiquidityLocker.json", "liquidityLockerAbi"],
   ["LiquidityLockerFactory", "packages/contracts/out/LiquidityLockerFactory.sol/LiquidityLockerFactory.json", "liquidityLockerFactoryAbi"],
   ["PositionManager", "packages/contracts/out/IPositionManager.sol/IPositionManager.json", "positionManagerAbi"],
-  ["ProtocolFeeRouter", "packages/contracts/out/ProtocolFeeRouter.sol/ProtocolFeeRouter.json", "protocolFeeRouterAbi"],
-  ["PledgeCashDeterministicDeployer", "packages/contracts/out/PledgeCashDeterministicDeployer.sol/PledgeCashDeterministicDeployer.json", "pledgeCashDeterministicDeployerAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
 ] as const;
