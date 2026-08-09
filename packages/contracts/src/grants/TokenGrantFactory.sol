@@ -186,12 +186,6 @@ contract TokenGrantFactory is Ownable, ERC721 {
         TokenGrant(grant).requireCanTransferGrantRight(block.timestamp);
     }
 
-    function _afterTokenTransfer(address from, address to, uint256 id) internal override {
-        if (_isMintOrBurn(from, to)) return;
-
-        TokenGrant(grantForTokenId[id]).onGrantRightTransferred(from, to);
-    }
-
     /*//////////////////////////////////////////////////////////////
                                INTERNAL
     //////////////////////////////////////////////////////////////*/

@@ -604,7 +604,7 @@ contract TokenGrantTest is Test {
         assertEq(paymentToken.balanceOf(issuer), PRICE);
     }
 
-    function testSafeTransferFromSyncsGrantHolder() public {
+    function testSafeTransferFromUsesCanonicalNftOwnerAsHolder() public {
         address newHolder = address(0xD00D);
         TokenGrant grant = _createGrant(
             _grantCreate(
@@ -743,17 +743,6 @@ contract TokenGrantTest is Test {
         factory.closeGrant(grantTokenId);
     }
 
-    function testOnlyFactoryCanSyncGrantHolder() public {
-        (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
-
-        vm.expectRevert(TokenGrant.OnlyFactory.selector);
-        grant.onGrantRightTransferred(holder, stranger);
-
-        vm.prank(address(factory));
-        vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
-        grant.onGrantRightTransferred(stranger, stranger);
-    }
-
     function testFullSettlementBurnsGrantNft() public {
         (TokenGrant grant,) = _createFreeGrant("full-settle-burn");
         uint256 grantTokenId = grant.tokenId();
@@ -807,6 +796,20 @@ contract TokenGrantTest is Test {
         assertEq(token.balanceOf(grantAddress), 0);
         vm.expectRevert(ERC721.TokenDoesNotExist.selector);
         factory.ownerOf(grantTokenId);
+    }
+
+    function testHaltAtTimestampZeroRemainsObservableAfterGrantRightBurns() public {
+        (TokenGrant grant,) = _createFreeGrant("halt-at-zero");
+        vm.warp(0);
+
+        vm.prank(issuer);
+        grant.stopVestingAndWithdrawUnvested();
+
+        assertTrue(grant.vestingIsHalted());
+        assertEq(grant.vestingHaltTimestamp(), 0);
+        assertEq(grant.claimable(), 0);
+        assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
     }
 
     function testPaymentTokenReentryCannotTransferGrantNftDuringSettlement() public {

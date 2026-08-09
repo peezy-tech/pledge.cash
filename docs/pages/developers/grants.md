@@ -20,7 +20,8 @@ escrow. Do not try to fund a Boardroom-issued grant with its own share token.
 Quote live data from `getSettleableAmount(timestamp)` and
 `getSettlementCost(amount)`. Payment cost rounds up. Submit any payment-token approval
 to the grant contract, not the factory. Re-read current ERC721 owner before settlement or
-transfer.
+transfer. The grant's compatibility `holder()` view derives that same owner and returns
+zero after closure burns the right.
 
 Index `TokenGrantCreated`, `GrantSettled`, issuer terminal events, and `GrantClosed`, but
 derive current state from the grant and factory. Closed grants have burned rights and can

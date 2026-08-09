@@ -39,7 +39,8 @@ granted amount from escrow to holder.
 
 The NFT can move only when the grant was declared transferable, its unlock time has
 passed, it is not expired, and no settlement or issuer recovery is in progress. A
-transfer updates the grant's holder atomically.
+transfer changes settlement authority atomically because the factory's ERC721 owner is
+the canonical holder; the grant does not mirror ownership in separate storage.
 
 ## Issuer exits
 
@@ -57,7 +58,8 @@ NFT. Anyone can then prune a canonical Boardroom's closed escrow.
 
 - `settledAmount` never exceeds `claimable`, and `claimable` never exceeds `grantSize`.
 - Only the current holder settles; only the issuer halts or recovers.
-- The grant right and the grant's `holder` field move together.
+- The grant's `holder()` view is derived from the live grant-right owner and returns zero
+  after the right is burned.
 - All public token movements require exact sender and recipient deltas.
 - A closed grant never reopens and its NFT no longer exists.
 - Every time calculation is bounded by fixed timestamps supplied at creation.
