@@ -110,12 +110,9 @@ export type DiscoveryForm = {
 };
 
 export type DiscoverySnapshot = {
-  chainId?: number;
   loadedFor?: Address;
   fromBlock?: bigint;
   toBlock?: bigint | "latest";
-  chunkSize?: bigint;
-  rangeMode?: "deployment" | "recent" | "manual";
   lastScannedBlock?: bigint;
   complete: boolean;
   errors: string[];

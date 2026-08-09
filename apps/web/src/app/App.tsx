@@ -642,11 +642,9 @@ export function App(): React.JSX.Element {
     const results = [boardrooms, grants, lockers];
     const lastScannedBlock = combineDiscoveryLastScanned(results);
     setDiscovery((current) => ({
-      chainId: network.chainId,
       ...(wallet.account ? { loadedFor: wallet.account } : {}),
       fromBlock,
       toBlock,
-      chunkSize,
       complete: results.every((result) => result.complete),
       ...(lastScannedBlock === undefined ? {} : { lastScannedBlock }),
       errors: discoveryErrors(results),
