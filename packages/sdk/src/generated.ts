@@ -603,13 +603,7 @@ export const boardroomAbi = [
         "internalType": "address"
       }
     ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -3840,19 +3834,6 @@ export const tokenGrantAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "paymentTokenDecimals",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
