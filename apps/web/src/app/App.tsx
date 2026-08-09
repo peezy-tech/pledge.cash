@@ -543,8 +543,10 @@ export function App(): React.JSX.Element {
       readQuote: async (amount) => await readGrantSettlementQuote(publicClient, grantSnapshot.address, amount),
     });
     if (prepared.plan.kind === "approve") {
+      const paymentTokenDecimals = grantSnapshot.paymentTokenMetadata?.decimals;
+      if (paymentTokenDecimals === undefined) throw new Error("Payment token decimals could not be read.");
       await submitContractTransaction("Approve exact grant payment", buildErc20Approval({ token: prepared.quote.state.paymentToken, spender: grantSnapshot.address, amount: prepared.plan.amount }));
-      setPaymentApproval(formatUnits(prepared.plan.amount, prepared.quote.state.paymentTokenDecimals));
+      setPaymentApproval(formatUnits(prepared.plan.amount, paymentTokenDecimals));
     } else {
       await submitContractTransaction("Settle available grant", buildGrantSettlementTransaction({ grant: grantSnapshot.address, amount: prepared.plan.amount }));
       await loadGrantAddress(grantSnapshot.address);

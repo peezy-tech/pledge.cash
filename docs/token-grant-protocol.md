@@ -10,6 +10,10 @@ A grant can be free (`price == 0`) or require an ERC20 payment. The quoted price
 whole granted token and settlement rounds payment cost up. The grant never mints the
 granted asset and never relies on a future issuer balance.
 
+Payment-token decimals are presentation metadata, not settlement state. The contract
+uses the raw quoted price in payment-token base units, while clients may read ERC20
+metadata to format that value for people.
+
 ## Creation
 
 The issuer approves the factory for the exact grant amount and calls `createGrant` with:

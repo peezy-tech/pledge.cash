@@ -29,7 +29,6 @@ contract TokenGrant is Initializable {
     address public token;
     address public paymentToken;
     uint8 public tokenDecimals;
-    uint8 public paymentTokenDecimals;
 
     // Economics.
     uint256 public grantSize;
@@ -320,7 +319,7 @@ contract TokenGrant is Initializable {
         if (vestingCliff_ > vestingEnd_) revert InvalidVestingSchedule();
     }
 
-    function _configurePaymentTerms(address token_, address paymentToken_, uint256 price_) internal {
+    function _configurePaymentTerms(address token_, address paymentToken_, uint256 price_) internal pure {
         if (price_ == 0) {
             if (paymentToken_ != address(0)) revert InvalidPaymentToken();
             return;
@@ -328,7 +327,6 @@ contract TokenGrant is Initializable {
 
         if (paymentToken_ == address(0)) revert InvalidPaymentToken();
         if (paymentToken_ == token_) revert InvalidTokenPair();
-        paymentTokenDecimals = _readTokenDecimals(paymentToken_);
     }
 
     function _effectiveVestingTime(uint256 currentTime) internal view returns (uint256) {

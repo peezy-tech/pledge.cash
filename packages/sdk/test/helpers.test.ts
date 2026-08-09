@@ -239,7 +239,6 @@ describe("lean readers", () => {
       paymentToken: quoteToken,
       tokenId: 123n,
       tokenDecimals: 18,
-      paymentTokenDecimals: 6,
       grantSize: 1_000n,
       claimable: 900n,
       price: 25n,

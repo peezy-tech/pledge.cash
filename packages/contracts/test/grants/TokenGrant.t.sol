@@ -91,10 +91,33 @@ contract NoReturnERC20 {
 }
 
 contract NoDecimalsERC20 {
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
 
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - amount;
+        }
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
         return true;
     }
 }
@@ -340,7 +363,6 @@ contract TokenGrantTest is Test {
         assertEq(grant.grantSize(), GRANT_SIZE);
         assertEq(grant.claimable(), GRANT_SIZE);
         assertEq(grant.tokenDecimals(), 18);
-        assertEq(grant.paymentTokenDecimals(), 0);
         assertEq(grant.tokenUnit(), 1 ether);
         assertEq(token.balanceOf(grantAddress), GRANT_SIZE);
         assertEq(token.balanceOf(issuer), 0);
@@ -1141,19 +1163,20 @@ contract TokenGrantTest is Test {
         );
     }
 
-    function testRejectsUnsupportedPaymentTokenDecimals() public {
+    function testPaymentTokenDecimalsDoNotAffectSettlementMath() public {
         GrantERC20 highDecimalPayment = new GrantERC20("High Payment", "HPAY", 78);
 
-        _createGrantExpectRevert(
-            abi.encodeWithSelector(
-                TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)
-            ),
-            "high-payment",
-            address(token),
-            holder,
-            address(highDecimalPayment),
-            _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("high-payment"),
+                holder,
+                address(token),
+                address(highDecimalPayment),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+            )
         );
+
+        assertEq(grant.getSettlementCost(10 ether), 20_000000);
     }
 
     function testRejectsTokenWithoutDecimals() public {
@@ -1169,17 +1192,32 @@ contract TokenGrantTest is Test {
         );
     }
 
-    function testRejectsPaymentTokenWithoutDecimals() public {
+    function testSupportsPaymentTokenWithoutDecimalsMetadata() public {
         NoDecimalsERC20 noDecimals = new NoDecimalsERC20();
+        noDecimals.mint(holder, 1_000_000000);
 
-        _createGrantExpectRevert(
-            abi.encodeWithSelector(TokenGrant.InvalidTokenDecimals.selector, address(noDecimals)),
-            "no-decimals-payment",
-            address(token),
-            holder,
-            address(noDecimals),
-            _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("no-decimals-payment"),
+                holder,
+                address(token),
+                address(noDecimals),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+            )
         );
+
+        vm.warp(1_500);
+        uint256 settleAmount = 10 ether;
+        uint256 expectedCost = 20_000000;
+
+        vm.prank(holder);
+        noDecimals.approve(address(grant), expectedCost);
+
+        vm.prank(holder);
+        grant.settle(settleAmount);
+
+        assertEq(token.balanceOf(holder), settleAmount);
+        assertEq(noDecimals.balanceOf(issuer), expectedCost);
     }
 
     function testSupportsNoReturnTokens() public {

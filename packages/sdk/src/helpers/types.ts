@@ -80,7 +80,6 @@ export type GrantState = {
   paymentToken: Address;
   tokenId: bigint;
   tokenDecimals: number;
-  paymentTokenDecimals: number;
   grantSize: bigint;
   claimable: bigint;
   price: bigint;
