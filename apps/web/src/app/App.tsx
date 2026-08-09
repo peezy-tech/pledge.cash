@@ -556,7 +556,6 @@ export function App(): React.JSX.Element {
     if (!grantSnapshot) throw new Error("Load the grant first.");
     const holder = activeAccount();
     const prepared = await prepareSmartGrantSettlement({
-      chainId: network.chainId,
       grant: grantSnapshot.address,
       holder,
       readCurrentState: async () => await readGrantState(publicClient, grantSnapshot.address),
