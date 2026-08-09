@@ -4,7 +4,7 @@ pledge.cash is an unreleased protocol and product workspace for token-backed pro
 accounts. Its lean core has four responsibilities:
 
 - a non-upgradeable **Boardroom** that owns treasury assets, issues one project token,
-  records obligations, and ends in pro-rata redemption;
+  tracks open escrows, and ends in pro-rata redemption;
 - deterministic, fully escrowed **Token Grants** with optional paid settlement;
 - one canonical **Uniswap v4 liquidity locker** per Boardroom, with permissionless fee
   collection and a fixed protocol split;

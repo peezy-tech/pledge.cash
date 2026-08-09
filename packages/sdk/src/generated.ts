@@ -525,32 +525,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_OBLIGATION_ASSETS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "MAX_PRUNE_BATCH",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "MAX_SNAPSHOT_PAGE",
     "inputs": [],
     "outputs": [
@@ -577,38 +551,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "activeObligationCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activeObligationCountByKind",
-    "inputs": [
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "enum IBoardroom.ObligationKind"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "count",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "allocatedRedemptionShares",
     "inputs": [
       {
@@ -625,25 +567,6 @@ export const boardroomAbi = [
     "outputs": [
       {
         "name": "shares",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "assetDependencyCount",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "count",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -767,6 +690,25 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "escrowState",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "state",
+        "type": "uint8",
+        "internalType": "enum IBoardroom.EscrowState"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "execute",
     "inputs": [
       {
@@ -839,10 +781,10 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "executeObligation",
+    "name": "executeEscrow",
     "inputs": [
       {
-        "name": "obligation",
+        "name": "escrow",
         "type": "address",
         "internalType": "address"
       },
@@ -896,44 +838,6 @@ export const boardroomAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "isIssuedGrant",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "isLockedLiquidity",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1020,77 +924,13 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "obligationDependencyAt",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "index",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "obligationDependencyCount",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
+    "name": "openEscrowCount",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "obligationOf",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "registrar",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "enum IBoardroom.ObligationKind"
-      },
-      {
-        "name": "active",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "everRegistered",
-        "type": "bool",
-        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -1136,10 +976,10 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "pruneObligation",
+    "name": "pruneEscrow",
     "inputs": [
       {
-        "name": "obligation",
+        "name": "escrow",
         "type": "address",
         "internalType": "address"
       }
@@ -1149,25 +989,6 @@ export const boardroomAbi = [
         "name": "pruned",
         "type": "bool",
         "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "pruneObligations",
-    "inputs": [
-      {
-        "name": "obligations",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "nonpayable"
@@ -1341,22 +1162,12 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "registerObligation",
+    "name": "registerEscrow",
     "inputs": [
       {
-        "name": "obligation",
+        "name": "escrow",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "enum IBoardroom.ObligationKind"
-      },
-      {
-        "name": "assets",
-        "type": "address[]",
-        "internalType": "address[]"
       }
     ],
     "outputs": [],
@@ -1365,19 +1176,6 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "registerRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "removeRedeemableAsset",
     "inputs": [
       {
         "name": "asset",
@@ -1597,6 +1395,38 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
+    "name": "BoardroomEscrowClosed",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomEscrowOpened",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "registrar",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "BoardroomInitialized",
     "inputs": [
       {
@@ -1641,75 +1471,6 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomObligationDependency",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomObligationPruned",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "registrar",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum IBoardroom.ObligationKind"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomObligationRecorded",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "registrar",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum IBoardroom.ObligationKind"
       }
     ],
     "anonymous": false
@@ -1857,19 +1618,6 @@ export const boardroomAbi = [
   {
     "type": "event",
     "name": "RedeemableAssetRegistered",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetRemoved",
     "inputs": [
       {
         "name": "asset",
@@ -2086,7 +1834,12 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "DuplicateObligationAsset",
+    "name": "EmptyBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptyRedeemableAsset",
     "inputs": [
       {
         "name": "asset",
@@ -2097,15 +1850,43 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "EmptyBatch",
-    "inputs": []
+    "name": "EscrowAlreadyClosed",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
-    "name": "EmptyRedeemableAsset",
+    "name": "EscrowAlreadyRegistered",
     "inputs": [
       {
-        "name": "asset",
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "EscrowNotOpen",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "EscrowStillOpen",
+    "inputs": [
+      {
+        "name": "escrow",
         "type": "address",
         "internalType": "address"
       }
@@ -2150,6 +1931,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidEscrow",
+    "inputs": [
+      {
+        "name": "escrow",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidExecutionContext",
     "inputs": [
       {
@@ -2174,28 +1966,6 @@ export const boardroomAbi = [
     "type": "error",
     "name": "InvalidMetadata",
     "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidObligation",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidObligationKind",
-    "inputs": [
-      {
-        "name": "kind",
-        "type": "uint8",
-        "internalType": "enum IBoardroom.ObligationKind"
-      }
-    ]
   },
   {
     "type": "error",
@@ -2268,50 +2038,6 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "ObligationAlreadyClosed",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ObligationAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ObligationNotActive",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ObligationStillOpen",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "OnlyFactory",
     "inputs": []
   },
@@ -2328,38 +2054,6 @@ export const boardroomAbi = [
         "name": "asset",
         "type": "address",
         "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RedeemableAssetDependency",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "dependencies",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RedeemableAssetHasBalance",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "balance",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ]
   },
@@ -2397,22 +2091,6 @@ export const boardroomAbi = [
   {
     "type": "error",
     "name": "TooManyCalls",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyObligationAssets",
     "inputs": [
       {
         "name": "requested",

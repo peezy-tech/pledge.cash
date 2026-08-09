@@ -118,8 +118,8 @@ export type GrantSettlementQuote = {
 };
 
 export type BoardroomStatus = 0 | 1 | 2 | 3;
-export type BoardroomObligationKind = 0 | 1 | 2;
-export type BoardroomSnapshotStatus = 0 | 1 | 2 | 3;
+export type BoardroomEscrowState = 0 | 1 | 2;
+export type BoardroomSnapshotStatus = 0 | 1 | 2;
 
 export type BoardroomState = {
   address: Address;
@@ -141,20 +141,14 @@ export type BoardroomState = {
   snapshotFrozen: boolean;
   redemptionSupply: bigint;
   redemptionSupplyFrozen: boolean;
-  activeObligationCount: bigint;
-  activeGrantCount: bigint;
-  activeLiquidityCount: bigint;
+  openEscrowCount: bigint;
   liquidityMutationAllowed: boolean;
   lockedLiquidityExitAllowed: boolean;
 };
 
-export type BoardroomObligationState = {
+export type BoardroomEscrowRecord = {
   address: Address;
-  registrar: Address;
-  kind: BoardroomObligationKind;
-  active: boolean;
-  everRegistered: boolean;
-  dependencies: Address[];
+  state: BoardroomEscrowState;
 };
 
 export type BoardroomRedemptionAssetState = {

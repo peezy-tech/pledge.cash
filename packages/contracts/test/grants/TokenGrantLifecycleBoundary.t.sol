@@ -40,7 +40,7 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         paymentToken.mint(holder, 1_000_000000);
     }
 
-    function testBoardroomExecuteCreatesRegisteredGrantAndReservesDependencies() public {
+    function testBoardroomExecuteCreatesRegisteredGrantEscrowAndReservesAssets() public {
         (uint256 cliff, uint256 vestingEnd, uint256 expiry) = _schedule();
         TokenGrant grant = _createBoardroomGrant(
             address(token), address(paymentToken), PRICE, expiry, cliff, vestingEnd, keccak256("registered")
@@ -52,20 +52,8 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         assertTrue(factory.isCanonicalBoardroom(address(boardroom)));
         assertTrue(boardroom.isRedeemableAsset(address(token)));
         assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
-        assertEq(boardroom.activeObligationCount(), 1);
-        assertEq(boardroom.activeObligationCountByKind(IBoardroom.ObligationKind.Grant), 1);
-
-        (address registrar, IBoardroom.ObligationKind kind, bool active, bool everRegistered) =
-            boardroom.obligationOf(address(grant));
-        assertEq(registrar, address(factory));
-        assertEq(uint256(kind), uint256(IBoardroom.ObligationKind.Grant));
-        assertTrue(active);
-        assertTrue(everRegistered);
-        assertEq(boardroom.obligationDependencyCount(address(grant)), 2);
-        assertEq(boardroom.obligationDependencyAt(address(grant), 0), address(token));
-        assertEq(boardroom.obligationDependencyAt(address(grant), 1), address(paymentToken));
-        assertEq(boardroom.assetDependencyCount(address(token)), 1);
-        assertEq(boardroom.assetDependencyCount(address(paymentToken)), 1);
+        assertEq(boardroom.openEscrowCount(), 1);
+        assertEq(uint256(boardroom.escrowState(address(grant))), uint256(IBoardroom.EscrowState.Open));
     }
 
     function testPaidBoardroomGrantSettlementRoutesPaymentBackToTreasury() public {
@@ -84,8 +72,8 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         assertTrue(grant.isClosed());
         assertEq(token.balanceOf(holder), GRANT_SIZE);
         assertEq(paymentToken.balanceOf(address(boardroom)), paymentAmount);
-        boardroom.pruneObligation(address(grant));
-        assertEq(boardroom.activeObligationCount(), 0);
+        boardroom.pruneEscrow(address(grant));
+        assertEq(boardroom.openEscrowCount(), 0);
     }
 
     function testCanonicalBoardroomGrantMustEnterThroughBoardroomExecute() public {
@@ -104,7 +92,7 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         assertEq(
             factory.grantForTokenId(uint256(uint160(factory.predictGrantAddress(address(boardroom), salt)))), address(0)
         );
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertEq(boardroom.openEscrowCount(), 0);
     }
 
     function testWindDownCannotSnapshotUntilClosedGrantIsPruned() public {
@@ -123,17 +111,16 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         vm.prank(holder);
         grant.settle(GRANT_SIZE);
         assertTrue(grant.isClosed());
-        assertEq(boardroom.activeObligationCount(), 1);
+        assertEq(boardroom.openEscrowCount(), 1);
 
-        boardroom.pruneObligation(address(grant));
-        assertEq(boardroom.activeObligationCount(), 0);
-        assertEq(boardroom.assetDependencyCount(address(token)), 0);
+        boardroom.pruneEscrow(address(grant));
+        assertEq(boardroom.openEscrowCount(), 0);
 
         boardroom.beginSnapshot();
         assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.Snapshotting));
     }
 
-    function testBoardroomExecuteObligationClosesUnvestedGrantAndReturnsEscrow() public {
+    function testBoardroomExecuteEscrowClosesUnvestedGrantAndReturnsAssets() public {
         (uint256 cliff, uint256 vestingEnd, uint256 expiry) = _schedule();
         TokenGrant grant = _createBoardroomGrant(
             address(token), address(0), 0, expiry, cliff, vestingEnd, keccak256("wind-down-close")
@@ -141,16 +128,13 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         uint256 balanceBefore = token.balanceOf(address(boardroom));
 
         boardroom.startWindDown();
-        boardroom.executeObligation(address(grant), abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ()));
+        boardroom.executeEscrow(address(grant), abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ()));
 
         assertTrue(grant.isClosed());
         assertTrue(grant.vestingIsHalted());
         assertEq(token.balanceOf(address(boardroom)), balanceBefore + GRANT_SIZE);
-        assertEq(boardroom.activeObligationCount(), 0);
-        (, IBoardroom.ObligationKind kind, bool active, bool everRegistered) = boardroom.obligationOf(address(grant));
-        assertEq(uint256(kind), uint256(IBoardroom.ObligationKind.Grant));
-        assertFalse(active);
-        assertTrue(everRegistered);
+        assertEq(boardroom.openEscrowCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(grant))), uint256(IBoardroom.EscrowState.Closed));
     }
 
     function testExpiredBoardroomGrantCanQuarantineMutatedToken() public {
@@ -164,13 +148,13 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         mutableToken.setTransfersFail(true);
         boardroom.startWindDown();
         vm.warp(expiry + 1);
-        boardroom.executeObligation(address(grant), abi.encodeCall(TokenGrant.quarantineAndClose, ()));
+        boardroom.executeEscrow(address(grant), abi.encodeCall(TokenGrant.quarantineAndClose, ()));
 
         assertTrue(grant.isClosed());
         assertTrue(grant.isQuarantined());
         assertEq(grant.quarantinedAmount(), GRANT_SIZE);
         assertEq(mutableToken.balanceOf(address(grant)), GRANT_SIZE);
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertEq(boardroom.openEscrowCount(), 0);
     }
 
     function testExpiredBoardroomGrantQuarantineRecoversHealthyToken() public {
@@ -182,14 +166,14 @@ contract TokenGrantLifecycleBoundaryTest is Test {
 
         boardroom.startWindDown();
         vm.warp(expiry + 1);
-        boardroom.executeObligation(address(grant), abi.encodeCall(TokenGrant.quarantineAndClose, ()));
+        boardroom.executeEscrow(address(grant), abi.encodeCall(TokenGrant.quarantineAndClose, ()));
 
         assertTrue(grant.isClosed());
         assertFalse(grant.isQuarantined());
         assertEq(grant.quarantinedAmount(), 0);
         assertEq(token.balanceOf(address(grant)), 0);
         assertEq(token.balanceOf(address(boardroom)), balanceBefore + GRANT_SIZE);
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertEq(boardroom.openEscrowCount(), 0);
     }
 
     function testCanonicalBoardroomGrantDurationIsBoundedButStandaloneGrantIsNot() public {

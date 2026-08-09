@@ -104,7 +104,7 @@ export function resolveProjectCapabilities(context: ProjectCapabilityContext): P
   const windingDown = project.status === "winding-down";
   capabilities["windDown.beginSnapshot"] = windingDown
     ? (project.windDownBlockers ?? 0) > 0
-      ? blocked("Close every grant and liquidity obligation before snapshotting.")
+      ? blocked("Close every grant and liquidity escrow before snapshotting.")
       : project.windDownMatured === false
         ? blocked("The Boardroom wind-down delay has not elapsed.")
         : walletGate(context)

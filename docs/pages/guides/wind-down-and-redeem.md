@@ -6,17 +6,17 @@ description: Close grants and liquidity, freeze a bounded treasury snapshot, bur
 # Wind down and redeem
 
 Wind-down is irreversible. It stops minting and general execution, so inventory every
-obligation and required exit call before starting.
+escrow and required exit call before starting.
 
 ## Operator sequence
 
-1. Confirm the owner, status, active obligation count, registered assets, and balances.
+1. Confirm the owner, status, open escrow count, registered assets, and balances.
 2. Start wind-down. The Boardroom wraps its native balance and begins the minimum delay.
-3. Exit the registered liquidity position through `executeObligation`, using fresh
+3. Exit the registered liquidity position through `executeEscrow`, using fresh
    minimum amounts and a deadline. An empty locker may be cancelled instead.
 4. Close Boardroom-funded grants by settlement, expiry recovery, or the bounded
    quarantine path when an expired hostile token cannot transfer exactly.
-5. Prune every closed obligation.
+5. Prune every closed escrow that was not closed through `executeEscrow`.
 6. After the delay, begin snapshotting. This burns treasury-held shares and freezes
    redemption supply.
 7. Process asset pages until the cursor is complete, then open redemptions.

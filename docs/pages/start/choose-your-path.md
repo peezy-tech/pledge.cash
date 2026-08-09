@@ -9,7 +9,7 @@ description: Go to the lean pledge.cash workspace that matches your role and int
 
 Read [Evaluate and join a project](../guides/evaluate-and-join), then use
 [Explore](../../explore). Verify the chain, canonical Boardroom, share token, owner,
-treasury, obligations, and locker before swapping.
+treasury, escrows, and locker before swapping.
 
 ## Receiving a grant
 

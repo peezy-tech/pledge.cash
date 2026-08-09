@@ -62,7 +62,7 @@ export default {
         "understand/boardrooms-and-project-tokens",
         "understand/grants-and-vesting",
         "understand/distributions-and-liquidity",
-        "understand/treasury-obligations-and-redemptions",
+        "understand/treasury-escrows-and-redemptions",
         "understand/provenance-and-hosted-context",
       ],
     },

@@ -26,7 +26,7 @@ or otherwise inexact tokens are rejected by balance-delta checks.
 
 If the issuer is a canonical Boardroom, creation must occur through
 `Boardroom.execute`. The factory's callbacks atomically reserve external granted or
-payment assets and register the grant as an obligation. Boardroom grants are capped at
+payment assets and register the grant as an escrow. Boardroom grants are capped at
 five years. The Boardroom cannot fund a grant of its own share token because it cannot
 execute a call targeting that token; use an external issuer for project-share grants.
 
@@ -48,10 +48,10 @@ The issuer may:
 - halt vesting once and withdraw the exact unvested amount;
 - after expiry, withdraw remaining escrow and close the grant;
 - for an expired Boardroom grant whose token no longer transfers safely, use the bounded
-  quarantine path to close the obligation while recording any stranded promise.
+  quarantine path to close the escrow while recording any stranded promise.
 
 Full settlement and issuer terminal actions close the grant and burn the grant-right
-NFT. Anyone can then prune a canonical Boardroom's closed obligation.
+NFT. Anyone can then prune a canonical Boardroom's closed escrow.
 
 ## Invariants
 

@@ -50,7 +50,7 @@ contract LiquidityLockerFactory is ReentrancyGuard {
         protocolFeeRouter = protocolFeeRouter_;
     }
 
-    /// @notice Creates and atomically registers a liquidity obligation for msg.sender.
+    /// @notice Creates and atomically registers a liquidity escrow for msg.sender.
     /// @dev Must be reached as the active target of Boardroom.execute.
     function createLocker(address quoteAsset, uint24 poolFee, int24 tickSpacing, bytes32 salt)
         external
@@ -64,7 +64,7 @@ contract LiquidityLockerFactory is ReentrancyGuard {
         }
         if (canonicalFactory.isShareToken(quoteAsset)) revert InvalidAddress(quoteAsset);
         address existing = lockerOfBoardroom[boardroom];
-        if (existing != address(0) && IBoardroom(boardroom).isLockedLiquidity(existing)) {
+        if (existing != address(0) && IBoardroom(boardroom).escrowState(existing) == IBoardroom.EscrowState.Open) {
             revert ActiveLockerExists(boardroom, existing);
         }
         address shareToken = IBoardroom(boardroom).shareToken();
@@ -78,11 +78,10 @@ contract LiquidityLockerFactory is ReentrancyGuard {
         lockerOfBoardroom[boardroom] = locker;
         isLocker[locker] = true;
         allLockers.push(locker);
-        address[] memory dependencies = new address[](1);
         // Boardroom shares returned by the position are treasury shares and burn at
-        // snapshot; only the external quote asset is a redeemable dependency.
-        dependencies[0] = quoteAsset;
-        IBoardroom(boardroom).registerObligation(locker, IBoardroom.ObligationKind.Liquidity, dependencies);
+        // snapshot; only the external quote asset belongs in the redemption registry.
+        IBoardroom(boardroom).reserveRedeemableAsset(quoteAsset);
+        IBoardroom(boardroom).registerEscrow(locker);
         emit LiquidityLockerCreated(locker, boardroom, quoteAsset, poolFee, tickSpacing, salt);
     }
 

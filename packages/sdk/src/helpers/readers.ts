@@ -12,8 +12,8 @@ import {
 } from "../generated";
 import type {
   BoardroomFactoryState,
-  BoardroomObligationKind,
-  BoardroomObligationState,
+  BoardroomEscrowRecord,
+  BoardroomEscrowState,
   BoardroomRedemptionAssetState,
   BoardroomSnapshotStatus,
   BoardroomState,
@@ -216,9 +216,7 @@ export async function readBoardroomState(
     redeemableAssetCount,
     snapshotProgress,
     redemptionSupplyState,
-    activeObligationCount,
-    activeGrantCount,
-    activeLiquidityCount,
+    openEscrowCount,
     liquidityMutationAllowed,
     lockedLiquidityExitAllowed,
   ] = await Promise.all([
@@ -234,9 +232,7 @@ export async function readBoardroomState(
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redeemableAssetCount" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "assetSnapshotProgress" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionSupplyState" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCount" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [1] }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [2] }),
+    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "openEscrowCount" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityMutationAllowed" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "lockedLiquidityExitAllowed" }),
   ]);
@@ -266,38 +262,26 @@ export async function readBoardroomState(
     snapshotFrozen: snapshot[2],
     redemptionSupply: redemption[0],
     redemptionSupplyFrozen: redemption[1],
-    activeObligationCount: activeObligationCount as bigint,
-    activeGrantCount: activeGrantCount as bigint,
-    activeLiquidityCount: activeLiquidityCount as bigint,
+    openEscrowCount: openEscrowCount as bigint,
     liquidityMutationAllowed: liquidityMutationAllowed as boolean,
     lockedLiquidityExitAllowed: lockedLiquidityExitAllowed as boolean,
   };
 }
 
-export async function readBoardroomObligationState(
+export async function readBoardroomEscrowState(
   client: PledgeCashReadClient,
   boardroom: Address,
-  obligation: Address,
-): Promise<BoardroomObligationState> {
-  const [record, dependencyCount] = await Promise.all([
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "obligationOf", args: [obligation] }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "obligationDependencyCount", args: [obligation] }),
-  ]);
-  const dependencies = await Promise.all(
-    Array.from({ length: Number(dependencyCount) }, (_, index) => client.readContract({
-      address: boardroom,
-      abi: boardroomAbi,
-      functionName: "obligationDependencyAt",
-      args: [obligation, BigInt(index)],
-    }) as Promise<Address>),
-  );
+  escrow: Address,
+): Promise<BoardroomEscrowRecord> {
+  const state = await client.readContract({
+    address: boardroom,
+    abi: boardroomAbi,
+    functionName: "escrowState",
+    args: [escrow],
+  });
   return {
-    address: obligation,
-    registrar: record[0],
-    kind: Number(record[1]) as BoardroomObligationKind,
-    active: record[2],
-    everRegistered: record[3],
-    dependencies,
+    address: escrow,
+    state: Number(state) as BoardroomEscrowState,
   };
 }
 

@@ -17,7 +17,7 @@ Use it to find:
 
 Every item retains its chain ID and contract address. Opening a grant re-reads factory
 provenance and live terms. Opening a project re-reads the Boardroom factory, owner,
-status, assets, and obligations.
+status, assets, and escrows.
 
 Disconnecting a wallet removes wallet-specific discovery but does not make public
 project state private. Clearing browser storage removes saved shortcuts and local

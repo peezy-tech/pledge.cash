@@ -51,7 +51,7 @@ describe("lean project capability resolver", () => {
     });
   });
 
-  test("gates wind-down snapshotting on obligations, delay, and cursor completion", () => {
+  test("gates wind-down snapshotting on escrows, delay, and cursor completion", () => {
     const blocked = resolveProjectCapabilities(context({
       project: { owner, status: "winding-down", windDownBlockers: 1, windDownMatured: true },
     }));
@@ -68,7 +68,7 @@ describe("lean project capability resolver", () => {
       project: { owner, status: "snapshotting", snapshotComplete: true },
     }));
 
-    expect(blocked["windDown.beginSnapshot"].reason).toContain("Close every grant and liquidity obligation");
+    expect(blocked["windDown.beginSnapshot"].reason).toContain("Close every grant and liquidity escrow");
     expect(waiting["windDown.beginSnapshot"].reason).toContain("delay has not elapsed");
     expect(ready["windDown.beginSnapshot"].status).toBe("enabled");
     expect(snapshotting["windDown.processSnapshot"].status).toBe("enabled");

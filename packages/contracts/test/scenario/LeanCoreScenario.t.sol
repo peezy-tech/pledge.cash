@@ -177,12 +177,12 @@ contract LeanCoreScenarioTest is Test {
 
     function _windDown(uint128 principal0, uint128 principal1) internal {
         boardroom.startWindDown();
-        boardroom.executeObligation(
+        boardroom.executeEscrow(
             address(locker), abi.encodeCall(locker.exit, (principal0, principal1, block.timestamp + 1))
         );
 
         assertTrue(locker.isClosed(), "locker did not close");
-        assertEq(boardroom.activeObligationCount(), 0, "locker obligation did not close");
+        assertEq(boardroom.openEscrowCount(), 0, "locker escrow did not close");
         assertEq(quote.balanceOf(address(boardroom)), 695 ether, "principal and fees did not reach treasury");
 
         vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());

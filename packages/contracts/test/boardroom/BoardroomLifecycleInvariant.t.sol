@@ -103,6 +103,7 @@ contract BoardroomLifecycleInvariantTest is StdInvariant, Test {
         if (uint8(current) >= uint8(IBoardroom.Status.Snapshotting)) {
             assertTrue(supplyFrozen);
             assertTrue(assetsFrozen);
+            assertEq(boardroom.openEscrowCount(), 0);
             assertGt(frozenSupply, 0);
             assertLe(cursor, frozenAssets);
             assertEq(shares.balanceOf(address(boardroom)), 0);

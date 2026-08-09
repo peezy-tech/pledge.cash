@@ -18,21 +18,12 @@ interface IBoardroomWrappedNative {
 /// @notice Non-upgradeable project custodian with bounded execution, wind-down, and redemption.
 contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     uint256 public constant override MAX_BATCH_CALLS = 16;
-    uint256 public constant override MAX_OBLIGATION_ASSETS = 8;
-    uint256 public constant MAX_PRUNE_BATCH = 32;
     uint256 public constant override MAX_SNAPSHOT_PAGE = 32;
     uint256 public constant override MIN_WIND_DOWN_DELAY = 1 days;
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
-    uint256 internal constant OBLIGATION_PROBE_GAS = 30_000;
+    uint256 internal constant ESCROW_PROBE_GAS = 30_000;
     uint256 internal constant MAX_NAME_LENGTH = 64;
     uint256 internal constant MAX_SYMBOL_LENGTH = 16;
-
-    struct ObligationRecord {
-        address registrar;
-        ObligationKind kind;
-        bool active;
-        bool everRegistered;
-    }
 
     address public immutable override factory;
     address public immutable override wrappedNative;
@@ -48,17 +39,13 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
 
     address[] internal assetRegistry;
     mapping(address asset => bool registered) public override isRedeemableAsset;
-    mapping(address asset => bool seen) internal assetEverRegistered;
     mapping(address asset => SnapshotStatus snapshotStatus) internal assetSnapshotStatus;
     uint256 internal frozenAssetCount;
     uint256 internal assetSnapshotCursor;
     bool internal assetRegistryFrozen;
 
-    uint256 public override activeObligationCount;
-    mapping(ObligationKind kind => uint256 count) public override activeObligationCountByKind;
-    mapping(address obligation => ObligationRecord record) internal obligationRecords;
-    mapping(address obligation => address[] assets) internal obligationDependencies;
-    mapping(address asset => uint256 count) public override assetDependencyCount;
+    uint256 public override openEscrowCount;
+    mapping(address escrow => EscrowState state) public override escrowState;
 
     uint256 internal redemptionSupply;
     bool internal redemptionSupplyFrozen;
@@ -83,18 +70,13 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     error InvalidRedeemableAsset(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
     error EmptyRedeemableAsset(address asset);
-    error RedeemableAssetDependency(address asset, uint256 dependencies);
-    error RedeemableAssetHasBalance(address asset, uint256 balance);
     error TreasuryContributionExpired(uint256 deadline);
     error TreasuryContributionAmountMismatch(address asset, uint256 expected, uint256 received);
-    error InvalidObligation(address obligation);
-    error ObligationAlreadyClosed(address obligation);
-    error ObligationAlreadyRegistered(address obligation);
-    error ObligationNotActive(address obligation);
-    error ObligationStillOpen(address obligation);
-    error InvalidObligationKind(ObligationKind kind);
-    error TooManyObligationAssets(uint256 requested, uint256 maximum);
-    error DuplicateObligationAsset(address asset);
+    error InvalidEscrow(address escrow);
+    error EscrowAlreadyClosed(address escrow);
+    error EscrowAlreadyRegistered(address escrow);
+    error EscrowNotOpen(address escrow);
+    error EscrowStillOpen(address escrow);
     error SnapshotNotReady();
     error SnapshotAlreadyFrozen();
     error SnapshotIncomplete(uint256 cursor, uint256 count);
@@ -116,13 +98,9 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     event RedemptionExcessRecipientSet(address indexed recipient);
     event BoardroomWindDownStarted(address indexed owner, uint256 startedAt, uint256 delay);
     event RedeemableAssetRegistered(address indexed asset);
-    event RedeemableAssetRemoved(address indexed asset);
     event TreasuryAssetContributed(address indexed contributor, address indexed asset, uint256 amount);
-    event BoardroomObligationRecorded(
-        address indexed obligation, address indexed registrar, ObligationKind indexed kind
-    );
-    event BoardroomObligationPruned(address indexed obligation, address indexed registrar, ObligationKind indexed kind);
-    event BoardroomObligationDependency(address indexed obligation, address indexed asset);
+    event BoardroomEscrowOpened(address indexed escrow, address indexed registrar);
+    event BoardroomEscrowClosed(address indexed escrow);
     event NativeWrappedForWindDown(address indexed wrappedNative, uint256 amount);
     event TreasurySharesBurned(uint256 amount);
     event BoardroomSnapshottingStarted(uint256 assetCount, uint256 redemptionSupply);
@@ -256,7 +234,7 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         }
     }
 
-    function executeObligation(address obligation, bytes calldata data)
+    function executeEscrow(address escrow, bytes calldata data)
         external
         override
         onlyOwner
@@ -264,12 +242,11 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         returns (bytes memory result)
     {
         _requireStatus(Status.WindingDown);
-        ObligationRecord storage record = obligationRecords[obligation];
-        if (!record.active) revert ObligationNotActive(obligation);
-        (bool success, bytes memory output) = obligation.call(data);
-        if (!success) _revertCall(obligation, output);
-        emit BoardroomCallExecuted(obligation, _selector(data), msg.sender, 0, keccak256(data));
-        if (_isObligationClosed(obligation)) _deactivateObligation(obligation, record);
+        if (escrowState[escrow] != EscrowState.Open) revert EscrowNotOpen(escrow);
+        (bool success, bytes memory output) = escrow.call(data);
+        if (!success) _revertCall(escrow, output);
+        emit BoardroomCallExecuted(escrow, _selector(data), msg.sender, 0, keccak256(data));
+        if (_isEscrowClosed(escrow)) _closeEscrow(escrow);
         return output;
     }
 
@@ -310,104 +287,30 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         emit TreasuryAssetContributed(msg.sender, asset, amount);
     }
 
-    function removeRedeemableAsset(address asset) external override onlyOwner {
-        _requireStatus(Status.Active);
-        if (asset == wrappedNative || !isRedeemableAsset[asset]) revert InvalidRedeemableAsset(asset);
-        uint256 dependencies = assetDependencyCount[asset];
-        if (dependencies != 0) revert RedeemableAssetDependency(asset, dependencies);
-        (bool readable, uint256 balance) = BestEffortTokenLib.tryBalanceOf(asset, address(this));
-        if (!readable) revert InvalidRedeemableAsset(asset);
-        if (balance != 0) revert RedeemableAssetHasBalance(asset, balance);
-        isRedeemableAsset[asset] = false;
-        emit RedeemableAssetRemoved(asset);
-    }
-
-    function registerObligation(address obligation, ObligationKind kind, address[] calldata assets) external override {
+    function registerEscrow(address escrow) external override {
         _requireExecutionTarget();
         _requireStatus(Status.Active);
-        if (
-            obligation == address(0) || obligation == address(this) || obligation == shareToken
-                || obligation.code.length == 0
-        ) revert InvalidObligation(obligation);
-        if (kind != ObligationKind.Grant && kind != ObligationKind.Liquidity) revert InvalidObligationKind(kind);
-        ObligationRecord storage record = obligationRecords[obligation];
-        if (record.everRegistered) revert ObligationAlreadyRegistered(obligation);
-        if (_isObligationClosed(obligation)) revert ObligationAlreadyClosed(obligation);
-        uint256 length = assets.length;
-        if (length > MAX_OBLIGATION_ASSETS) revert TooManyObligationAssets(length, MAX_OBLIGATION_ASSETS);
-
-        record.registrar = msg.sender;
-        record.kind = kind;
-        record.active = true;
-        record.everRegistered = true;
-        activeObligationCount += 1;
-        activeObligationCountByKind[kind] += 1;
-
-        for (uint256 i; i < length; ++i) {
-            address asset = assets[i];
-            for (uint256 j; j < i; ++j) {
-                if (assets[j] == asset) revert DuplicateObligationAsset(asset);
-            }
-            _registerAsset(asset);
-            obligationDependencies[obligation].push(asset);
-            assetDependencyCount[asset] += 1;
-            emit BoardroomObligationDependency(obligation, asset);
+        if (escrow == address(0) || escrow == address(this) || escrow == shareToken || escrow.code.length == 0) {
+            revert InvalidEscrow(escrow);
         }
-        emit BoardroomObligationRecorded(obligation, msg.sender, kind);
+        if (escrowState[escrow] != EscrowState.None) revert EscrowAlreadyRegistered(escrow);
+        if (_isEscrowClosed(escrow)) revert EscrowAlreadyClosed(escrow);
+
+        escrowState[escrow] = EscrowState.Open;
+        openEscrowCount += 1;
+        emit BoardroomEscrowOpened(escrow, msg.sender);
     }
 
-    function pruneObligation(address obligation) external override returns (bool pruned) {
-        ObligationRecord storage record = obligationRecords[obligation];
-        if (!record.active) revert ObligationNotActive(obligation);
-        if (!_isObligationClosed(obligation)) revert ObligationStillOpen(obligation);
-        _deactivateObligation(obligation, record);
+    function pruneEscrow(address escrow) external override returns (bool pruned) {
+        if (escrowState[escrow] != EscrowState.Open) revert EscrowNotOpen(escrow);
+        if (!_isEscrowClosed(escrow)) revert EscrowStillOpen(escrow);
+        _closeEscrow(escrow);
         return true;
-    }
-
-    function pruneObligations(address[] calldata obligations) external override returns (uint256 pruned) {
-        uint256 length = obligations.length;
-        if (length == 0) revert EmptyBatch();
-        if (length > MAX_PRUNE_BATCH) revert TooManyCalls(length, MAX_PRUNE_BATCH);
-        for (uint256 i; i < length; ++i) {
-            ObligationRecord storage record = obligationRecords[obligations[i]];
-            if (record.active && _isObligationClosed(obligations[i])) {
-                _deactivateObligation(obligations[i], record);
-                ++pruned;
-            }
-        }
-    }
-
-    function obligationOf(address obligation)
-        external
-        view
-        override
-        returns (address registrar, ObligationKind kind, bool active, bool everRegistered)
-    {
-        ObligationRecord storage record = obligationRecords[obligation];
-        return (record.registrar, record.kind, record.active, record.everRegistered);
-    }
-
-    function isIssuedGrant(address obligation) external view override returns (bool) {
-        ObligationRecord storage record = obligationRecords[obligation];
-        return record.active && record.kind == ObligationKind.Grant;
-    }
-
-    function isLockedLiquidity(address obligation) external view override returns (bool) {
-        ObligationRecord storage record = obligationRecords[obligation];
-        return record.active && record.kind == ObligationKind.Liquidity;
-    }
-
-    function obligationDependencyCount(address obligation) external view override returns (uint256) {
-        return obligationDependencies[obligation].length;
-    }
-
-    function obligationDependencyAt(address obligation, uint256 index) external view override returns (address) {
-        return obligationDependencies[obligation][index];
     }
 
     function beginSnapshot() external override nonReentrant {
         _requireStatus(Status.WindingDown);
-        if (block.timestamp < windDownStartedAt + windDownDelay || activeObligationCount != 0) {
+        if (block.timestamp < windDownStartedAt + windDownDelay || openEscrowCount != 0) {
             revert SnapshotNotReady();
         }
         if (assetRegistryFrozen) revert SnapshotAlreadyFrozen();
@@ -433,10 +336,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         if (end > frozenAssetCount) end = frozenAssetCount;
         for (uint256 i = cursor; i < end; ++i) {
             address asset = assetRegistry[i];
-            if (!isRedeemableAsset[asset]) {
-                assetSnapshotStatus[asset] = SnapshotStatus.Excluded;
-                continue;
-            }
             (bool readable, uint256 balance) = _tryBoundedBalanceOf(asset, address(this));
             if (readable) {
                 snapshotBalance[asset] = balance;
@@ -586,11 +485,8 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     function _registerAsset(address asset) internal {
         _validateAsset(asset);
         if (assetRegistryFrozen) revert SnapshotAlreadyFrozen();
-        if (!assetEverRegistered[asset]) {
-            assetEverRegistered[asset] = true;
-            assetRegistry.push(asset);
-        }
         if (!isRedeemableAsset[asset]) {
+            assetRegistry.push(asset);
             isRedeemableAsset[asset] = true;
             emit RedeemableAssetRegistered(asset);
         }
@@ -604,23 +500,17 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         if (!readable) revert InvalidRedeemableAsset(asset);
     }
 
-    function _deactivateObligation(address obligation, ObligationRecord storage record) internal {
-        record.active = false;
-        activeObligationCount -= 1;
-        activeObligationCountByKind[record.kind] -= 1;
-        address[] storage dependencies = obligationDependencies[obligation];
-        uint256 length = dependencies.length;
-        for (uint256 i; i < length; ++i) {
-            assetDependencyCount[dependencies[i]] -= 1;
-        }
-        emit BoardroomObligationPruned(obligation, record.registrar, record.kind);
+    function _closeEscrow(address escrow) internal {
+        escrowState[escrow] = EscrowState.Closed;
+        openEscrowCount -= 1;
+        emit BoardroomEscrowClosed(escrow);
     }
 
-    function _isObligationClosed(address obligation) internal view returns (bool closed) {
+    function _isEscrowClosed(address escrow) internal view returns (bool closed) {
         assembly ("memory-safe") {
             let pointer := mload(0x40)
             mstore(pointer, shl(224, 0xc2b6b58c))
-            let success := staticcall(OBLIGATION_PROBE_GAS, obligation, pointer, 4, pointer, 32)
+            let success := staticcall(ESCROW_PROBE_GAS, escrow, pointer, 4, pointer, 32)
             closed := and(and(success, eq(returndatasize(), 32)), eq(mload(pointer), 1))
         }
     }

@@ -4,7 +4,7 @@
 
 pledge.cash locks one canonical Uniswap v4 `PositionManager` NFT for each
 Boardroom. `LiquidityLockerFactory` creates the locker, and the Boardroom records it
-as a liquidity obligation. The locker replaces the former custom hook, vault, and
+as an escrow. The locker replaces the former custom hook, vault, and
 third-party liquidity-claim system.
 
 The locker does not create an auction, initialize a pool, or mint liquidity. Projects
@@ -23,8 +23,8 @@ A locker is canonical only when all of these relationships hold:
 - the fee and tick spacing match the locker configuration;
 - the pool is hookless, the position has nonzero liquidity, and it has no subscriber.
 
-The factory permits one active locker per Boardroom. A replacement can be created only
-after the previous obligation is closed and pruned.
+The factory permits one open locker escrow per Boardroom. A replacement can be created
+only after the previous escrow is closed and pruned.
 
 ## Position receipt
 
@@ -53,10 +53,11 @@ transfer behavior does not match the requested amount.
 ## Wind-down
 
 Starting Boardroom wind-down disables ordinary locker mutation. The Boardroom must call
-`exit(amount0Min, amount1Min, deadline)` through `executeObligation`. Exit collects final
+`exit(amount0Min, amount1Min, deadline)` through `executeEscrow`. Exit collects final
 fees, burns the complete v4 position, transfers both currencies to the Boardroom, and
 marks the locker closed. A locker that never received a position can instead be
-cancelled. The closed obligation must be pruned before snapshotting begins.
+cancelled. The closed escrow must be pruned before snapshotting begins unless the closing
+call already updated the Boardroom state.
 
 ## Security boundaries
 

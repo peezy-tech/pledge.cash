@@ -208,9 +208,7 @@ function boardroomState(): BoardroomState {
     snapshotFrozen: false,
     redemptionSupply: 0n,
     redemptionSupplyFrozen: false,
-    activeObligationCount: 1n,
-    activeGrantCount: 0n,
-    activeLiquidityCount: 1n,
+    openEscrowCount: 1n,
     liquidityMutationAllowed: true,
     lockedLiquidityExitAllowed: false,
   };

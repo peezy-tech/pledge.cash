@@ -110,7 +110,7 @@ describe("lean Boardroom and grant builders", () => {
       status: 1,
       functionName: "withdrawExpiredTokens",
     });
-    expect(winding.functionName).toBe("executeObligation");
+    expect(winding.functionName).toBe("executeEscrow");
     expect(winding.args[0]).toBe(grant);
     expect(buildGrantSettlementTransaction({ grant, amount: 200n })).toMatchObject({
       functionName: "settle",
@@ -137,18 +137,18 @@ describe("liquidity locker builders", () => {
     });
   });
 
-  test("dispatches cancel active through execute and winding down through executeObligation", () => {
+  test("dispatches cancel active through execute and winding down through executeEscrow", () => {
     const active = buildBoardroomLiquidityLockerCancelTransaction({ boardroom, locker, status: 0 });
     expect(active).toMatchObject({ functionName: "execute" });
     expect(decodeFunctionData({ abi: liquidityLockerAbi, data: active.args[0].data }).functionName).toBe("cancel");
 
     const winding = buildBoardroomLiquidityLockerCancelTransaction({ boardroom, locker, status: 1 });
-    expect(winding.functionName).toBe("executeObligation");
+    expect(winding.functionName).toBe("executeEscrow");
     expect(winding.args[0]).toBe(locker);
     expect(decodeFunctionData({ abi: liquidityLockerAbi, data: winding.args[1] }).functionName).toBe("cancel");
   });
 
-  test("exits only through the registered winding-down obligation route", () => {
+  test("exits only through the registered winding-down escrow route", () => {
     const transaction = buildBoardroomLiquidityLockerExitTransaction({
       boardroom,
       locker,
@@ -156,7 +156,7 @@ describe("liquidity locker builders", () => {
       amount1Min: 20n,
       deadline: 1_800_000_000n,
     });
-    expect(transaction.functionName).toBe("executeObligation");
+    expect(transaction.functionName).toBe("executeEscrow");
     expect(transaction.args[0]).toBe(locker);
     expect(decodeFunctionData({ abi: liquidityLockerAbi, data: transaction.args[1] })).toMatchObject({
       functionName: "exit",
@@ -180,7 +180,7 @@ describe("lean readers", () => {
       redeemableAssetCount: 2n,
       assetSnapshotProgress: [2n, 1n, true],
       redemptionSupplyState: [900n, true],
-      activeObligationCount: 2n,
+      openEscrowCount: 2n,
       liquidityMutationAllowed: true,
       lockedLiquidityExitAllowed: true,
       totalSupply: 1_000n,
@@ -190,7 +190,6 @@ describe("lean readers", () => {
       async getBlockNumber() { return 77n; },
       async readContract(parameters) {
         const name = parameters.functionName as string;
-        if (name === "activeObligationCountByKind") return parameters.args?.[0] === 1 ? 1n : 1n as never;
         const value = values[name];
         if (value === undefined) throw new Error(`Unexpected read ${name}`);
         return value as never;
@@ -203,8 +202,7 @@ describe("lean readers", () => {
       status: 1,
       totalShareSupply: 1_000n,
       treasuryShareBalance: 100n,
-      activeGrantCount: 1n,
-      activeLiquidityCount: 1n,
+      openEscrowCount: 2n,
       snapshotAssetCount: 2n,
       snapshotCursor: 1n,
     });

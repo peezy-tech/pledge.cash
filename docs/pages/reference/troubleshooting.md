@@ -39,8 +39,8 @@ preflight against the state it observed.
 
 ## Wind-down cannot advance
 
-Read active obligation counts. Exit or cancel the locker, close grants, and prune each
-closed obligation. After the delay, process every snapshot page before opening
+Read the open escrow count. Exit or cancel the locker, close grants, and prune each
+closed escrow. After the delay, process every snapshot page before opening
 redemptions. An asset claim requires prior share redemption and can fail its minimum
 output independently of other assets.
 

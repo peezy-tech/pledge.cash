@@ -1,6 +1,6 @@
 ---
 title: Boardroom integration
-description: Integrate the flat Boardroom custodian, factory identity, callbacks, obligations, snapshotting, and redemptions.
+description: Integrate the flat Boardroom custodian, factory identity, callbacks, escrows, snapshotting, and redemptions.
 ---
 
 # Boardroom integration
@@ -20,10 +20,10 @@ substitute for current reads.
 
 Owner calls operate only while Active. `execute` and the 16-call bounded batch reject the
 Boardroom and share token as targets. A target may call `reserveRedeemableAsset` and
-`registerObligation` only inside its active execution frame.
+`registerEscrow` only inside its active execution frame.
 
-In WindingDown, `executeObligation` can call only a recorded active grant or locker.
-Snapshotting requires the delay and zero active obligations. Process assets in pages no
+In WindingDown, `executeEscrow` can call only a recorded open grant or locker.
+Snapshotting requires the delay and zero open escrows. Process assets in pages no
 larger than `MAX_SNAPSHOT_PAGE`, then open redemptions. A holder burns shares into
 credits before claiming individual assets.
 

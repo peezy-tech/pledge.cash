@@ -97,7 +97,7 @@ contract BoardroomMutableToken is BoardroomTestERC20 {
     }
 }
 
-contract BoardroomObligation {
+contract BoardroomEscrow {
     address public immutable boardroom;
     bool public isClosed;
 
@@ -122,23 +122,16 @@ contract BoardroomCallbackModule {
         IBoardroom(boardroom).reserveRedeemableAsset(asset);
     }
 
-    function register(address boardroom, address obligation, IBoardroom.ObligationKind kind, address[] calldata assets)
-        external
-    {
-        IBoardroom(boardroom).registerObligation(obligation, kind, assets);
+    function register(address boardroom, address escrow) external {
+        IBoardroom(boardroom).registerEscrow(escrow);
     }
 
-    function reserveAndRegister(
-        address boardroom,
-        address obligation,
-        IBoardroom.ObligationKind kind,
-        address[] calldata assets
-    ) external {
+    function reserveAndRegister(address boardroom, address escrow, address[] calldata assets) external {
         uint256 length = assets.length;
         for (uint256 i; i < length; ++i) {
             IBoardroom(boardroom).reserveRedeemableAsset(assets[i]);
         }
-        IBoardroom(boardroom).registerObligation(obligation, kind, assets);
+        IBoardroom(boardroom).registerEscrow(escrow);
     }
 }
 
@@ -296,7 +289,7 @@ contract BoardroomTest is Test {
         reentrantOwner.attack();
     }
 
-    function testBatchAndObligationInputsAreBounded() public {
+    function testBatchInputsAreBounded() public {
         IBoardroom.Call[] memory emptyCalls = new IBoardroom.Call[](0);
         vm.expectRevert(Boardroom.EmptyBatch.selector);
         boardroom.executeBatch(emptyCalls);
@@ -306,49 +299,24 @@ contract BoardroomTest is Test {
             abi.encodeWithSelector(Boardroom.TooManyCalls.selector, tooManyCalls.length, boardroom.MAX_BATCH_CALLS())
         );
         boardroom.executeBatch(tooManyCalls);
-
-        BoardroomObligation obligation = new BoardroomObligation(address(boardroom));
-        address[] memory tooManyAssets = new address[](boardroom.MAX_OBLIGATION_ASSETS() + 1);
-        for (uint256 i; i < tooManyAssets.length; ++i) {
-            tooManyAssets[i] = address(asset);
-        }
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Boardroom.TooManyObligationAssets.selector, tooManyAssets.length, boardroom.MAX_OBLIGATION_ASSETS()
-            )
-        );
-        boardroom.execute(
-            IBoardroom.Call(
-                address(callbacks),
-                0,
-                abi.encodeCall(
-                    callbacks.register,
-                    (address(boardroom), address(obligation), IBoardroom.ObligationKind.Grant, tooManyAssets)
-                )
-            )
-        );
     }
 
-    function testObligationBlocksSnapshotUntilOwnerClosesIt() public {
-        BoardroomObligation obligation = new BoardroomObligation(address(boardroom));
-        address[] memory dependencies = new address[](1);
-        dependencies[0] = address(asset);
-        asset.mint(address(obligation), 30 ether);
+    function testEscrowBlocksSnapshotUntilOwnerClosesIt() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        address[] memory assets = new address[](1);
+        assets[0] = address(asset);
+        asset.mint(address(escrow), 30 ether);
 
         boardroom.execute(
             IBoardroom.Call(
                 address(callbacks),
                 0,
-                abi.encodeCall(
-                    callbacks.reserveAndRegister,
-                    (address(boardroom), address(obligation), IBoardroom.ObligationKind.Grant, dependencies)
-                )
+                abi.encodeCall(callbacks.reserveAndRegister, (address(boardroom), address(escrow), assets))
             )
         );
-        assertEq(boardroom.activeObligationCount(), 1);
-        assertEq(boardroom.activeObligationCountByKind(IBoardroom.ObligationKind.Grant), 1);
-        assertEq(boardroom.assetDependencyCount(address(asset)), 1);
-        assertTrue(boardroom.isIssuedGrant(address(obligation)));
+        assertEq(boardroom.openEscrowCount(), 1);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Open));
+        assertTrue(boardroom.isRedeemableAsset(address(asset)));
 
         boardroom.mint(alice, 1 ether);
         boardroom.startWindDown();
@@ -356,48 +324,54 @@ contract BoardroomTest is Test {
         vm.expectRevert(Boardroom.SnapshotNotReady.selector);
         boardroom.beginSnapshot();
 
-        boardroom.executeObligation(address(obligation), abi.encodeCall(obligation.close, (address(asset))));
+        boardroom.executeEscrow(address(escrow), abi.encodeCall(escrow.close, (address(asset))));
         assertEq(asset.balanceOf(address(boardroom)), 30 ether);
-        assertEq(boardroom.activeObligationCount(), 0);
-        assertEq(boardroom.assetDependencyCount(address(asset)), 0);
-        assertFalse(boardroom.isIssuedGrant(address(obligation)));
+        assertEq(boardroom.openEscrowCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Closed));
 
         boardroom.beginSnapshot();
         assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.Snapshotting));
     }
 
-    function testClosedObligationCanBePermissionlesslyPruned() public {
-        BoardroomObligation obligation = new BoardroomObligation(address(boardroom));
-        address[] memory dependencies = new address[](0);
+    function testClosedEscrowCanBePermissionlesslyPruned() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
         boardroom.execute(
             IBoardroom.Call(
-                address(callbacks),
-                0,
-                abi.encodeCall(
-                    callbacks.register,
-                    (address(boardroom), address(obligation), IBoardroom.ObligationKind.Liquidity, dependencies)
-                )
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
             )
         );
-        obligation.markClosed();
+        escrow.markClosed();
         vm.prank(alice);
-        assertTrue(boardroom.pruneObligation(address(obligation)));
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertTrue(boardroom.pruneEscrow(address(escrow)));
+        assertEq(boardroom.openEscrowCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Closed));
     }
 
-    function testAlreadyClosedObligationCannotBeRegistered() public {
-        BoardroomObligation obligation = new BoardroomObligation(address(boardroom));
-        obligation.markClosed();
-        address[] memory dependencies = new address[](0);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.ObligationAlreadyClosed.selector, address(obligation)));
+    function testAlreadyClosedEscrowCannotBeRegistered() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        escrow.markClosed();
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EscrowAlreadyClosed.selector, address(escrow)));
         boardroom.execute(
             IBoardroom.Call(
-                address(callbacks),
-                0,
-                abi.encodeCall(
-                    callbacks.register,
-                    (address(boardroom), address(obligation), IBoardroom.ObligationKind.Grant, dependencies)
-                )
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
+        );
+    }
+
+    function testClosedEscrowCannotBeReopened() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
+        );
+        escrow.markClosed();
+        boardroom.pruneEscrow(address(escrow));
+
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EscrowAlreadyRegistered.selector, address(escrow)));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
             )
         );
     }

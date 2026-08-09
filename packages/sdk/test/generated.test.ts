@@ -43,7 +43,7 @@ describe("generated SDK exports", () => {
       "claimRedemptionAsset",
       "execute",
       "executeBatch",
-      "executeObligation",
+      "executeEscrow",
       "openRedemptions",
       "redeem",
       "startWindDown",

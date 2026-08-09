@@ -7,7 +7,7 @@ description: Map the lean product to its contracts, SDK, deployment artifacts, a
 
 The integration surface is intentionally small:
 
-- [Boardroom integration](developers/boardroom) for custody, execution, obligations, and redemption;
+- [Boardroom integration](developers/boardroom) for custody, execution, escrows, and redemption;
 - [Grant integration](developers/grants) for escrow, vesting, settlement, and grant-right NFTs;
 - [Uniswap v4 and liquidity integration](developers/amm-and-liquidity) for lockers, fees, and swaps;
 - [Deployment and local scenarios](developers/deployment-and-local-scenarios) for profiles,

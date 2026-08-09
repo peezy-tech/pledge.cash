@@ -256,7 +256,7 @@ contract TokenGrantFactory is Ownable, ERC721 {
     }
 
     /// @dev The canonical Boardroom only permits these callbacks while this factory is
-    /// its owner-selected execution target, making funding and obligation registration atomic.
+    /// its owner-selected execution target, making funding and escrow registration atomic.
     function _registerBoardroomGrant(GrantCreateInput memory input, address grant) internal {
         if (!isCanonicalBoardroom(input.issuer)) return;
 
@@ -265,16 +265,16 @@ contract TokenGrantFactory is Ownable, ERC721 {
         bool includeToken = input.token != shares;
         bool includePayment =
             input.paymentToken != address(0) && input.paymentToken != input.token && input.paymentToken != shares;
-        uint256 dependencyCount = (includeToken ? 1 : 0) + (includePayment ? 1 : 0);
-        address[] memory dependencies = new address[](dependencyCount);
+        uint256 assetCount = (includeToken ? 1 : 0) + (includePayment ? 1 : 0);
+        address[] memory assets = new address[](assetCount);
         uint256 cursor;
-        if (includeToken) dependencies[cursor++] = input.token;
-        if (includePayment) dependencies[cursor] = input.paymentToken;
+        if (includeToken) assets[cursor++] = input.token;
+        if (includePayment) assets[cursor] = input.paymentToken;
 
-        for (uint256 i; i < dependencyCount; ++i) {
-            boardroom.reserveRedeemableAsset(dependencies[i]);
+        for (uint256 i; i < assetCount; ++i) {
+            boardroom.reserveRedeemableAsset(assets[i]);
         }
-        boardroom.registerObligation(grant, IBoardroom.ObligationKind.Grant, dependencies);
+        boardroom.registerEscrow(grant);
     }
 
     function _emitTokenGrantCreated(

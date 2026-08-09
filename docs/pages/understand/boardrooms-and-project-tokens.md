@@ -1,6 +1,6 @@
 ---
 title: Boardrooms and project tokens
-description: Understand the non-upgradeable project custodian, external owner, share token, obligations, and one-way lifecycle.
+description: Understand the non-upgradeable project custodian, external owner, share token, escrows, and one-way lifecycle.
 ---
 
 # Boardrooms and project tokens
@@ -22,14 +22,14 @@ Calls to the Boardroom itself and its own share token are rejected.
 
 ## Lifecycle
 
-- **Active:** operate the treasury, mint shares, and create obligations.
+- **Active:** operate the treasury, mint shares, and create escrows.
 - **WindingDown:** ordinary execution stops; grants and liquidity must close.
-- **Snapshotting:** after the delay, all obligations are closed and treasury shares are
+- **Snapshotting:** after the delay, all escrows are closed and treasury shares are
   burned, freeze supply and process registered assets in bounded pages.
 - **RedemptionsOpen:** holders burn shares into credits and claim each included asset.
 
 Every transition is one-way. Deploying a new Boardroom is the upgrade path while the old
 one is still Active.
 
-Read [Treasury obligations and redemptions](treasury-obligations-and-redemptions) for the
+Read [Treasury escrows and redemptions](treasury-escrows-and-redemptions) for the
 shutdown accounting.

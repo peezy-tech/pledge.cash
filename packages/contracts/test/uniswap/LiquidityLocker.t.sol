@@ -113,7 +113,7 @@ contract LiquidityLockerTest is Test {
         locker = _createLocker(boardroom, address(quote), LOCKER_SALT);
     }
 
-    function testFactoryCreatesDeterministicLockerAndRegistersObligationAtomically() public view {
+    function testFactoryCreatesDeterministicLockerAndRegistersEscrowAtomically() public view {
         assertEq(
             address(locker),
             lockerFactory.predictLockerAddress(address(boardroom), address(quote), 3_000, 60, LOCKER_SALT)
@@ -127,14 +127,9 @@ contract LiquidityLockerTest is Test {
         assertEq(address(locker.positionManager()), address(positionManager));
         assertEq(locker.protocolFeeRouter(), address(protocolFeeRouter));
 
-        (address registrar, IBoardroom.ObligationKind kind, bool active, bool everRegistered) =
-            boardroom.obligationOf(address(locker));
-        assertEq(registrar, address(lockerFactory));
-        assertEq(uint256(kind), uint256(IBoardroom.ObligationKind.Liquidity));
-        assertTrue(active);
-        assertTrue(everRegistered);
-        assertEq(boardroom.obligationDependencyCount(address(locker)), 1);
-        assertEq(boardroom.obligationDependencyAt(address(locker), 0), address(quote));
+        assertEq(uint256(boardroom.escrowState(address(locker))), uint256(IBoardroom.EscrowState.Open));
+        assertEq(boardroom.openEscrowCount(), 1);
+        assertTrue(boardroom.isRedeemableAsset(address(quote)));
         assertTrue(boardroom.isRedeemableAsset(address(quote)));
     }
 
@@ -357,14 +352,14 @@ contract LiquidityLockerTest is Test {
         // Fee collection remains permitted during the wind-down mutation window.
         locker.collectFees();
         vm.expectRevert(LiquidityLocker.BoardroomMutationForbidden.selector);
-        _executeObligation(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID)));
+        _executeEscrow(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID)));
 
         bytes memory actionsBeforeExit = positionManager.lastActions();
         assertEq(uint8(actionsBeforeExit[0]), PositionManagerActions.DECREASE_LIQUIDITY);
-        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
+        _executeEscrow(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
         assertTrue(locker.isClosed());
-        assertFalse(boardroom.isLockedLiquidity(address(locker)));
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(locker))), uint256(IBoardroom.EscrowState.Closed));
+        assertEq(boardroom.openEscrowCount(), 0);
         bytes memory actions = positionManager.lastActions();
         assertEq(uint8(actions[0]), PositionManagerActions.BURN_POSITION);
         assertEq(uint8(actions[1]), PositionManagerActions.TAKE_PAIR);
@@ -379,8 +374,8 @@ contract LiquidityLockerTest is Test {
         boardroom.startWindDown();
 
         vm.expectPartialRevert(PositionManagerMock.SlippageExceeded.selector);
-        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(501), uint128(700), block.timestamp + 1)));
-        _executeObligation(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
+        _executeEscrow(locker, abi.encodeCall(locker.exit, (uint128(501), uint128(700), block.timestamp + 1)));
+        _executeEscrow(locker, abi.encodeCall(locker.exit, (uint128(500), uint128(700), block.timestamp + 1)));
         _assertCurrencyBalance(locker.currency0(), address(boardroom), 507);
         _assertCurrencyBalance(locker.currency1(), address(boardroom), 711);
     }
@@ -390,14 +385,14 @@ contract LiquidityLockerTest is Test {
         assertTrue(locker.isClosed());
         vm.expectRevert(LiquidityLocker.LockerAlreadyClosed.selector);
         _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
-        boardroom.pruneObligation(address(locker));
+        boardroom.pruneEscrow(address(locker));
 
         LiquidityLocker replacement = _createLocker(boardroom, address(quote), keccak256("replacement"));
-        assertTrue(boardroom.isLockedLiquidity(address(replacement)));
+        assertEq(uint256(boardroom.escrowState(address(replacement))), uint256(IBoardroom.EscrowState.Open));
         boardroom.startWindDown();
-        _executeObligation(replacement, abi.encodeCall(replacement.cancel, ()));
+        _executeEscrow(replacement, abi.encodeCall(replacement.cancel, ()));
         assertTrue(replacement.isClosed());
-        assertEq(boardroom.activeObligationCount(), 0);
+        assertEq(boardroom.openEscrowCount(), 0);
     }
 
     function _createLocker(Boardroom boardroom_, address quoteAsset, bytes32 salt)
@@ -425,8 +420,8 @@ contract LiquidityLockerTest is Test {
         return boardroom_.execute(IBoardroom.Call({target: address(locker_), value: 0, data: data}));
     }
 
-    function _executeObligation(LiquidityLocker locker_, bytes memory data) internal returns (bytes memory) {
-        return boardroom.executeObligation(address(locker_), data);
+    function _executeEscrow(LiquidityLocker locker_, bytes memory data) internal returns (bytes memory) {
+        return boardroom.executeEscrow(address(locker_), data);
     }
 
     function _mintAndRegister(uint256 tokenId_, uint128 principal0, uint128 principal1, uint128 liquidity) internal {

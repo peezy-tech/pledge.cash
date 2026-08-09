@@ -188,7 +188,7 @@ contract LiquidityLocker is ReentrancyGuard {
     }
 
     /// @notice Closes an empty pre-launch locker so it cannot block Boardroom wind-down.
-    /// @dev Callable by Boardroom.execute while active or executeObligation while winding down.
+    /// @dev Callable by Boardroom.execute while active or executeEscrow while winding down.
     function cancel() external onlyBoardroom nonReentrant {
         if (isClosed) revert LockerAlreadyClosed();
         if (positionRegistered) revert PositionAlreadyRegistered(tokenId);

@@ -20,7 +20,7 @@ sent to the address is not canonical until this registration succeeds.
 While the Boardroom is Active, anyone can collect accrued fees without removing
 principal. The locker sends 95 percent of each currency to the Boardroom and 5 percent
 to the protocol fee router. During wind-down, the Boardroom exits the whole position,
-receives both currencies, and prunes the closed obligation before snapshotting.
+receives both currencies, and closes the locker escrow before snapshotting.
 
 Swaps use standard Uniswap periphery and are not a pledge.cash pool contract. Verify the
 chain-specific router, Permit2 address, PoolKey, token approvals, deadline, and minimum

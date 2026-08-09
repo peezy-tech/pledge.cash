@@ -682,7 +682,7 @@ export function App(): React.JSX.Element {
       project: {
         owner: boardroom.owner,
         status: boardroomStatus(boardroom.status),
-        windDownBlockers: Number(boardroom.activeObligationCount),
+        windDownBlockers: Number(boardroom.openEscrowCount),
         windDownMatured: boardroom.windDownStartedAt + boardroom.windDownDelay <= BigInt(Math.floor(Date.now() / 1000)),
         snapshotComplete: boardroom.snapshotFrozen,
       },
@@ -1024,7 +1024,7 @@ function requireValue<T>(value: T | undefined, message: string): T {
 }
 
 function activeBoardroomStatus(boardroom: BoardroomState): 0 | 1 {
-  if (boardroom.status !== 0 && boardroom.status !== 1) throw new Error("This obligation can only be managed before snapshotting begins.");
+  if (boardroom.status !== 0 && boardroom.status !== 1) throw new Error("This escrow can only be managed before snapshotting begins.");
   return boardroom.status;
 }
 

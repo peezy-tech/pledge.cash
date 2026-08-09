@@ -134,7 +134,7 @@ export function BoardroomWorkspace({
       <WorkspaceHeader
         eyebrow={mode === "studio" ? "Project studio" : "Project"}
         title={mode === "studio" ? "Boardroom workspace" : "Boardroom overview"}
-        description="One custody boundary for shares, grant obligations, a canonical locked Uniswap v4 position, wind-down, and pro-rata redemption."
+        description="One custody boundary for shares, grant escrows, a canonical locked Uniswap v4 position, wind-down, and pro-rata redemption."
         action={refresh}
       >
         {mode === "project" && projectSection ? (
@@ -236,7 +236,7 @@ function StudioBody({
         <LiquidityPanel boardroom={boardroom} canManage={canManage} canWrite={canWrite} form={form} locker={locker} pendingAction={pendingAction} setForm={setForm} onAction={onAction} />
       ) : null}
       {section === "close" ? (
-        <ClosePanel boardroom={boardroom} canManage={canManage} canWrite={canWrite} form={form} pendingAction={pendingAction} setForm={setForm} onAction={onAction} />
+        <ClosePanel boardroom={boardroom} canManage={canManage} canWrite={canWrite} form={form} locker={locker} pendingAction={pendingAction} setForm={setForm} onAction={onAction} />
       ) : null}
     </div>
   );
@@ -245,7 +245,7 @@ function StudioBody({
 function SetupPanel({ boardroom, locker }: { boardroom: BoardroomState; locker: LiquidityLockerState | undefined }): React.JSX.Element {
   return (
     <div className="grid gap-4">
-      <Panel title="Authority and custody" description="The Boardroom owner is the only administrative authority; assets stay in the Boardroom or registered obligations.">
+      <Panel title="Authority and custody" description="The Boardroom owner is the only administrative authority; assets stay in the Boardroom or registered escrows.">
         <BoardroomFacts boardroom={boardroom} />
       </Panel>
       <LockerFacts locker={locker} />
@@ -388,6 +388,7 @@ function ClosePanel({
   canManage,
   canWrite,
   form,
+  locker,
   pendingAction,
   setForm,
   onAction,
@@ -396,6 +397,7 @@ function ClosePanel({
   canManage: boolean;
   canWrite: boolean;
   form: BoardroomWorkspaceForm;
+  locker: LiquidityLockerState | undefined;
   pendingAction: string | undefined;
   setForm: Dispatch<SetStateAction<BoardroomWorkspaceForm>>;
   onAction: (action: BoardroomAction) => Promise<void>;
@@ -405,7 +407,7 @@ function ClosePanel({
   return (
     <div className="grid gap-4">
       <LifecyclePanel boardroom={boardroom} />
-      <Panel title="Wind down and redeem" description="Close obligations, snapshot all registered assets, freeze the redemption supply, then burn shares for pro-rata claims.">
+      <Panel title="Wind down and redeem" description="Close escrows, snapshot all registered assets, freeze the redemption supply, then burn shares for pro-rata claims.">
         <div className="grid gap-px border-t border-[var(--pc-border)] bg-[var(--pc-border)] md:grid-cols-2">
           <TextField label="Redemption asset" value={form.windDown.asset} onChange={(value) => setWindDown("asset", value)} />
           <TextField label="Shares to redeem" value={form.windDown.shares} onChange={(value) => setWindDown("shares", value)} />
@@ -419,8 +421,8 @@ function ClosePanel({
         <ActionRow>
           <StudioAction action="register-asset" disabled={!canManage || boardroom.status > 1} label="Register asset" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="start-wind-down" disabled={!canManage || boardroom.status !== 0} label="Start wind-down" pendingAction={pendingAction} onAction={onAction}><ArchiveRestore className="h-4 w-4" /></StudioAction>
-          <StudioAction action="exit-locker" disabled={!canManage || boardroom.status !== 1 || boardroom.activeLiquidityCount === 0n} label="Exit liquidity" pendingAction={pendingAction} onAction={onAction} />
-          <StudioAction action="begin-snapshot" disabled={!canWrite || boardroom.status !== 1 || boardroom.activeObligationCount !== 0n} label="Begin snapshot" pendingAction={pendingAction} onAction={onAction} />
+          <StudioAction action="exit-locker" disabled={!canManage || boardroom.status !== 1 || !locker || locker.closed} label="Exit liquidity" pendingAction={pendingAction} onAction={onAction} />
+          <StudioAction action="begin-snapshot" disabled={!canWrite || boardroom.status !== 1 || boardroom.openEscrowCount !== 0n} label="Begin snapshot" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="snapshot-assets" disabled={!canWrite || boardroom.status !== 2 || boardroom.snapshotFrozen} label="Snapshot assets" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="wrap-native" disabled={!canWrite || boardroom.status !== 2} label="Wrap native" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="burn-treasury-shares" disabled={!canWrite || boardroom.status !== 1} label="Burn treasury shares" pendingAction={pendingAction} onAction={onAction} />
@@ -435,12 +437,10 @@ function ClosePanel({
 
 function LifecyclePanel({ boardroom }: { boardroom: BoardroomState }): React.JSX.Element {
   return (
-    <Panel title="Lifecycle" description="The onchain state machine, snapshot progress, and active obligations.">
+    <Panel title="Lifecycle" description="The onchain state machine, snapshot progress, and open escrows.">
       <Facts columns="three" items={[
         { label: "Status", value: statusLabel(boardroom.status) },
-        { label: "Active obligations", value: boardroom.activeObligationCount.toString() },
-        { label: "Active grants", value: boardroom.activeGrantCount.toString() },
-        { label: "Active liquidity", value: boardroom.activeLiquidityCount.toString() },
+        { label: "Open escrows", value: boardroom.openEscrowCount.toString() },
         { label: "Snapshot", value: `${boardroom.snapshotCursor.toString()} / ${boardroom.snapshotAssetCount.toString()}` },
         { label: "Snapshot frozen", value: boardroom.snapshotFrozen ? "Yes" : "No" },
         { label: "Redemption supply", value: boardroom.redemptionSupply.toString() },

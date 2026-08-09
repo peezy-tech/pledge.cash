@@ -4,7 +4,7 @@
 
 A Boardroom is a non-upgradeable project custodian created by
 `BoardroomFactory`. It owns one `BoardroomToken`, holds treasury assets, executes
-owner-authorized calls, records grants and locked liquidity as obligations, and ends in
+owner-authorized calls, records grants and locked liquidity as escrows, and ends in
 pro-rata redemption.
 
 The owner is an external account. It may be an EOA, a Safe, or a separately deployed
@@ -30,31 +30,32 @@ The Boardroom rejects calls to itself and its own share token.
 
 The execution target gets callback-scoped authority for the duration of one call. A
 canonical `TokenGrantFactory` or `LiquidityLockerFactory` uses that context to reserve
-redeemable assets and register the exact obligation it just created. An arbitrary
-external caller cannot register an obligation.
+redeemable assets and register the exact escrow it just created. An arbitrary external
+caller cannot register an escrow.
 
-The asset registry contains ERC20s that can participate in final redemption. External
-contributors may add an exact amount of an already registered asset before a deadline.
-An asset cannot be removed while it has a balance or an active dependency.
+The asset registry is append-only and contains ERC20s that can participate in final
+redemption. External contributors may add an exact amount of an already registered asset
+before a deadline.
 
-## Obligations
+## Escrows
 
-The only obligation kinds are `Grant` and `Liquidity`. Each may name at most eight
-dependent assets. Active obligations prevent snapshotting. Anyone may prune a closed
-obligation; the bounded batch form accepts at most 32 addresses.
+Boardroom-funded grants and the canonical liquidity locker are one-shot escrows. Each
+escrow moves from `None` to `Open` to `Closed` and can never be reactivated. Open escrows
+prevent snapshotting. Anyone may prune an escrow after its canonical `isClosed()` probe
+returns true.
 
-During wind-down the owner may call only a recorded active obligation through
-`executeObligation`. That is how a Boardroom exits its locker or closes a Boardroom-funded
+During wind-down the owner may call only a recorded open escrow through `executeEscrow`.
+That is how a Boardroom exits its locker or closes a Boardroom-funded
 grant without regaining general-purpose execution.
 
 ## Lifecycle
 
 The state machine is irreversible:
 
-1. `Active`: the owner may operate the treasury, issue shares, and create obligations.
+1. `Active`: the owner may operate the treasury, issue shares, and create escrows.
 2. `WindingDown`: ordinary execution and minting stop. Native balance is wrapped, and
-   obligations must close. The minimum delay is one day.
-3. `Snapshotting`: after the delay and after every obligation is pruned, the Boardroom
+   escrows must close. The minimum delay is one day.
+3. `Snapshotting`: after the delay and after every escrow is closed, the Boardroom
    burns any shares it holds, freezes total supply, and processes the asset registry in
    pages of at most 32.
 4. `RedemptionsOpen`: after every asset is processed, holders burn shares into
@@ -69,8 +70,8 @@ have been claimed.
 
 - Only the Boardroom contract can mint or burn its share token.
 - General external execution exists only in `Active` and only for the owner.
-- An obligation can be registered once and can never be reactivated.
-- Snapshotting cannot begin while an obligation is active.
+- An escrow can be registered once and can never be reactivated.
+- Snapshotting cannot begin while an escrow is open.
 - Snapshot balances and redemption supply freeze before any holder redeems.
 - A holder's claim for one asset cannot consume another holder's allocation.
 - Native currency is wrapped before snapshotting, so redemptions use ERC20 accounting.

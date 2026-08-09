@@ -8,7 +8,7 @@ description: Learn the four retained protocol surfaces and the responsibilities 
 pledge.cash gives a token-backed project a small onchain operating core:
 
 - a **Boardroom**, which holds treasury assets, issues one ERC20 project token, records
-  obligations, and ends in redemptions;
+  escrows, and ends in redemptions;
 - **Token Grants**, which escrow existing ERC20s and release vested amounts to an
   ERC721 grant-right holder;
 - a **Liquidity Locker**, which holds one verified Uniswap v4 PositionManager NFT and

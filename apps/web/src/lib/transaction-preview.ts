@@ -73,7 +73,7 @@ const BOARDROOM_BATCH_CALL_FUNCTIONS = new Set([
   "executeBatch",
 ]);
 
-const ASSET_AND_OBLIGATION_ABIS = [
+const ASSET_AND_ESCROW_ABIS = [
   boardroomAbi,
   boardroomTokenAbi,
   erc20Abi,
@@ -95,7 +95,7 @@ const FUNCTION_LABELS: Record<string, string> = {
   collectFees: "Collect locked-position fees",
   createGrant: "Create a token grant",
   createLocker: "Create a canonical liquidity locker",
-  executeObligation: "Run an obligation wind-down operation",
+  executeEscrow: "Run an escrow wind-down operation",
   exit: "Exit locked liquidity to the Boardroom",
   launch: "Mark the Boardroom launched",
   mint: "Mint project shares",
@@ -158,7 +158,7 @@ export function boardroomCallReview(call: BoardroomCall, boardroom?: Address): B
   const selfTarget = boardroom !== undefined && sameAddress(normalized.target, boardroom);
   const abis = selfTarget
     ? [boardroomAbi] as const
-    : [...MODULE_FACTORY_ABIS, ...ASSET_AND_OBLIGATION_ABIS];
+    : [...MODULE_FACTORY_ABIS, ...ASSET_AND_ESCROW_ABIS];
   const matches = uniqueDecodedMatches(abis, normalized.data);
   if (matches.length !== 1) {
     const candidates = matches.map((match) => match.signature).join(", ");
@@ -420,7 +420,7 @@ const IMPORTANT_FUNCTIONS = new Set([
   "createLocker",
   "execute",
   "executeBatch",
-  "executeObligation",
+  "executeEscrow",
   "mint",
   "preparePositionTransfer",
   "registerPosition",

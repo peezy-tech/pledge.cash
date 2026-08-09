@@ -13,10 +13,10 @@ The routed project sections are:
 - **Setup:** predict or create a Boardroom and verify its canonical identity.
 - **Token:** mint project shares while the Boardroom is Active.
 - **Grants:** create standalone grants or Boardroom-funded external-asset grants and
-  inspect active obligations.
+  inspect open escrows.
 - **Liquidity:** create the one-position locker, register a received PositionManager
   NFT, collect fees, or prepare the wind-down exit.
-- **Close:** start wind-down, close and prune obligations, process the bounded asset
+- **Close:** start wind-down, close and prune escrows, process the bounded asset
   snapshot, open redemptions, and redeem shares.
 
 Project-share grants require an external issuer rather than the Boardroom. Token launches

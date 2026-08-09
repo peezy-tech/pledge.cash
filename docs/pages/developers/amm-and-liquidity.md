@@ -10,8 +10,8 @@ protocol
 specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/liquidity-protocol.md).
 
 Create a locker by targeting `LiquidityLockerFactory.createLocker` through
-`Boardroom.execute`. The callback atomically registers a liquidity obligation whose
-external dependency is the quote asset. Verify `isLocker`, `lockerOfBoardroom`, and all
+`Boardroom.execute`. The callback atomically registers the locker as an escrow and adds
+the quote asset to the append-only redemption registry. Verify `isLocker`, `lockerOfBoardroom`, and all
 immutable locker fields.
 
 For a direct CCA mint, set `positionRecipient` to the predicted locker and call

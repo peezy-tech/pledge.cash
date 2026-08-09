@@ -148,27 +148,12 @@ export function buildBoardroomSnapshotAssetsTransaction(input: { boardroom: Addr
   };
 }
 
-export function buildBoardroomPruneObligationTransaction(input: { boardroom: Address; obligation: Address }) {
+export function buildBoardroomPruneEscrowTransaction(input: { boardroom: Address; escrow: Address }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
-    functionName: "pruneObligation" as const,
-    args: [input.obligation] as const,
-  };
-}
-
-export function buildBoardroomPruneObligationsTransaction(input: {
-  boardroom: Address;
-  obligations: readonly Address[];
-}) {
-  if (input.obligations.length === 0 || input.obligations.length > 32) {
-    throw new Error("Obligation prune batches must contain between 1 and 32 addresses.");
-  }
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "pruneObligations" as const,
-    args: [input.obligations] as const,
+    functionName: "pruneEscrow" as const,
+    args: [input.escrow] as const,
   };
 }
 
@@ -189,15 +174,6 @@ export function buildBoardroomRegisterRedeemableAssetTransaction(input: { boardr
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "registerRedeemableAsset" as const,
-    args: [input.asset] as const,
-  };
-}
-
-export function buildBoardroomRemoveRedeemableAssetTransaction(input: { boardroom: Address; asset: Address }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "removeRedeemableAsset" as const,
     args: [input.asset] as const,
   };
 }
@@ -293,16 +269,16 @@ export function buildBoardroomExecuteBatchTransaction(input: {
   };
 }
 
-export function buildBoardroomExecuteObligationTransaction(input: {
+export function buildBoardroomExecuteEscrowTransaction(input: {
   boardroom: Address;
-  obligation: Address;
+  escrow: Address;
   data: Hex;
 }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
-    functionName: "executeObligation" as const,
-    args: [input.obligation, input.data] as const,
+    functionName: "executeEscrow" as const,
+    args: [input.escrow, input.data] as const,
   };
 }
 
@@ -413,7 +389,7 @@ export function buildGrantIssuerBoardroomAction(input: {
   const call = buildGrantIssuerBoardroomCall(input);
   return input.status === 0
     ? buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call })
-    : buildBoardroomExecuteObligationTransaction({ boardroom: input.boardroom, obligation: input.grant, data: call.data });
+    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.grant, data: call.data });
 }
 
 export function buildLiquidityLockerCreationCall(input: {
@@ -509,7 +485,7 @@ export function buildBoardroomRecoverUntrackedPositionTransaction(input: {
         boardroom: input.boardroom,
         call: buildBoardroomCall({ target: input.locker, data }),
       })
-    : buildBoardroomExecuteObligationTransaction({ boardroom: input.boardroom, obligation: input.locker, data });
+    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.locker, data });
 }
 
 export function buildPositionManagerSafeTransferToLockerTransaction(input: {
@@ -538,7 +514,7 @@ export function buildBoardroomLiquidityLockerCancelTransaction(input: {
   const data = encodeFunctionData({ abi: liquidityLockerAbi, functionName: "cancel" });
   return input.status === 0
     ? buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call: buildBoardroomCall({ target: input.locker, data }) })
-    : buildBoardroomExecuteObligationTransaction({ boardroom: input.boardroom, obligation: input.locker, data });
+    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.locker, data });
 }
 
 export function buildBoardroomLiquidityLockerExitTransaction(input: {
@@ -554,9 +530,9 @@ export function buildBoardroomLiquidityLockerExitTransaction(input: {
     functionName: "exit",
     args: [requireUint128(input.amount0Min, "amount0Min"), requireUint128(input.amount1Min, "amount1Min"), input.deadline],
   });
-  return buildBoardroomExecuteObligationTransaction({
+  return buildBoardroomExecuteEscrowTransaction({
     boardroom: input.boardroom,
-    obligation: input.locker,
+    escrow: input.locker,
     data,
   });
 }

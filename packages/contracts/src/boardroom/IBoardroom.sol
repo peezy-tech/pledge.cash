@@ -10,17 +10,16 @@ interface IBoardroom {
         RedemptionsOpen
     }
 
-    enum ObligationKind {
+    enum EscrowState {
         None,
-        Grant,
-        Liquidity
+        Open,
+        Closed
     }
 
     enum SnapshotStatus {
         Unprocessed,
         Included,
-        Unreadable,
-        Excluded
+        Unreadable
     }
 
     struct Call {
@@ -30,8 +29,6 @@ interface IBoardroom {
     }
 
     function MAX_BATCH_CALLS() external view returns (uint256);
-
-    function MAX_OBLIGATION_ASSETS() external view returns (uint256);
 
     function MAX_SNAPSHOT_PAGE() external view returns (uint256);
 
@@ -69,7 +66,7 @@ interface IBoardroom {
 
     function executeBatch(Call[] calldata calls) external payable returns (bytes[] memory results);
 
-    function executeObligation(address obligation, bytes calldata data) external returns (bytes memory result);
+    function executeEscrow(address escrow, bytes calldata data) external returns (bytes memory result);
 
     function wrapNativeBalance() external;
 
@@ -79,32 +76,13 @@ interface IBoardroom {
 
     function contributeTreasuryAsset(address asset, uint256 amount, uint256 deadline) external;
 
-    function removeRedeemableAsset(address asset) external;
+    function registerEscrow(address escrow) external;
 
-    function registerObligation(address obligation, ObligationKind kind, address[] calldata assets) external;
+    function pruneEscrow(address escrow) external returns (bool pruned);
 
-    function pruneObligation(address obligation) external returns (bool pruned);
+    function escrowState(address escrow) external view returns (EscrowState);
 
-    function pruneObligations(address[] calldata obligations) external returns (uint256 pruned);
-
-    function obligationOf(address obligation)
-        external
-        view
-        returns (address registrar, ObligationKind kind, bool active, bool everRegistered);
-
-    function isIssuedGrant(address obligation) external view returns (bool);
-
-    function isLockedLiquidity(address obligation) external view returns (bool);
-
-    function activeObligationCount() external view returns (uint256);
-
-    function activeObligationCountByKind(ObligationKind kind) external view returns (uint256);
-
-    function assetDependencyCount(address asset) external view returns (uint256);
-
-    function obligationDependencyCount(address obligation) external view returns (uint256);
-
-    function obligationDependencyAt(address obligation, uint256 index) external view returns (address);
+    function openEscrowCount() external view returns (uint256);
 
     function beginSnapshot() external;
 
