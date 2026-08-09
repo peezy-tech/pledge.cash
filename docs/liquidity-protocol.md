@@ -4,8 +4,7 @@
 
 pledge.cash locks one canonical Uniswap v4 `PositionManager` NFT for each
 Boardroom. `LiquidityLockerFactory` creates the locker, and the Boardroom records it
-as an escrow. The locker replaces the former custom hook, vault, and
-third-party liquidity-claim system.
+as an escrow.
 
 The locker does not create an auction, initialize a pool, or mint liquidity. Projects
 may use Uniswap's Liquidity Launchpad or another v4-native path that mints the finished

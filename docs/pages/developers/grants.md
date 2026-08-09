@@ -14,8 +14,8 @@ grant amount, initializes the clone, mints token ID `uint160(grant)`, and record
 `grantForTokenId`.
 
 For a canonical Boardroom issuer, encode `createGrant` as a `Boardroom.execute` target.
-That single transaction funds escrow, reserves external dependencies, and registers the
-escrow. Do not try to fund a Boardroom-issued grant with its own share token.
+That single transaction funds and registers the escrow. Do not try to fund a
+Boardroom-issued grant with its own share token.
 
 Quote live data from `getSettleableAmount(timestamp)` and
 `getSettlementCost(amount)`. Payment cost rounds up. Submit any payment-token approval
