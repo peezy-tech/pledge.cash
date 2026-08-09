@@ -1,7 +1,6 @@
 import { CheckCircle2, ChevronDown, CircleAlert, Clock3, Loader2, ReceiptText, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
-import type { AppRoute } from "../../app/routing";
 import { transactionUrl } from "../../lib/contracts";
 import { shortAddress } from "../../lib/forms";
 import type { ContractCallReview } from "../../lib/transaction-preview";
@@ -22,31 +21,19 @@ export type TransactionRecord = {
   id: string;
   chainId: number;
   createdAt: string;
-  deploymentIdentity?: string | undefined;
   error?: string | undefined;
   functionName: string;
   hash?: Hex | undefined;
   label: string;
-  refreshBlocked?: boolean | undefined;
-  refreshPending?: boolean | undefined;
-  refreshRoute?: AppRoute | undefined;
-  replacementReason?: "cancelled" | "replaced" | "repriced" | undefined;
   stage: TransactionStage;
-  submittedHash?: Hex | undefined;
   target: Address | "unknown";
 };
 
 export type TransactionUpdate = Partial<Pick<
   TransactionRecord,
-  | "deploymentIdentity"
   | "error"
   | "hash"
-  | "refreshBlocked"
-  | "refreshPending"
-  | "refreshRoute"
-  | "replacementReason"
   | "stage"
-  | "submittedHash"
 >>;
 
 export type StoredTransactions = Record<string, readonly TransactionRecord[]>;
@@ -59,7 +46,6 @@ export function useTransactionCenter(chainId: number, account?: Address): {
   records: TransactionRecord[];
   startTransaction: (review: ContractCallReview) => string;
   updateTransaction: (id: string, update: TransactionUpdate) => void;
-  updateTransactionForIdentity: (chainId: number, account: Address | undefined, id: string, update: TransactionUpdate) => void;
   clearSettled: () => void;
 } {
   const identity = transactionIdentity(chainId, account);
@@ -116,27 +102,6 @@ export function useTransactionCenter(chainId: number, account?: Address): {
     if (loadedIdentityRef.current === targetIdentity) writeTransactionRecords(targetIdentity, next);
   }, []);
 
-  const updateTransactionForIdentity = useCallback((
-    targetChainId: number,
-    targetAccount: Address | undefined,
-    id: string,
-    update: TransactionUpdate,
-  ): void => {
-    const targetIdentity = transactionIdentity(targetChainId, targetAccount);
-    const stored = updateStoredTransactionsForIdentity(
-      readStoredTransactions(),
-      targetChainId,
-      targetAccount,
-      id,
-      update,
-    );
-    writeStoredTransactions(stored);
-    if (currentIdentityRef.current !== targetIdentity || loadedIdentityRef.current !== targetIdentity) return;
-    const next = updateTransactionRecords(recordsRef.current, id, update);
-    recordsRef.current = next;
-    setRecords(next);
-  }, []);
-
   const clearSettled = useCallback((): void => {
     const targetIdentity = currentIdentityRef.current;
     const next = clearSettledTransactions(recordsRef.current);
@@ -149,7 +114,6 @@ export function useTransactionCenter(chainId: number, account?: Address): {
     records: loadedIdentity === identity ? records : [],
     startTransaction,
     updateTransaction,
-    updateTransactionForIdentity,
     clearSettled,
   };
 }
@@ -163,15 +127,14 @@ export function recoverInterruptedTransactions(records: readonly TransactionReco
         stage: "failed",
       };
     }
-    if (record.stage === "submitted" && !record.hash) {
+    if (record.stage === "submitted") {
       return {
         ...record,
-        error: "This submitted transaction has no receipt hash and cannot be resumed.",
+        error: record.hash
+          ? "Receipt tracking was interrupted after submission. Check the onchain receipt."
+          : "This submitted transaction has no receipt hash and cannot be resumed.",
         stage: "failed",
       };
-    }
-    if (record.stage === "submitted" && record.hash && !record.submittedHash) {
-      return { ...record, submittedHash: record.hash };
     }
     return record;
   });
@@ -183,20 +146,6 @@ export function updateTransactionRecords(
   update: TransactionUpdate,
 ): TransactionRecord[] {
   return records.map((record) => record.id === id ? { ...record, ...update } : record);
-}
-
-export function updateStoredTransactionsForIdentity(
-  stored: Readonly<Record<string, readonly TransactionRecord[]>>,
-  chainId: number,
-  account: Address | undefined,
-  id: string,
-  update: TransactionUpdate,
-): StoredTransactions {
-  const identity = transactionIdentity(chainId, account);
-  return {
-    ...stored,
-    [identity]: updateTransactionRecords(stored[identity] ?? [], id, update).slice(0, MAX_RECORDS),
-  };
 }
 
 export function clearSettledTransactions(records: readonly TransactionRecord[]): TransactionRecord[] {
@@ -230,7 +179,7 @@ export function TransactionTray({
         type="button"
         onClick={() => setOpen((value) => !value)}
       >
-        <StageIcon refreshBlocked={latest.refreshBlocked} refreshPending={latest.refreshPending} stage={latest.stage} />
+        <StageIcon stage={latest.stage} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-zinc-100">{latest.label}</span>
           <span className="block text-xs text-zinc-400" aria-live="polite">{transactionStatusLabel(latest)}</span>
@@ -262,7 +211,7 @@ function TransactionRow({ record }: { record: TransactionRecord }): React.JSX.El
   const explorer = record.hash ? transactionUrl(record.hash, record.chainId) : undefined;
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-b border-zinc-800 px-4 py-3 last:border-b-0">
-      <StageIcon refreshBlocked={record.refreshBlocked} refreshPending={record.refreshPending} stage={record.stage} />
+      <StageIcon stage={record.stage} />
       <div className="min-w-0">
         <div className="flex items-start justify-between gap-3">
           <span className="truncate text-sm font-medium text-zinc-100">{record.label}</span>
@@ -283,18 +232,7 @@ function TransactionRow({ record }: { record: TransactionRecord }): React.JSX.El
   );
 }
 
-function StageIcon({
-  refreshBlocked,
-  refreshPending,
-  stage,
-}: {
-  refreshBlocked?: boolean | undefined;
-  refreshPending?: boolean | undefined;
-  stage: TransactionStage;
-}): React.JSX.Element {
-  if (stage === "confirmed" && refreshPending && !refreshBlocked) {
-    return <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-teal-300" aria-hidden="true" />;
-  }
+function StageIcon({ stage }: { stage: TransactionStage }): React.JSX.Element {
   if (stage === "confirmed") return <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-300" aria-hidden="true" />;
   if (stage === "failed") return <CircleAlert className="mt-0.5 h-4 w-4 text-red-300" aria-hidden="true" />;
   if (stage === "cancelled") return <X className="mt-0.5 h-4 w-4 text-zinc-500" aria-hidden="true" />;
@@ -317,12 +255,7 @@ export function stageLabel(stage: TransactionStage): string {
   }
 }
 
-export function transactionStatusLabel(record: Pick<TransactionRecord, "refreshBlocked" | "refreshPending" | "stage">): string {
-  if (record.stage === "confirmed" && record.refreshPending) {
-    return record.refreshBlocked
-      ? "Confirmed — refresh waiting for the matching deployment"
-      : "Confirmed — refreshing workspace data";
-  }
+export function transactionStatusLabel(record: Pick<TransactionRecord, "stage">): string {
   return stageLabel(record.stage);
 }
 
@@ -330,8 +263,7 @@ export function transactionIdentity(chainId: number, account?: Address): string 
   return `${chainId.toString()}:${account?.toLowerCase() ?? "read-only"}`;
 }
 
-function isSettledRecord(record: Pick<TransactionRecord, "refreshBlocked" | "refreshPending" | "stage">): boolean {
-  if (record.stage === "confirmed" && record.refreshPending && !record.refreshBlocked) return false;
+function isSettledRecord(record: Pick<TransactionRecord, "stage">): boolean {
   return record.stage === "confirmed"
     || record.stage === "failed"
     || record.stage === "cancelled"

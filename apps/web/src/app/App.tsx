@@ -297,7 +297,7 @@ export function App(): React.JSX.Element {
       } as never);
       transactionCenter.updateTransaction(transactionId, { stage: "awaiting-signature" });
       const hash = await walletClient().writeContract(simulation.request as never);
-      transactionCenter.updateTransaction(transactionId, { hash, submittedHash: hash, stage: "submitted" });
+      transactionCenter.updateTransaction(transactionId, { hash, stage: "submitted" });
       pushLog(`${label} submitted`, "info", hash, network.chainId);
       await publicClient.waitForTransactionReceipt({ hash });
       transactionCenter.updateTransaction(transactionId, { stage: "confirmed" });
