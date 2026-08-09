@@ -419,24 +419,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         return assetRegistry[index];
     }
 
-    function redeemableAssetPage(uint256 cursor, uint256 size)
-        external
-        view
-        override
-        returns (address[] memory page, uint256 nextCursor)
-    {
-        if (size == 0 || size > MAX_SNAPSHOT_PAGE) revert InvalidSnapshotPage(size, MAX_SNAPSHOT_PAGE);
-        uint256 length = assetRegistry.length;
-        if (cursor >= length) return (new address[](0), length);
-        uint256 end = cursor + size;
-        if (end > length) end = length;
-        page = new address[](end - cursor);
-        for (uint256 i; i < page.length; ++i) {
-            page[i] = assetRegistry[cursor + i];
-        }
-        nextCursor = end;
-    }
-
     function redeemableAssetSnapshotStatus(address asset) external view override returns (SnapshotStatus) {
         return assetSnapshotStatus[asset];
     }

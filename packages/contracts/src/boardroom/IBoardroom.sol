@@ -106,11 +106,6 @@ interface IBoardroom {
 
     function redeemableAssetAt(uint256 index) external view returns (address);
 
-    function redeemableAssetPage(uint256 cursor, uint256 size)
-        external
-        view
-        returns (address[] memory page, uint256 nextCursor);
-
     function isRedeemableAsset(address asset) external view returns (bool);
 
     function redeemableAssetSnapshotStatus(address asset) external view returns (SnapshotStatus);
