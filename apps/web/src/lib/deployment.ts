@@ -53,7 +53,7 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
 ] as const;
 
 const BOOLEAN_DEPLOYMENT_FIELDS = ["deterministicDeployment"] as const;
-const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentBlock", "deploymentTimestamp"] as const;
+const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentBlock"] as const;
 const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null';
 
 export function deploymentText(deployment: PledgeCashDeployment | undefined): string {

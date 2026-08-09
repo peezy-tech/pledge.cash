@@ -40,7 +40,6 @@ export type PledgeCashDeployment = {
   tokenGrantFeeRecipient?: Address;
   creationFee?: bigint;
   deploymentBlock?: bigint;
-  deploymentTimestamp?: bigint;
   deterministicDeployerCodeHash?: string;
   protocolFeeRouterCodeHash?: string;
   boardroomFactoryCodeHash?: string;

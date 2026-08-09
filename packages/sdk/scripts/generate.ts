@@ -65,7 +65,6 @@ const deploymentFields = [
   ["tokenGrantFeeRecipient", "address"],
   ["creationFee", "bigint"],
   ["deploymentBlock", "bigint"],
-  ["deploymentTimestamp", "bigint"],
   ["deterministicDeployerCodeHash", "string"],
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],

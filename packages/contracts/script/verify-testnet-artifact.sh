@@ -46,7 +46,7 @@ fi
 readonly -a live_fields=(
   boardroomArchitectureCodeHash boardroomFactory boardroomFactoryCodeHash
   boardroomImplementation boardroomImplementationCodeHash chainId create2Factory creationFee
-  deployer deploymentBlock deploymentTimestamp deterministicDeployer deterministicDeployerCodeHash
+  deployer deploymentBlock deterministicDeployer deterministicDeployerCodeHash
   deterministicDeployerOwner deterministicDeployment deterministicDeploymentVersion
   deterministicReleaseCodeHash liquidityLockerFactory liquidityLockerFactoryCodeHash manifestHash
   moduleArchitectureCodeHash permit2 permit2CodeHash protocolFeeRouter protocolFeeRouterCodeHash
@@ -66,7 +66,6 @@ jq -e --argjson fields "$required_fields_json" '
   and .deterministicDeployment == true
   and (.creationFee | type == "number" and . >= 0 and floor == .)
   and (.deploymentBlock | type == "number" and . > 0 and floor == .)
-  and (.deploymentTimestamp | type == "number" and . > 0 and floor == .)
   and all(to_entries[] | select(.key | endswith("CodeHash") or . == "manifestHash");
     .value | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
   and all(to_entries[] | select(

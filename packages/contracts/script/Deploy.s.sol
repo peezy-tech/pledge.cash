@@ -285,7 +285,6 @@ contract Deploy is Script {
         json.serialize("tokenGrantFeeRecipient", state.tokenGrantFactory.feeRecipient());
         json.serialize("creationFee", state.tokenGrantFactory.creationFee());
         json.serialize("deploymentBlock", block.number);
-        json.serialize("deploymentTimestamp", block.timestamp);
         json.serialize("deterministicDeployerCodeHash", address(state.deterministicDeployer).codehash);
         json.serialize("protocolFeeRouterCodeHash", address(state.protocolFeeRouter).codehash);
         json.serialize("boardroomFactoryCodeHash", address(state.boardroomFactory).codehash);

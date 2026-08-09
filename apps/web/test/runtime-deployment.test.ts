@@ -49,12 +49,14 @@ describe("lean runtime deployment artifacts", () => {
       protocolFacetRegistry: address("2"),
       assetPolicy: address("3"),
       pledgeV4LiquidityFactory: address("4"),
+      deploymentTimestamp: 1_700_000_000,
     })) as Record<string, unknown>;
 
     expect(deployment.boardroomControllerFactory).toBeUndefined();
     expect(deployment.protocolFacetRegistry).toBeUndefined();
     expect(deployment.assetPolicy).toBeUndefined();
     expect(deployment.pledgeV4LiquidityFactory).toBeUndefined();
+    expect(deployment.deploymentTimestamp).toBeUndefined();
   });
 
   test("accepts status-only placeholders and rejects wrong-chain artifacts", () => {
