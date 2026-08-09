@@ -169,22 +169,6 @@ export function buildBoardroomRegisterRedeemableAssetTransaction(input: { boardr
   };
 }
 
-export function buildBoardroomTreasuryContributionTransaction(input: {
-  boardroom: Address;
-  asset: Address;
-  amount: bigint;
-  deadline: bigint;
-}) {
-  if (input.amount <= 0n) throw new Error("Treasury contribution amount must be positive.");
-  if (input.deadline <= 0n) throw new Error("Treasury contribution requires a deadline.");
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "contributeTreasuryAsset" as const,
-    args: [input.asset, input.amount, input.deadline] as const,
-  };
-}
-
 export function buildBoardroomRedeemTransaction(input: { boardroom: Address; shares: bigint }) {
   if (input.shares <= 0n) throw new Error("Redemption share amount must be positive.");
   return {

@@ -34,8 +34,13 @@ redeemable assets and register the exact escrow it just created. An arbitrary ex
 caller cannot register an escrow.
 
 The asset registry is append-only and contains ERC20s that can participate in final
-redemption. External contributors may add an exact amount of an already registered asset
-before a deadline.
+redemption. Anyone may fund the treasury with an ordinary ERC20 transfer to the Boardroom.
+While Active, the owner may register a readable asset before or after funding it. During
+wind-down, transfer an unregistered asset first, then have the owner register it; the
+Boardroom requires a readable, nonzero balance at that point. Snapshotting always freezes
+the balance the Boardroom actually holds, not the amount a sender requested. Claims still
+require exact sender and recipient balance deltas, so operators must not register tokens
+that charge transfer fees or otherwise violate exact ERC20 accounting.
 
 ## Escrows
 

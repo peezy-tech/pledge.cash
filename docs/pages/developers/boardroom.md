@@ -23,6 +23,15 @@ Owner calls operate only while Active. `execute` and the 16-call bounded batch r
 Boardroom and share token as targets. A target may call `reserveRedeemableAsset` and
 `registerEscrow` only inside its active execution frame.
 
+Fund the treasury with the asset's ordinary ERC20 `transfer` to the Boardroom. The owner
+may call `registerRedeemableAsset` while Active or WindingDown. For a new asset during
+WindingDown, transfer it first because registration requires a readable, nonzero
+Boardroom balance. Integrations should display the received balance rather than assuming
+it equals the requested transfer amount; the snapshot uses the actual balance. There is
+no Boardroom contribution deadline or exact-received preflight. Screen non-standard
+tokens before registration because redemption claims enforce exact sender and recipient
+balance deltas.
+
 In WindingDown, `executeEscrow` can call only a recorded open grant or locker.
 Snapshotting requires the delay and zero open escrows. Process assets in pages no
 larger than `MAX_SNAPSHOT_PAGE`, then open redemptions. A holder burns shares into

@@ -9,6 +9,13 @@ The Boardroom's append-only registry identifies ERC20 assets eligible for final
 redemption. Grant and locker factories add assets while atomically registering each new
 escrow. Snapshotting cannot start while any recorded escrow remains open.
 
+Treasury funding is a direct ERC20 transfer to the Boardroom. The owner can register a
+readable asset while Active. During wind-down, transfer an unregistered asset first and
+then register it; registration requires the Boardroom to hold a nonzero balance. The
+snapshot records the amount actually received, including transfer fees or other token
+behavior, rather than a caller-declared contribution amount. This does not make
+fee-on-transfer tokens redeemable: claims require exact balance changes and reject them.
+
 ## Wind-down order
 
 1. The owner starts wind-down; ordinary execution and new share minting stop.

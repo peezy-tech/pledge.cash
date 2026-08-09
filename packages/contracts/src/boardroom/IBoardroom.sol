@@ -68,8 +68,6 @@ interface IBoardroom {
 
     function registerRedeemableAsset(address asset) external;
 
-    function contributeTreasuryAsset(address asset, uint256 amount, uint256 deadline) external;
-
     function registerEscrow(address escrow) external;
 
     function pruneEscrow(address escrow) external returns (bool pruned);

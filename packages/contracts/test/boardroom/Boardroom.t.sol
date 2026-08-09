@@ -393,7 +393,7 @@ contract BoardroomTest is Test {
         );
     }
 
-    function testTreasuryContributionRejectsFeeOnTransferToken() public {
+    function testSnapshotUsesActualBalanceReceivedByDirectTransfer() public {
         BoardroomFeeOnTransferToken feeToken = new BoardroomFeeOnTransferToken();
         boardroom.execute(
             IBoardroom.Call(
@@ -401,13 +401,47 @@ contract BoardroomTest is Test {
             )
         );
         feeToken.mint(address(this), 100 ether);
-        feeToken.approve(address(boardroom), type(uint256).max);
+        assertTrue(feeToken.transfer(address(boardroom), 100 ether));
+        assertEq(feeToken.balanceOf(address(boardroom)), 99 ether);
+
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+        vm.warp(block.timestamp + boardroom.windDownDelay());
+        boardroom.beginSnapshot();
+        boardroom.snapshotAssets(32);
+
+        (uint256 frozenBalance,) = boardroom.redemptionAssetState(address(feeToken));
+        assertEq(frozenBalance, 99 ether);
+
+        boardroom.openRedemptions();
+        vm.startPrank(alice);
+        boardroom.redeem(1 ether);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.TreasuryContributionAmountMismatch.selector, address(feeToken), 100 ether, 99 ether
+                Boardroom.UnexpectedRedeemableAssetBalanceChange.selector, address(feeToken), 99 ether, 98.01 ether
             )
         );
-        boardroom.contributeTreasuryAsset(address(feeToken), 100 ether, block.timestamp);
+        boardroom.claimRedemptionAsset(address(feeToken), alice, 0);
+        vm.stopPrank();
+
+        assertEq(feeToken.balanceOf(address(boardroom)), 99 ether);
+        (, uint256 paidAmount) = boardroom.redemptionAssetState(address(feeToken));
+        assertEq(paidAmount, 0);
+    }
+
+    function testOwnerRegistersDirectlyTransferredAssetDuringWindDown() public {
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EmptyRedeemableAsset.selector, address(asset)));
+        boardroom.registerRedeemableAsset(address(asset));
+
+        asset.mint(address(this), 10 ether);
+        assertTrue(asset.transfer(address(boardroom), 10 ether));
+        boardroom.registerRedeemableAsset(address(asset));
+
+        assertTrue(boardroom.isRedeemableAsset(address(asset)));
+        assertEq(asset.balanceOf(address(boardroom)), 10 ether);
     }
 
     function testWindDownSnapshotAndRedemptionAreExact() public {
@@ -417,8 +451,7 @@ contract BoardroomTest is Test {
             )
         );
         asset.mint(address(this), 100 ether);
-        asset.approve(address(boardroom), type(uint256).max);
-        boardroom.contributeTreasuryAsset(address(asset), 100 ether, block.timestamp);
+        assertTrue(asset.transfer(address(boardroom), 100 ether));
 
         boardroom.mint(alice, 2 ether);
         boardroom.mint(bob, 1 ether);

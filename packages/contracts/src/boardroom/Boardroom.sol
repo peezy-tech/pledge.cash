@@ -63,8 +63,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     error InvalidRedeemableAsset(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
     error EmptyRedeemableAsset(address asset);
-    error TreasuryContributionExpired(uint256 deadline);
-    error TreasuryContributionAmountMismatch(address asset, uint256 expected, uint256 received);
     error InvalidEscrow(address escrow);
     error EscrowAlreadyClosed(address escrow);
     error EscrowAlreadyRegistered(address escrow);
@@ -89,7 +87,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     event RedemptionExcessRecipientSet(address indexed recipient);
     event BoardroomWindDownStarted(address indexed owner, uint256 startedAt, uint256 delay);
     event RedeemableAssetRegistered(address indexed asset);
-    event TreasuryAssetContributed(address indexed contributor, address indexed asset, uint256 amount);
     event BoardroomEscrowOpened(address indexed escrow, address indexed registrar);
     event BoardroomEscrowClosed(address indexed escrow);
     event NativeWrappedForWindDown(address indexed wrappedNative, uint256 amount);
@@ -254,20 +251,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
             if (!readable || balance == 0) revert EmptyRedeemableAsset(asset);
         }
         _registerAsset(asset);
-    }
-
-    function contributeTreasuryAsset(address asset, uint256 amount, uint256 deadline) external override nonReentrant {
-        if (status != Status.Active && status != Status.WindingDown) {
-            revert InvalidStatus(Status.WindingDown, status);
-        }
-        if (deadline < block.timestamp) revert TreasuryContributionExpired(deadline);
-        if (!isRedeemableAsset[asset]) revert InvalidRedeemableAsset(asset);
-        if (amount == 0) revert InvalidAmount();
-        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(asset, msg.sender, address(this), amount);
-        if (delta.balanceDecreased || delta.received != amount) {
-            revert TreasuryContributionAmountMismatch(asset, amount, delta.received);
-        }
-        emit TreasuryAssetContributed(msg.sender, asset, amount);
     }
 
     function registerEscrow(address escrow) external override {
