@@ -8,12 +8,12 @@ import { Input } from "../../components/ui/input";
 import { dateString } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type { GrantSnapshot } from "../../lib/types";
-import type { Capability } from "../capabilities/project-capabilities";
+import type { WalletActionCapability } from "../capabilities/wallet-action";
 import { GrantVestingChart } from "./grant-vesting-chart";
 
 type GrantInspectorProps = {
   account: Address | undefined;
-  actionCapability: Capability;
+  actionCapability: WalletActionCapability;
   addressLocked?: boolean | undefined;
   grantAddress: string;
   grantSnapshot: GrantSnapshot | undefined;
@@ -304,7 +304,7 @@ function grantActionEligibility(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
   issuerActionsAvailable: boolean,
-  actionCapability: Capability,
+  actionCapability: WalletActionCapability,
 ): GrantActionEligibility {
   const holderAuthorized = canSettleGrant(account, grantSnapshot);
   const holderActionsAvailable = holderAuthorized && actionCapability.status === "enabled";
@@ -319,11 +319,11 @@ function grantActionEligibility(
   };
 }
 
-function capabilityReason(capability: Capability): string | undefined {
+function capabilityReason(capability: WalletActionCapability): string | undefined {
   return capability.status === "enabled" ? undefined : capability.reason ?? "This action is not available right now.";
 }
 
-function CapabilityNotice({ capability, id }: { capability: Capability; id?: string | undefined }): React.JSX.Element | null {
+function CapabilityNotice({ capability, id }: { capability: WalletActionCapability; id?: string | undefined }): React.JSX.Element | null {
   const reason = capabilityReason(capability);
   if (!reason) return null;
   return <p aria-live="polite" className="m-0 border-t border-zinc-800 p-4 text-sm text-amber-200" id={id}>{reason}</p>;

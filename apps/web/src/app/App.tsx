@@ -64,7 +64,10 @@ import {
   type BoardroomAction,
   type BoardroomWorkspaceForm,
 } from "../features/boardrooms/boardroom-workspace";
-import { resolveProjectCapabilities, type Capability } from "../features/capabilities/project-capabilities";
+import {
+  walletActionCapability,
+  type WalletActionCapability,
+} from "../features/capabilities/wallet-action";
 import { ArtifactPanel, DeploymentPanel } from "../features/deployment/deployment-panel";
 import { DiscoveryPanel, WalletAccessPanel } from "../features/discovery/discovery-panel";
 import { DirectGrantPanel } from "../features/grants/direct-grant-panel";
@@ -673,26 +676,10 @@ export function App(): React.JSX.Element {
     }));
   }
 
-  const grantCapability = opportunityCapability(wallet.account, wallet.chainId, network.chainId);
-  const projectCapabilities = resolveProjectCapabilities({
-    account: wallet.account,
-    routeChainId: network.chainId,
-    walletChainId: wallet.chainId,
-    ...(boardroom ? {
-      project: {
-        owner: boardroom.owner,
-        status: boardroomStatus(boardroom.status),
-        windDownBlockers: Number(boardroom.openEscrowCount),
-        windDownMatured: boardroom.windDownStartedAt + boardroom.windDownDelay <= BigInt(Math.floor(Date.now() / 1000)),
-        snapshotComplete: boardroom.snapshotFrozen,
-      },
-    } : {}),
-    opportunities: {
-      "swap.execute": { available: Boolean(deployment?.uniswapUniversalRouter) },
-      "grant.settle": { available: Boolean(grantSnapshot && !grantSnapshot.closed) },
-      "grant.halt": { available: Boolean(grantSnapshot && !grantSnapshot.closed) },
-    },
-  });
+  const grantCapability = walletActionCapability(wallet.account, wallet.chainId, network.chainId);
+  const swapCapability: WalletActionCapability = deployment?.uniswapUniversalRouter
+    ? grantCapability
+    : { status: "blocked", reason: "This action is not available right now." };
   const canWrite = grantCapability.status === "enabled";
   const canManage = Boolean(canWrite && boardroom && wallet.account?.toLowerCase() === boardroom.owner.toLowerCase());
   const issuerActionsAvailable = Boolean(grantSnapshot && wallet.account && (
@@ -704,7 +691,7 @@ export function App(): React.JSX.Element {
   const swapPanel = (
     <SwapPanel
       account={wallet.account}
-      actionCapability={projectCapabilities["swap.execute"]}
+      actionCapability={swapCapability}
       deployment={deployment}
       form={swapForm}
       nativeBalance={nativeBalanceValue}
@@ -1026,16 +1013,6 @@ function requireValue<T>(value: T | undefined, message: string): T {
 function activeBoardroomStatus(boardroom: BoardroomState): 0 | 1 {
   if (boardroom.status !== 0 && boardroom.status !== 1) throw new Error("This escrow can only be managed before snapshotting begins.");
   return boardroom.status;
-}
-
-function boardroomStatus(status: BoardroomState["status"]): "active" | "winding-down" | "snapshotting" | "redemptions-open" {
-  return ["active", "winding-down", "snapshotting", "redemptions-open"][status] as "active" | "winding-down" | "snapshotting" | "redemptions-open";
-}
-
-function opportunityCapability(account: Address | undefined, walletChainId: number | undefined, routeChainId: number): Capability {
-  if (!account) return { status: "connect", reason: "Connect a wallet to continue." };
-  if (walletChainId !== routeChainId) return { status: "switch", reason: `Switch the wallet to chain ${routeChainId.toString()}.` };
-  return { status: "enabled" };
 }
 
 function boardroomActionLabel(action: Exclude<BoardroomAction, "refresh">): string {

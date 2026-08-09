@@ -21,12 +21,12 @@ import {
   type SwapTokenMetadata,
   type SwapTokenOption,
 } from "../../lib/swap";
-import type { Capability } from "../capabilities/project-capabilities";
+import type { WalletActionCapability } from "../capabilities/wallet-action";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
 
 type SwapPanelProps = {
   account: Address | undefined;
-  actionCapability: Capability;
+  actionCapability: WalletActionCapability;
   deployment: PledgeCashDeployment | undefined;
   form: SwapForm;
   nativeBalance?: bigint | undefined;
@@ -356,7 +356,7 @@ export function deadlineIsFuture(deadline: string, currentUnixTime: number): boo
 }
 
 export function swapActionState(
-  actionCapability: Capability,
+  actionCapability: WalletActionCapability,
   quote: SwapQuoteState | undefined,
   inputIsNative: boolean,
   deadlineValid: boolean,
@@ -397,7 +397,7 @@ export function swapActionState(
   return { approve, quoteReady, swap };
 }
 
-function swapQuoteBlockingReason(actionCapability: Capability, quote: SwapQuoteState | undefined, ready: boolean, state: "current" | "missing" | "stale"): string | undefined {
+function swapQuoteBlockingReason(actionCapability: WalletActionCapability, quote: SwapQuoteState | undefined, ready: boolean, state: "current" | "missing" | "stale"): string | undefined {
   if (actionCapability.status !== "enabled") return actionCapability.reason ?? "Wallet actions are unavailable.";
   if (state === "stale") return "The quote is stale. Refresh it before acting.";
   if (state === "missing" || !quote) return "No current quote is loaded.";
