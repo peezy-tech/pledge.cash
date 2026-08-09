@@ -29,7 +29,8 @@ enough cost. Wait for the approval receipt before settling.
 
 Compare PositionManager owner, token ID, currency order, fee, tick spacing, hook address,
 subscriber flag, tick range, and liquidity. A direct mint must still be registered by the
-Boardroom. A safe transfer must be prepared for that exact token ID.
+Boardroom. The launch must mint the position NFT directly to the locker; transferring an
+existing NFT is not supported.
 
 ## A swap fails
 

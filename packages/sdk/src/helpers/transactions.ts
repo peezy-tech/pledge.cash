@@ -5,7 +5,6 @@ import {
   erc20Abi,
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
-  positionManagerAbi,
   protocolFeeRouterAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -420,23 +419,12 @@ export function buildBoardroomCreateLiquidityLockerTransaction(input: {
 
 function buildLiquidityLockerCall(input: {
   locker: Address;
-  functionName: "preparePositionTransfer" | "registerPosition";
+  functionName: "registerPosition";
   tokenId: bigint;
 }): BoardroomCall {
   return buildBoardroomCall({
     target: input.locker,
     data: encodeFunctionData({ abi: liquidityLockerAbi, functionName: input.functionName, args: [input.tokenId] }),
-  });
-}
-
-export function buildBoardroomPreparePositionTransferTransaction(input: {
-  boardroom: Address;
-  locker: Address;
-  tokenId: bigint;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    call: buildLiquidityLockerCall({ ...input, functionName: "preparePositionTransfer" }),
   });
 }
 
@@ -449,53 +437,6 @@ export function buildBoardroomRegisterLiquidityPositionTransaction(input: {
     boardroom: input.boardroom,
     call: buildLiquidityLockerCall({ ...input, functionName: "registerPosition" }),
   });
-}
-
-export function buildBoardroomCancelPositionTransferTransaction(input: {
-  boardroom: Address;
-  locker: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      target: input.locker,
-      data: encodeFunctionData({ abi: liquidityLockerAbi, functionName: "cancelPositionTransfer" }),
-    }),
-  });
-}
-
-export function buildBoardroomRecoverUntrackedPositionTransaction(input: {
-  boardroom: Address;
-  locker: Address;
-  tokenId: bigint;
-  recipient: Address;
-  status: 0 | 1;
-}) {
-  const data = encodeFunctionData({
-    abi: liquidityLockerAbi,
-    functionName: "recoverUntrackedPosition",
-    args: [input.tokenId, input.recipient],
-  });
-  return input.status === 0
-    ? buildBoardroomExecuteTransaction({
-        boardroom: input.boardroom,
-        call: buildBoardroomCall({ target: input.locker, data }),
-      })
-    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.locker, data });
-}
-
-export function buildPositionManagerSafeTransferToLockerTransaction(input: {
-  positionManager: Address;
-  from: Address;
-  locker: Address;
-  tokenId: bigint;
-}) {
-  return {
-    address: input.positionManager,
-    abi: positionManagerAbi,
-    functionName: "safeTransferFrom" as const,
-    args: [input.from, input.locker, input.tokenId] as const,
-  };
 }
 
 export function buildLiquidityLockerCollectFeesTransaction(input: { locker: Address }) {

@@ -10,8 +10,6 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 interface IPositionManager {
     function ownerOf(uint256 tokenId) external view returns (address owner);
 
-    function safeTransferFrom(address from, address to, uint256 tokenId) external;
-
     function getPoolAndPositionInfo(uint256 tokenId)
         external
         view

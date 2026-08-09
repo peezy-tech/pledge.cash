@@ -219,9 +219,7 @@ describe("lean readers", () => {
       poolFee: 3_000,
       tickSpacing: 60,
       tokenId: 0n,
-      pendingTokenId: 0n,
       positionRegistered: false,
-      transferPrepared: false,
       isClosed: false,
     };
     const state = await readLiquidityLockerState(readClient((_, name) => values[name]), locker);

@@ -147,9 +147,7 @@ export type LiquidityLockerState = {
   poolFee: number;
   tickSpacing: number;
   tokenId: bigint;
-  pendingTokenId: bigint;
   positionRegistered: boolean;
-  transferPrepared: boolean;
   closed: boolean;
   positionLiquidity?: bigint;
   positionInfo?: bigint;

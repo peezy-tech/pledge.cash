@@ -8,8 +8,8 @@ as an escrow. The locker replaces the former custom hook, vault, and
 third-party liquidity-claim system.
 
 The locker does not create an auction, initialize a pool, or mint liquidity. Projects
-may use Uniswap's Liquidity Launchpad or another v4-native path, then deliver the
-finished position NFT to the locker.
+may use Uniswap's Liquidity Launchpad or another v4-native path that mints the finished
+position NFT directly to the locker.
 
 ## Canonical identity
 
@@ -27,18 +27,11 @@ The factory permits one open locker escrow per Boardroom. A replacement can be c
 only after the previous escrow is closed and pruned. Creation events provide the
 append-only discovery history; the mapping identifies the current canonical locker.
 
-## Position receipt
+## Position registration
 
-There are two supported receipt paths:
-
-1. A launch mechanism mints the NFT directly to the locker. The Boardroom then calls
-   `registerPosition(tokenId)` through `execute`.
-2. The Boardroom calls `preparePositionTransfer(tokenId)` through `execute`, then the
-   current holder uses `safeTransferFrom` to send that exact NFT to the locker.
-
-An unprepared safe transfer reverts. An unsafe `transferFrom` does not register the
-position; while the Boardroom is Active it may recover that untracked NFT to a safe
-recipient.
+A launch mechanism must mint the NFT directly to the locker. The Boardroom then calls
+`registerPosition(tokenId)` through `execute`. The locker deliberately does not accept
+existing NFT transfers or provide recovery for arbitrary NFTs sent with `transferFrom`.
 
 ## Fees
 
@@ -65,7 +58,7 @@ call already updated the Boardroom state.
 - The locker holds one ERC721 and transient ERC20 balances only.
 - It never approves an arbitrary operator.
 - It accepts no hooked or subscribed position.
-- The Boardroom is the only caller for registration, cancellation, recovery, and exit.
+- The Boardroom is the only caller for registration, cancellation, and exit.
 - Fee collection is permissionless but has a fixed destination and fixed split.
 - Deadlines and minimum outputs bound final exit.
 - The integration assumes canonical v4 periphery behavior and ordinary ERC20 balance

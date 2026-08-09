@@ -4,7 +4,6 @@ import {
   erc20Abi,
   liquidityLockerAbi,
   liquidityLockerFactoryAbi,
-  positionManagerAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
   type BoardroomCall,
@@ -78,7 +77,6 @@ const ASSET_AND_ESCROW_ABIS = [
   boardroomTokenAbi,
   erc20Abi,
   liquidityLockerAbi,
-  positionManagerAbi,
   tokenGrantAbi,
 ] as const;
 
@@ -99,7 +97,6 @@ const FUNCTION_LABELS: Record<string, string> = {
   exit: "Exit locked liquidity to the Boardroom",
   mint: "Mint project shares",
   openRedemptions: "Open holder redemptions",
-  preparePositionTransfer: "Authorize a PositionManager NFT transfer",
   registerPosition: "Register a direct CCA position mint",
   registerRedeemableAsset: "Register a redemption asset",
   snapshotAssets: "Process a redemption snapshot page",
@@ -420,7 +417,6 @@ const IMPORTANT_FUNCTIONS = new Set([
   "executeBatch",
   "executeEscrow",
   "mint",
-  "preparePositionTransfer",
   "registerPosition",
   "snapshotAssets",
   "redeem",

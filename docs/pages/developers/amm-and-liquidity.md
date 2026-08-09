@@ -14,9 +14,8 @@ Create a locker by targeting `LiquidityLockerFactory.createLocker` through
 the quote asset to the append-only redemption registry. Verify
 `lockerOfBoardroom(locker.boardroom()) == locker` and all immutable locker fields.
 
-For a direct CCA mint, create the locker first, set `positionRecipient` to its address,
-and call `registerPosition` through the Boardroom after mint. For an existing NFT, first
-call `preparePositionTransfer`, then use `safeTransferFrom`. Registration rejects the
+Set `positionRecipient` to the predicted locker and call `registerPosition` through the
+Boardroom after mint. Existing NFT transfers are not supported. Registration rejects the
 wrong PositionManager, owner, currencies, fee, tick spacing, hook, subscriber flag, tick
 order, or zero liquidity.
 

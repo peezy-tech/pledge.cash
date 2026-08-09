@@ -7,19 +7,12 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {IPositionManager} from "../../src/uniswap/IPositionManager.sol";
 import {PositionManagerActions} from "../../src/uniswap/PositionManagerActions.sol";
 
-interface IERC721ReceiverMock {
-    function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)
-        external
-        returns (bytes4);
-}
-
 /// @notice Focused PositionManager double that validates the two action plans used by LiquidityLocker.
 contract PositionManagerMock is IPositionManager {
     using SafeTransferLib for address;
 
     struct Position {
         address owner;
-        address approved;
         PoolKey key;
         uint256 info;
         uint128 liquidity;
@@ -37,8 +30,7 @@ contract PositionManagerMock is IPositionManager {
     bool public reentrySucceeded;
 
     error InvalidOwner(uint256 tokenId);
-    error NotApproved(address caller, uint256 tokenId);
-    error InvalidReceiver(address receiver);
+    error OnlyPositionOwner(address caller, uint256 tokenId);
     error InvalidActionPlan();
     error InvalidActionParameters();
     error DeadlinePassed(uint256 deadline);
@@ -66,35 +58,9 @@ contract PositionManagerMock is IPositionManager {
         position.principal1 = principal1;
     }
 
-    function approve(address approved, uint256 tokenId_) external {
-        Position storage position = positions[tokenId_];
-        if (position.owner != msg.sender) revert NotApproved(msg.sender, tokenId_);
-        position.approved = approved;
-    }
-
     function ownerOf(uint256 tokenId_) external view returns (address owner) {
         owner = positions[tokenId_].owner;
         if (owner == address(0)) revert InvalidOwner(tokenId_);
-    }
-
-    function safeTransferFrom(address from, address to, uint256 tokenId_) external {
-        _transferFrom(from, to, tokenId_, true);
-    }
-
-    function transferFrom(address from, address to, uint256 tokenId_) external {
-        _transferFrom(from, to, tokenId_, false);
-    }
-
-    function _transferFrom(address from, address to, uint256 tokenId_, bool safe) internal {
-        Position storage position = positions[tokenId_];
-        if (position.owner != from) revert InvalidOwner(tokenId_);
-        if (msg.sender != from && msg.sender != position.approved) revert NotApproved(msg.sender, tokenId_);
-        position.owner = to;
-        position.approved = address(0);
-        if (safe && to.code.length != 0) {
-            bytes4 received = IERC721ReceiverMock(to).onERC721Received(msg.sender, from, tokenId_, "");
-            if (received != IERC721ReceiverMock.onERC721Received.selector) revert InvalidReceiver(to);
-        }
     }
 
     function getPoolAndPositionInfo(uint256 tokenId_) external view returns (PoolKey memory key, uint256 positionInfo) {
@@ -170,7 +136,7 @@ contract PositionManagerMock is IPositionManager {
             revert InvalidActionParameters();
         }
         Position storage position_ = positions[tokenId_];
-        _requireApproved(position_, tokenId_);
+        _requirePositionOwner(position_, tokenId_);
         address recipient = _validateTake(position_, takeParams);
         uint256 amount0 = position_.fees0;
         uint256 amount1 = position_.fees1;
@@ -184,7 +150,7 @@ contract PositionManagerMock is IPositionManager {
             abi.decode(burnParams, (uint256, uint128, uint128, bytes));
         if (hookData.length != 0) revert InvalidActionParameters();
         Position storage position_ = positions[tokenId_];
-        _requireApproved(position_, tokenId_);
+        _requirePositionOwner(position_, tokenId_);
         address recipient = _validateTake(position_, takeParams);
         uint256 amount0 = uint256(position_.principal0) + position_.fees0;
         uint256 amount1 = uint256(position_.principal1) + position_.fees1;
@@ -193,7 +159,6 @@ contract PositionManagerMock is IPositionManager {
         }
         PoolKey memory key = position_.key;
         position_.owner = address(0);
-        position_.approved = address(0);
         position_.liquidity = 0;
         position_.principal0 = 0;
         position_.principal1 = 0;
@@ -202,11 +167,9 @@ contract PositionManagerMock is IPositionManager {
         _pay(key, recipient, amount0, amount1);
     }
 
-    function _requireApproved(Position storage position_, uint256 tokenId_) internal view {
+    function _requirePositionOwner(Position storage position_, uint256 tokenId_) internal view {
         if (position_.owner == address(0)) revert InvalidOwner(tokenId_);
-        if (msg.sender != position_.owner && msg.sender != position_.approved) {
-            revert NotApproved(msg.sender, tokenId_);
-        }
+        if (msg.sender != position_.owner) revert OnlyPositionOwner(msg.sender, tokenId_);
     }
 
     function _validateTake(Position storage position_, bytes memory takeParams)

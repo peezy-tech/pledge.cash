@@ -12,8 +12,7 @@ import {IPositionManager} from "./IPositionManager.sol";
 import {PositionManagerActions} from "./PositionManagerActions.sol";
 
 /// @notice Immutable custodian for one hookless Uniswap v4 PositionManager NFT.
-/// @dev The Boardroom explicitly authorizes the token ID before a safe transfer,
-///      or registers a direct CCA mint after PositionManager has assigned ownership.
+/// @dev The Boardroom registers a direct mint after PositionManager has assigned ownership.
 contract LiquidityLocker is ReentrancyGuard {
     uint24 public constant MAX_STATIC_POOL_FEE = 1_000_000;
     int24 public constant MAX_TICK_SPACING = type(int16).max;
@@ -29,20 +28,15 @@ contract LiquidityLocker is ReentrancyGuard {
     int24 public immutable tickSpacing;
 
     uint256 public tokenId;
-    uint256 public pendingTokenId;
     bool public positionRegistered;
-    bool public transferPrepared;
     bool public isClosed;
 
     error InvalidAddress(address account);
     error OnlyBoardroom(address caller);
-    error OnlyPositionManager(address caller);
     error PositionAlreadyRegistered(uint256 tokenId);
     error PositionNotRegistered();
     error LockerAlreadyClosed();
-    error PositionTransferNotPrepared(uint256 tokenId);
     error PositionNotOwned(uint256 tokenId, address owner);
-    error TrackedPosition(uint256 tokenId);
     error InvalidPositionPair(address actualCurrency0, address actualCurrency1);
     error HookedPool(address hook);
     error SubscribedPosition(uint256 tokenId);
@@ -54,10 +48,7 @@ contract LiquidityLocker is ReentrancyGuard {
     error DeadlineExpired(uint256 deadline);
     error UnexpectedTokenTransfer(address token, uint256 expected, uint256 senderSpent, uint256 recipientReceived);
 
-    event PositionTransferPrepared(uint256 indexed tokenId);
-    event PositionTransferPreparationCancelled(uint256 indexed tokenId);
     event PositionRegistered(uint256 indexed tokenId, int24 tickLower, int24 tickUpper);
-    event UntrackedPositionRecovered(uint256 indexed tokenId, address indexed recipient);
     event FeesCollected(
         uint256 indexed tokenId,
         uint256 boardroomAmount0,
@@ -110,64 +101,10 @@ contract LiquidityLocker is ReentrancyGuard {
         _;
     }
 
-    /// @notice Authorizes one exact token ID for an incoming safe transfer.
-    function preparePositionTransfer(uint256 expectedTokenId) external onlyBoardroom {
-        _requireRegistrationAllowed();
-        if (isClosed) revert LockerAlreadyClosed();
-        if (positionRegistered) revert PositionAlreadyRegistered(tokenId);
-        transferPrepared = true;
-        pendingTokenId = expectedTokenId;
-        emit PositionTransferPrepared(expectedTokenId);
-    }
-
-    /// @notice Cancels a pending transfer authorization before the NFT arrives.
-    function cancelPositionTransfer() external onlyBoardroom {
-        _requireRegistrationAllowed();
-        if (isClosed) revert LockerAlreadyClosed();
-        if (positionRegistered) revert PositionAlreadyRegistered(tokenId);
-        uint256 expectedTokenId = pendingTokenId;
-        transferPrepared = false;
-        pendingTokenId = 0;
-        emit PositionTransferPreparationCancelled(expectedTokenId);
-    }
-
     /// @notice Registers a position minted directly to this locker by a CCA.
     function registerPosition(uint256 positionTokenId) external onlyBoardroom nonReentrant {
         _requireRegistrationAllowed();
         _registerPosition(positionTokenId);
-    }
-
-    /// @notice Recovers an NFT sent with unsafe transferFrom without changing the tracked slot.
-    function recoverUntrackedPosition(uint256 untrackedTokenId, address recipient) external onlyBoardroom nonReentrant {
-        _requireMutationAllowed();
-        if (recipient == address(0) || recipient == address(this) || recipient == boardroom) {
-            revert InvalidAddress(recipient);
-        }
-        if (positionRegistered && untrackedTokenId == tokenId) revert TrackedPosition(untrackedTokenId);
-        address actualOwner;
-        try positionManager.ownerOf(untrackedTokenId) returns (address owner_) {
-            actualOwner = owner_;
-        } catch {
-            revert PositionNotOwned(untrackedTokenId, address(0));
-        }
-        if (actualOwner != address(this)) revert PositionNotOwned(untrackedTokenId, actualOwner);
-        positionManager.safeTransferFrom(address(this), recipient, untrackedTokenId);
-        emit UntrackedPositionRecovered(untrackedTokenId, recipient);
-    }
-
-    /// @notice Accepts only the exact Boardroom-prepared PositionManager NFT.
-    function onERC721Received(address, address, uint256 receivedTokenId, bytes calldata)
-        external
-        nonReentrant
-        returns (bytes4)
-    {
-        if (msg.sender != address(positionManager)) revert OnlyPositionManager(msg.sender);
-        if (!transferPrepared || receivedTokenId != pendingTokenId) {
-            revert PositionTransferNotPrepared(receivedTokenId);
-        }
-        _requireRegistrationAllowed();
-        _registerPosition(receivedTokenId);
-        return this.onERC721Received.selector;
     }
 
     /// @notice Collects accrued fees without removing principal and forwards them.
@@ -190,8 +127,6 @@ contract LiquidityLocker is ReentrancyGuard {
         if (!IBoardroom(boardroom).liquidityMutationAllowed() && !IBoardroom(boardroom).lockedLiquidityExitAllowed()) {
             revert BoardroomExitForbidden();
         }
-        transferPrepared = false;
-        pendingTokenId = 0;
         isClosed = true;
         emit LockerCancelled();
     }
@@ -262,8 +197,6 @@ contract LiquidityLocker is ReentrancyGuard {
 
         tokenId = positionTokenId;
         positionRegistered = true;
-        transferPrepared = false;
-        pendingTokenId = 0;
         emit PositionRegistered(positionTokenId, tickLower, tickUpper);
     }
 

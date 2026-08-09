@@ -175,30 +175,6 @@ contract LiquidityLockerTest is Test {
         assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
     }
 
-    function testPreparedSafeTransferRegistersExactPosition() public {
-        _mintPositionTo(address(this), TOKEN_ID, _poolKey(locker, address(0)), 100, 200, 1_000);
-        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
-        positionManager.safeTransferFrom(address(this), address(locker), TOKEN_ID);
-
-        assertTrue(locker.positionRegistered());
-        assertFalse(locker.transferPrepared());
-        assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
-    }
-
-    function testPreparedSafeTransferCannotBeFrontRunWithAnotherSamePoolNft() public {
-        _mintPositionTo(address(this), TOKEN_ID, _poolKey(locker, address(0)), 100, 200, 1_000);
-        _mintPositionTo(alice, TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
-        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
-
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.PositionTransferNotPrepared.selector, TOKEN_ID + 1));
-        positionManager.safeTransferFrom(alice, address(locker), TOKEN_ID + 1);
-        assertEq(positionManager.ownerOf(TOKEN_ID + 1), alice);
-
-        positionManager.safeTransferFrom(address(this), address(locker), TOKEN_ID);
-        assertEq(locker.tokenId(), TOKEN_ID);
-    }
-
     function testRejectsHookedWrongPairEmptyAndMalformedPositions() public {
         PoolKey memory hooked = _poolKey(locker, address(0xBEEF));
         _mintPositionTo(address(locker), 1, hooked, 100, 200, 1_000);
@@ -243,31 +219,11 @@ contract LiquidityLockerTest is Test {
         _executeLocker(locker, abi.encodeCall(locker.registerPosition, (7)));
     }
 
-    function testOnePositionOnlyAndOnlyCanonicalManagerCallback() public {
+    function testOnePositionOnly() public {
         _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
         _mintPositionTo(address(locker), TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
         vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.PositionAlreadyRegistered.selector, TOKEN_ID));
         _executeLocker(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID + 1)));
-
-        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.OnlyPositionManager.selector, address(this)));
-        locker.onERC721Received(address(this), address(this), TOKEN_ID + 2, "");
-    }
-
-    function testUnsafeTransferCannotFillTrackedSlotAndCanBeRecovered() public {
-        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
-        _mintPositionTo(alice, TOKEN_ID + 1, _poolKey(locker, address(0)), 100, 200, 1_000);
-
-        vm.prank(alice);
-        positionManager.transferFrom(alice, address(locker), TOKEN_ID + 1);
-        assertEq(locker.tokenId(), TOKEN_ID);
-        assertTrue(locker.positionRegistered());
-        assertEq(positionManager.ownerOf(TOKEN_ID + 1), address(locker));
-
-        vm.expectRevert(abi.encodeWithSelector(LiquidityLocker.TrackedPosition.selector, TOKEN_ID));
-        _executeLocker(locker, abi.encodeCall(locker.recoverUntrackedPosition, (TOKEN_ID, alice)));
-        _executeLocker(locker, abi.encodeCall(locker.recoverUntrackedPosition, (TOKEN_ID + 1, alice)));
-        assertEq(positionManager.ownerOf(TOKEN_ID + 1), alice);
-        assertEq(positionManager.ownerOf(TOKEN_ID), address(locker));
     }
 
     function testCollectFeesUsesCanonicalActionsExactDeltasAndFloorRounding() public {
@@ -410,7 +366,7 @@ contract LiquidityLockerTest is Test {
         _executeLocker(locker, abi.encodeCall(locker.cancel, ()));
         assertTrue(locker.isClosed());
         vm.expectRevert(LiquidityLocker.LockerAlreadyClosed.selector);
-        _executeLocker(locker, abi.encodeCall(locker.preparePositionTransfer, (TOKEN_ID)));
+        _executeLocker(locker, abi.encodeCall(locker.registerPosition, (TOKEN_ID)));
         boardroom.pruneEscrow(address(locker));
 
         LiquidityLocker replacement = _createLocker(boardroom, address(quote), keccak256("replacement"));

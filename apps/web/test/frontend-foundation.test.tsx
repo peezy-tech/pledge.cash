@@ -229,9 +229,7 @@ function lockerState(): LiquidityLockerState {
     poolFee: 3000,
     tickSpacing: 60,
     tokenId: 7n,
-    pendingTokenId: 0n,
     positionRegistered: true,
-    transferPrepared: false,
     closed: false,
     positionLiquidity: 500n,
   };

@@ -293,9 +293,7 @@ export async function readLiquidityLockerState(
     poolFee,
     tickSpacing,
     tokenId,
-    pendingTokenId,
     positionRegistered,
-    transferPrepared,
     closed,
   ] = await Promise.all([
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "boardroom" }),
@@ -308,9 +306,7 @@ export async function readLiquidityLockerState(
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "poolFee" }),
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "tickSpacing" }),
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "tokenId" }),
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "pendingTokenId" }),
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "positionRegistered" }),
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "transferPrepared" }),
     client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "isClosed" }),
   ]);
   const state: LiquidityLockerState = {
@@ -325,9 +321,7 @@ export async function readLiquidityLockerState(
     poolFee: Number(poolFee),
     tickSpacing: Number(tickSpacing),
     tokenId: tokenId as bigint,
-    pendingTokenId: pendingTokenId as bigint,
     positionRegistered: positionRegistered as boolean,
-    transferPrepared: transferPrepared as boolean,
     closed: closed as boolean,
   };
   if (state.positionRegistered) {

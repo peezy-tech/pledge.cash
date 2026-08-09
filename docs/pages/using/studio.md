@@ -14,8 +14,8 @@ The routed project sections are:
 - **Token:** mint project shares while the Boardroom is Active.
 - **Grants:** create standalone grants or Boardroom-funded external-asset grants and
   inspect open escrows.
-- **Liquidity:** create the one-position locker, register a received PositionManager
-  NFT, collect fees, or prepare the wind-down exit.
+- **Liquidity:** create the one-position locker, register a PositionManager NFT minted
+  directly to it, collect fees, or prepare the wind-down exit.
 - **Close:** start wind-down, close and prune escrows, process the bounded asset
   snapshot, open redemptions, and redeem shares.
 

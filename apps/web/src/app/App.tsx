@@ -9,7 +9,6 @@ import {
   buildBoardroomLiquidityLockerExitTransaction,
   buildBoardroomMintTransaction,
   buildBoardroomOpenRedemptionsTransaction,
-  buildBoardroomPreparePositionTransferTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterLiquidityPositionTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
@@ -22,7 +21,6 @@ import {
   buildGrantSettlementTransaction,
   buildLiquidityLockerCollectFeesTransaction,
   buildPermit2ApprovalTransaction,
-  buildPositionManagerSafeTransferToLockerTransaction,
   discoverBoardrooms,
   discoverGrantHistory,
   discoverLiquidityLockers,
@@ -376,17 +374,6 @@ export function App(): React.JSX.Element {
             tickSpacing: signedNumberInput(workspaceForm.locker.tickSpacing, "Tick spacing"),
             salt: requireBytes32(workspaceForm.locker.salt, "Locker salt"),
           },
-        });
-        break;
-      case "prepare-position":
-        request = buildBoardroomPreparePositionTransferTransaction({ boardroom: boardroomAddress, locker: requireValue(lockerAddress, "Create the locker first."), tokenId: uintInput(workspaceForm.position.tokenId, "Position token ID") });
-        break;
-      case "transfer-position":
-        request = buildPositionManagerSafeTransferToLockerTransaction({
-          positionManager: requireDeploymentAddress(deployment?.uniswapV4PositionManager, "PositionManager"),
-          from: activeAccount(),
-          locker: requireValue(lockerAddress, "Create the locker first."),
-          tokenId: uintInput(workspaceForm.position.tokenId, "Position token ID"),
         });
         break;
       case "register-position":

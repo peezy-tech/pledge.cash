@@ -22,8 +22,6 @@ export type BoardroomAction =
   | "mint"
   | "create-grant"
   | "create-locker"
-  | "prepare-position"
-  | "transfer-position"
   | "register-position"
   | "collect-fees"
   | "cancel-locker"
@@ -351,7 +349,7 @@ function LiquidityPanel({
     <div className="grid gap-4">
       <LockerFacts locker={locker} />
       {!locker ? (
-        <Panel title="Create liquidity locker" description="Create the one canonical locker for this Boardroom before transferring a plain PositionManager NFT into it.">
+        <Panel title="Create liquidity locker" description="Create the one canonical locker for this Boardroom before minting a PositionManager NFT directly to it.">
           <div className="grid gap-px border-t border-[var(--pc-border)] bg-[var(--pc-border)] md:grid-cols-2">
             <TextField label="Quote asset" value={form.locker.quoteAsset} onChange={(value) => setLocker("quoteAsset", value)} />
             <TextField label="Pool fee" value={form.locker.poolFee} onChange={(value) => setLocker("poolFee", value)} />
@@ -364,14 +362,12 @@ function LiquidityPanel({
           </ActionRow>
         </Panel>
       ) : (
-        <Panel title="Position custody" description="Prepare the expected NFT, transfer it with PositionManager.safeTransferFrom, then register its PoolKey and liquidity.">
+        <Panel title="Position custody" description="After a launch mints directly to this locker, register the position so its PoolKey and liquidity can be verified.">
           <div className="border-t border-[var(--pc-border)]">
             <TextField label="Position token ID" value={form.position.tokenId} onChange={setPosition} />
           </div>
           <ActionRow>
-            <StudioAction action="prepare-position" disabled={!canManage || boardroom.status !== 0 || locker.positionRegistered} label="1. Prepare" pendingAction={pendingAction} onAction={onAction} />
-            <StudioAction action="transfer-position" disabled={!canWrite || boardroom.status !== 0 || locker.positionRegistered} label="2. Transfer NFT" pendingAction={pendingAction} onAction={onAction} />
-            <StudioAction action="register-position" disabled={!canManage || boardroom.status !== 0 || locker.positionRegistered} label="Register direct transfer" pendingAction={pendingAction} onAction={onAction} />
+            <StudioAction action="register-position" disabled={!canManage || boardroom.status !== 0 || locker.positionRegistered} label="Register direct mint" pendingAction={pendingAction} onAction={onAction} />
             <StudioAction action="collect-fees" disabled={!canWrite || !boardroom.liquidityMutationAllowed || !locker.positionRegistered || locker.closed} label="Collect fees" pendingAction={pendingAction} onAction={onAction} />
             <StudioAction action="cancel-locker" disabled={!canManage || locker.closed} label="Cancel empty locker" pendingAction={pendingAction} onAction={onAction} />
           </ActionRow>
