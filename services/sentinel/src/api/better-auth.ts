@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { genericOAuth, organization, siwe } from "better-auth/plugins";
+import { genericOAuth, siwe } from "better-auth/plugins";
 import { and, eq, sql } from "drizzle-orm";
 import {
   createRemoteJWKSet,
@@ -187,16 +187,6 @@ export function createBetterAuthAdapter(
             message,
             signature
           })
-      }),
-      organization({
-        allowUserToCreateOrganization: false,
-        requireEmailVerificationOnInvitation: true,
-        schema: {
-          invitation: { modelName: "organizationInvitations" },
-          member: { modelName: "organizationMembers" },
-          organization: { modelName: "organizations" },
-          session: { fields: { activeOrganizationId: "activeOrganizationId" } }
-        }
       })
     ]
   });

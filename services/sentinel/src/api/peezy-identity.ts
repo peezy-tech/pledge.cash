@@ -17,11 +17,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { authorizationCodeRequest, getOAuth2Tokens } from "better-auth/oauth2";
-import {
-  genericOAuth,
-  organization,
-  type GenericOAuthConfig
-} from "better-auth/plugins";
+import { genericOAuth, type GenericOAuthConfig } from "better-auth/plugins";
 import { and, eq, gt, inArray, lt, lte, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 import { parseSiweMessage } from "viem/siwe";
@@ -284,17 +280,7 @@ export function createPeezyIdentityAuthAdapter(
         identityHydrator,
         config.webOrigin,
         requestContext
-      ),
-      organization({
-        allowUserToCreateOrganization: false,
-        requireEmailVerificationOnInvitation: true,
-        schema: {
-          invitation: { modelName: "organizationInvitations" },
-          member: { modelName: "organizationMembers" },
-          organization: { modelName: "organizations" },
-          session: { fields: { activeOrganizationId: "activeOrganizationId" } }
-        }
-      })
+      )
     ]
   });
 

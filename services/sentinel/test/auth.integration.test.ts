@@ -114,17 +114,6 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       walletCount: 2
     });
 
-    const organization = await app.request(`${apiOrigin}/auth/organization/create`, {
-      body: JSON.stringify({ name: "Not yet", slug: "not-yet" }),
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: first.cookie,
-        Origin: webOrigin
-      },
-      method: "POST"
-    });
-    expect(organization.status).toBe(403);
-
     const logout = await app.request(`${apiOrigin}/auth/sign-out`, {
       headers: { Cookie: first.cookie, Origin: webOrigin },
       method: "POST"

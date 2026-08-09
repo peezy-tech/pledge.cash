@@ -21,15 +21,6 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  logo: text("logo"),
-  metadata: text("metadata"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-});
-
 export const authSessions = pgTable(
   "auth_sessions",
   {
@@ -42,10 +33,7 @@ export const authSessions = pgTable(
     userAgent: text("user_agent"),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    activeOrganizationId: uuid("active_organization_id").references(() => organizations.id, {
-      onDelete: "set null"
-    })
+      .references(() => users.id, { onDelete: "cascade" })
   },
   (table) => ({
     userIdx: index("auth_sessions_user_idx").on(table.userId)
@@ -121,51 +109,6 @@ export const legacySiweNonces = pgTable(
   },
   (table) => ({
     expiresAtIdx: index("legacy_siwe_nonces_expires_at_idx").on(table.expiresAt)
-  })
-);
-
-export const organizationMembers = pgTable(
-  "organization_members",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role").notNull().default("member"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => ({
-    organizationIdx: index("organization_members_organization_idx").on(table.organizationId),
-    organizationUserUnique: unique("organization_members_organization_user_unique").on(
-      table.organizationId,
-      table.userId
-    ),
-    userIdx: index("organization_members_user_idx").on(table.userId)
-  })
-);
-
-export const organizationInvitations = pgTable(
-  "organization_invitations",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    organizationId: uuid("organization_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    email: text("email").notNull(),
-    role: text("role"),
-    status: text("status").notNull().default("pending"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    inviterId: uuid("inviter_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" })
-  },
-  (table) => ({
-    emailIdx: index("organization_invitations_email_idx").on(table.email),
-    organizationIdx: index("organization_invitations_organization_idx").on(table.organizationId)
   })
 );
 
