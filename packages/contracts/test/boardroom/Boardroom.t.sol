@@ -359,7 +359,7 @@ contract BoardroomTest is Test {
         );
         escrow.markClosed();
         vm.prank(alice);
-        assertTrue(boardroom.pruneEscrow(address(escrow)));
+        boardroom.pruneEscrow(address(escrow));
         assertEq(boardroom.openEscrowCount(), 0);
         assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Closed));
     }

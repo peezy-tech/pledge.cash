@@ -70,7 +70,7 @@ interface IBoardroom {
 
     function registerEscrow(address escrow) external;
 
-    function pruneEscrow(address escrow) external returns (bool pruned);
+    function pruneEscrow(address escrow) external;
 
     function escrowState(address escrow) external view returns (EscrowState);
 

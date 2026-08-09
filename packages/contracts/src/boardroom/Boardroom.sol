@@ -267,11 +267,10 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         emit BoardroomEscrowOpened(escrow, msg.sender);
     }
 
-    function pruneEscrow(address escrow) external override returns (bool pruned) {
+    function pruneEscrow(address escrow) external override {
         if (escrowState[escrow] != EscrowState.Open) revert EscrowNotOpen(escrow);
         if (!_isEscrowClosed(escrow)) revert EscrowStillOpen(escrow);
         _closeEscrow(escrow);
-        return true;
     }
 
     function beginSnapshot() external override nonReentrant {
