@@ -11,7 +11,6 @@ import type { ExactRational, MetricState, NormalizedPrice } from "../../lib/mark
 import {
   formatSwapAmount,
   pairHasWrappedNative,
-  swapNativeMode,
   swapPairLabel,
   swapQuoteReady,
   swapQuoteRequestIdentity,
@@ -29,7 +28,6 @@ type SwapPanelProps = {
   actionCapability: WalletActionCapability;
   deployment: PledgeCashDeployment | undefined;
   form: SwapForm;
-  nativeBalance?: bigint | undefined;
   pendingAction: string | undefined;
   quote: SwapQuoteState | undefined;
   setForm: Dispatch<SetStateAction<SwapForm>>;
@@ -54,7 +52,6 @@ export function SwapPanel({
   actionCapability,
   deployment,
   form,
-  nativeBalance,
   pendingAction,
   quote,
   setForm,
@@ -78,18 +75,15 @@ export function SwapPanel({
     return () => window.clearInterval(timer);
   }, []);
 
-  const inputIsNative = swapNativeMode(deployment, form) === "input";
   const deadlineValid = deadlineIsFuture(form.deadline, currentUnixTime);
   const quoteCurrent = quote !== undefined && quote.requestIdentity === swapDecisionFormKey(form);
   const currentQuote = quoteCurrent ? quote : undefined;
   const actions = swapActionState(
     actionCapability,
     currentQuote,
-    inputIsNative,
     deadlineValid,
     quote ? (quoteCurrent ? "current" : "stale") : "missing",
     pendingAction,
-    nativeBalance,
   );
   const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, currentQuote?.tokenIn);
   const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, currentQuote?.tokenOut);
@@ -175,7 +169,7 @@ export function SwapPanel({
           <Facts columns="three" items={swapDecisionFacts(currentQuote, form, currentUnixTime)} />
           <details className="border-t border-zinc-800 px-4 py-3 text-sm text-zinc-400">
             <summary className="cursor-pointer font-semibold text-zinc-300">Technical details</summary>
-            <Facts columns="three" items={swapTechnicalFacts(currentQuote, inputIsNative, nativeBalance)} />
+            <Facts columns="three" items={swapTechnicalFacts(currentQuote)} />
             <p className="m-0 pt-3 text-xs">Router: {deployment?.uniswapUniversalRouter ? <AddressLink address={deployment.uniswapUniversalRouter} /> : "Not configured"}</p>
             {pairHasWrappedNative(deployment, form.tokenIn, form.tokenOut) ? (
               <p className="m-0 pt-2 text-xs">Native routing is disabled. Wrap or unwrap {wrappedNativeSymbol} separately.</p>
@@ -358,11 +352,9 @@ export function deadlineIsFuture(deadline: string, currentUnixTime: number): boo
 export function swapActionState(
   actionCapability: WalletActionCapability,
   quote: SwapQuoteState | undefined,
-  inputIsNative: boolean,
   deadlineValid: boolean,
   quoteState: "current" | "missing" | "stale" = quote ? "current" : "missing",
   pendingAction?: string | undefined,
-  nativeBalance?: bigint | undefined,
 ): SwapActionState {
   const quoteReady = swapQuoteReady(quote);
   const commonReason = swapQuoteBlockingReason(actionCapability, quote, quoteReady, quoteState);
@@ -370,22 +362,20 @@ export function swapActionState(
   let swap: ActionDecision = { enabled: false, ...(commonReason ? { reason: commonReason } : {}) };
 
   if (!commonReason && quoteReady) {
-    const balance = inputIsNative ? nativeBalance : quote.tokenIn.balance;
+    const balance = quote.tokenIn.balance;
     const allowance = quote.tokenIn.allowance;
-    approve = inputIsNative
-      ? { enabled: false, reason: "Native input does not require ERC-20 approval." }
-      : allowance === undefined
-        ? { enabled: false, reason: "Input-token allowance is unknown. Refresh the quote." }
-        : allowance >= quote.amountIn
-          ? { enabled: false, reason: "The current allowance covers this swap." }
-          : { enabled: true };
+    approve = allowance === undefined
+      ? { enabled: false, reason: "Input-token allowance is unknown. Refresh the quote." }
+      : allowance >= quote.amountIn
+        ? { enabled: false, reason: "The current allowance covers this swap." }
+        : { enabled: true };
     swap = !deadlineValid
       ? { enabled: false, reason: "The quote expiry is invalid or has passed." }
       : balance === undefined
         ? { enabled: false, reason: "Input-token balance is unknown. Refresh the quote." }
         : balance < quote.amountIn
           ? { enabled: false, reason: "Insufficient input-token balance." }
-          : !inputIsNative && (allowance === undefined || allowance < quote.amountIn)
+          : allowance === undefined || allowance < quote.amountIn
             ? { enabled: false, reason: "Approve the quoted input amount first." }
             : { enabled: true };
   } else if (!commonReason) {
@@ -416,12 +406,12 @@ function swapDecisionFacts(quote: SwapQuoteState | undefined, form: SwapForm, no
   ];
 }
 
-function swapTechnicalFacts(quote: SwapQuoteState | undefined, inputIsNative: boolean, nativeBalance: bigint | undefined): FactItem[] {
+function swapTechnicalFacts(quote: SwapQuoteState | undefined): FactItem[] {
   return [
     { label: "Liquidity locker", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "Unknown" },
     { label: "Pool ID", value: quote?.pool?.poolId ?? "Unknown" },
-    { label: "Input approval", value: inputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
-    { label: "Input balance", value: formatSwapAmount(inputIsNative ? nativeBalance : quote?.tokenIn?.balance, quote?.tokenIn) },
+    { label: "Input approval", value: approvalLabel(quote?.tokenIn, quote?.amountIn) },
+    { label: "Input balance", value: formatSwapAmount(quote?.tokenIn?.balance, quote?.tokenIn) },
     { label: "Active liquidity", value: quote?.pool?.liquidity.toString() ?? "Unknown" },
     { label: "sqrtPriceX96", value: quote?.pool?.sqrtPriceX96.toString() ?? "Unknown" },
   ];

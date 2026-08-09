@@ -168,7 +168,7 @@ export function App(): React.JSX.Element {
   const deployment = deploymentAvailability.status === "ready" ? deploymentAvailability.deployment : undefined;
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const walletApi = useWagmiWallet({ network, onAccountChanged: () => undefined, pushLog });
-  const { activeAccount, nativeBalance, switchChain, wallet, walletClient } = walletApi;
+  const { activeAccount, switchChain, wallet, walletClient } = walletApi;
   const transactionCenter = useTransactionCenter(network.chainId, wallet.account);
 
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
@@ -666,15 +666,12 @@ export function App(): React.JSX.Element {
     wallet.account.toLowerCase() === grantSnapshot.issuer.toLowerCase()
     || wallet.account.toLowerCase() === grantIssuerBoardroom?.owner.toLowerCase()
   ));
-  const nativeBalanceValue = nativeBalance.status === "ready" ? nativeBalance.value : undefined;
-
   const swapPanel = (
     <SwapPanel
       account={wallet.account}
       actionCapability={swapCapability}
       deployment={deployment}
       form={swapForm}
-      nativeBalance={nativeBalanceValue}
       pendingAction={pendingAction}
       quote={swapQuote}
       setForm={setSwapForm}

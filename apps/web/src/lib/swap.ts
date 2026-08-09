@@ -37,7 +37,6 @@ export type SwapForm = {
   slippageBps: string;
   recipient: string;
   deadline: string;
-  useNative: boolean;
 };
 
 export type SwapTokenMetadata = {
@@ -147,7 +146,6 @@ export function swapQuoteRequestIdentity(form: SwapForm): string {
     form.amountIn.trim(),
     form.slippageBps.trim(),
     form.deadline.trim(),
-    form.useNative ? "native" : "wrapped",
   ].join("|");
 }
 
@@ -159,7 +157,6 @@ export function defaultSwapForm(): SwapForm {
     slippageBps: DEFAULT_SLIPPAGE_BPS.toString(),
     recipient: "",
     deadline: defaultSwapDeadline(),
-    useNative: false,
   };
 }
 
@@ -175,7 +172,6 @@ export function withSwapTokenListDefaults(
     ...form,
     tokenIn,
     tokenOut: defaultTokenOut(form.tokenOut, tokenIn, defaults.tokenOut),
-    useNative: false,
   };
 }
 
@@ -263,7 +259,6 @@ export async function readSwapQuote(
   let slippageBps = DEFAULT_SLIPPAGE_BPS;
   try {
     slippageBps = parseSlippageBps(form.slippageBps);
-    if (form.useNative) throw new Error("Uniswap v4 swaps require wrapped ERC20 input; wrap native currency first.");
     const router = requireDeploymentAddress(deployment?.uniswapUniversalRouter, "Uniswap Universal Router");
     const quoter = requireDeploymentAddress(deployment?.uniswapV4Quoter, "Uniswap v4 Quoter");
     const permit2 = requireDeploymentAddress(deployment?.permit2, "Permit2");
@@ -349,7 +344,6 @@ export function buildSwapTransaction(input: {
   quote: SwapQuoteState;
   account: Address;
 }) {
-  if (input.form.useNative) throw new Error("Wrap native currency before using the v4 swap route.");
   const quote = requireExecutableQuote(input.quote);
   return buildUniswapV4SwapExactInputSingleTransaction({
     universalRouter: requireDeploymentAddress(input.deployment?.uniswapUniversalRouter, "Uniswap Universal Router"),
@@ -374,11 +368,6 @@ export function pairHasWrappedNative(
   const wrappedNative = deployment?.wrappedNative;
   return Boolean(wrappedNative && !isZeroAddress(wrappedNative)
     && (sameAddress(tokenA, wrappedNative) || sameAddress(tokenB, wrappedNative)));
-}
-
-/** Native routing stays disabled until the Universal Router plan includes explicit wrap and unwrap actions. */
-export function swapNativeMode(_deployment: PledgeCashDeployment | undefined, _form: SwapForm): undefined {
-  return undefined;
 }
 
 export function swapPairLabel(quote: SwapQuoteState | undefined, form: SwapForm): string {

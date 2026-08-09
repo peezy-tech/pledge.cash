@@ -13,7 +13,6 @@ import {
   pairHasWrappedNative,
   poolIdForKey,
   readSwapQuote,
-  swapNativeMode,
   swapPairLabel,
   swapQuoteExecutionMetrics,
   swapQuoteReady,
@@ -71,7 +70,7 @@ describe("lean Uniswap v4 swap surface", () => {
     }, deployment);
     expect(form.tokenIn).toBe(token0);
     expect(form.tokenOut).toBe(token1);
-    expect(form.useNative).toBe(false);
+    expect("useNative" in form).toBe(false);
   });
 
   test("computes the canonical PoolKey identifier", () => {
@@ -94,11 +93,11 @@ describe("lean Uniswap v4 swap surface", () => {
     expect(transaction.args[2]).toBe(2_000_000_000n);
   });
 
-  test("never advertises native routing without explicit wrap and unwrap actions", () => {
-    const form = { ...defaultSwapForm(), tokenIn: token0, tokenOut: token1, useNative: true };
+  test("recognizes wrapped-native pairs without adding a second transaction mode", () => {
+    const form = { ...defaultSwapForm(), tokenIn: token0, tokenOut: token1, amountIn: "10", deadline: "2000000000" };
     expect(pairHasWrappedNative(deployment, token0, token1)).toBe(true);
-    expect(swapNativeMode(deployment, form)).toBeUndefined();
-    expect(() => buildSwapTransaction({ deployment, form, quote: executableQuote(), account })).toThrow("Wrap native currency");
+    expect("useNative" in form).toBe(false);
+    expect(buildSwapTransaction({ deployment, form, quote: executableQuote(), account }).address).toBe(router);
   });
 
   test("fails quotes clearly when locker discovery roots are absent", async () => {
@@ -129,7 +128,7 @@ describe("lean Uniswap v4 swap surface", () => {
     expect(() => assertFutureSwapDeadline("1000", 1000)).toThrow("expired");
     const quote = executableQuote();
     quote.tokenIn = { ...quote.tokenIn!, allowance: 0n };
-    const actions = swapActionState({ status: "enabled" }, quote, false, true, "current", undefined, 100n);
+    const actions = swapActionState({ status: "enabled" }, quote, true, "current");
     expect(actions.approve.enabled).toBe(true);
     expect(actions.swap.enabled).toBe(false);
   });
