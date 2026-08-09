@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {Currency} from "v4-core/types/Currency.sol";
@@ -16,10 +15,6 @@ import {PositionManagerActions} from "./PositionManagerActions.sol";
 /// @dev The Boardroom explicitly authorizes the token ID before a safe transfer,
 ///      or registers a direct CCA mint after PositionManager has assigned ownership.
 contract LiquidityLocker is ReentrancyGuard {
-    using FixedPointMathLib for uint256;
-
-    uint256 public constant PROTOCOL_FEE_SHARE_BPS = 500;
-    uint256 public constant BPS_DENOMINATOR = 10_000;
     uint24 public constant MAX_STATIC_POOL_FEE = 1_000_000;
     int24 public constant MAX_TICK_SPACING = type(int16).max;
 
@@ -292,8 +287,8 @@ contract LiquidityLocker is ReentrancyGuard {
         }
         uint256 fees0 = balance0After - balance0Before;
         uint256 fees1 = balance1After - balance1Before;
-        protocolAmount0 = fees0.fullMulDiv(PROTOCOL_FEE_SHARE_BPS, BPS_DENOMINATOR);
-        protocolAmount1 = fees1.fullMulDiv(PROTOCOL_FEE_SHARE_BPS, BPS_DENOMINATOR);
+        protocolAmount0 = fees0 / 20;
+        protocolAmount1 = fees1 / 20;
         boardroomAmount0 = fees0 - protocolAmount0;
         boardroomAmount1 = fees1 - protocolAmount1;
 

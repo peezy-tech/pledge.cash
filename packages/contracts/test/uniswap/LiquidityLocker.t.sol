@@ -297,6 +297,38 @@ contract LiquidityLockerTest is Test {
         assertEq(uint8(actions[1]), PositionManagerActions.TAKE_PAIR);
     }
 
+    function testFeeSplitHandlesZeroAndSubTwentyFees() public {
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+
+        (uint256 boardroom0, uint256 boardroom1, uint256 protocol0, uint256 protocol1) = locker.collectFees();
+        assertEq(boardroom0, 0);
+        assertEq(boardroom1, 0);
+        assertEq(protocol0, 0);
+        assertEq(protocol1, 0);
+
+        _fundManager(locker, 19, 20);
+        positionManager.accrueFees(TOKEN_ID, 19, 20);
+        (boardroom0, boardroom1, protocol0, protocol1) = locker.collectFees();
+        assertEq(boardroom0, 19);
+        assertEq(boardroom1, 19);
+        assertEq(protocol0, 0);
+        assertEq(protocol1, 1);
+    }
+
+    function testFeeSplitHandlesMaximumAccruedFeesWithoutOverflow() public {
+        uint128 maximumFee = type(uint128).max;
+        _mintAndRegister(TOKEN_ID, 100, 200, 1_000);
+        _fundManager(locker, maximumFee, maximumFee);
+        positionManager.accrueFees(TOKEN_ID, maximumFee, maximumFee);
+
+        (uint256 boardroom0, uint256 boardroom1, uint256 protocol0, uint256 protocol1) = locker.collectFees();
+        uint256 expectedProtocol = uint256(maximumFee) / 20;
+        assertEq(protocol0, expectedProtocol);
+        assertEq(protocol1, expectedProtocol);
+        assertEq(boardroom0 + protocol0, maximumFee);
+        assertEq(boardroom1 + protocol1, maximumFee);
+    }
+
     function testFuzzFeeSplitRounding(uint128 rawFee0, uint128 rawFee1) public {
         uint128 fee0 = uint128(bound(rawFee0, 1, 1e24));
         uint128 fee1 = uint128(bound(rawFee1, 1, 1e24));
@@ -305,8 +337,8 @@ contract LiquidityLockerTest is Test {
         positionManager.accrueFees(TOKEN_ID, fee0, fee1);
 
         (uint256 boardroom0, uint256 boardroom1, uint256 protocol0, uint256 protocol1) = locker.collectFees();
-        assertEq(protocol0, uint256(fee0) * 500 / 10_000);
-        assertEq(protocol1, uint256(fee1) * 500 / 10_000);
+        assertEq(protocol0, uint256(fee0) / 20);
+        assertEq(protocol1, uint256(fee1) / 20);
         assertEq(boardroom0 + protocol0, fee0);
         assertEq(boardroom1 + protocol1, fee1);
     }
