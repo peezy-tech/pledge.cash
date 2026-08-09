@@ -2,7 +2,7 @@
 
 The retained Sentinel service is the PledgeCash product identity boundary. It
 owns product sessions, delegates canonical social and wallet credentials to
-peezy.tech Identity when configured, and maintains local wallet-link records.
+peezy.tech Identity, and maintains local wallet-link records.
 It does not watch chains, analyze protocol actions, or deliver notifications.
 
 ## Requirements
@@ -10,7 +10,7 @@ It does not watch chains, analyze protocol actions, or deliver notifications.
 - Bun 1.3+
 - Postgres 15+
 - A unique 32-byte-or-longer Better Auth secret
-- Optional peezy.tech Identity application and OIDC credentials
+- A peezy.tech Identity application with distinct API and OIDC credentials
 
 Copy `.env.example`, then run:
 
@@ -29,20 +29,19 @@ database reachability. Product clients use `/auth/*` for sessions and
 | `DATABASE_URL` | yes | Postgres connection string. |
 | `SENTINEL_PORT` | no | HTTP port, default `8787`. |
 | `SENTINEL_WEB_ORIGIN` | yes | Exact browser origin accepted by CORS and SIWE. |
-| `SENTINEL_TRUSTED_PROXY_IPS` | for shared Identity behind HTTPS | Exact trusted edge peers used to resolve client addresses. |
+| `SENTINEL_TRUSTED_PROXY_IPS` | when Sentinel is served over HTTPS | Exact trusted edge peers used to resolve client addresses. |
 | `BETTER_AUTH_SECRET` | yes | Product-session signing secret. |
 | `BETTER_AUTH_URL` | yes | Exact public origin of this service. |
-| `PEEZY_IDENTITY_URL` | no | Shared Identity origin; all four `PEEZY_IDENTITY_*` values must be configured together. |
-| `PEEZY_IDENTITY_CLIENT_ID` | with shared Identity | Identity client identifier. |
-| `PEEZY_IDENTITY_APP_CLIENT_SECRET` | with shared Identity | Confidential Identity API secret. |
-| `PEEZY_IDENTITY_OIDC_CLIENT_SECRET` | with shared Identity | Distinct OIDC exchange secret. |
-| `APPLE_*`, `DISCORD_*`, `GITHUB_*`, `TELEGRAM_OAUTH_*`, `TWITTER_*` | legacy standalone mode only | Optional paired social OAuth client credentials. |
+| `PEEZY_IDENTITY_URL` | yes | Shared Identity origin. HTTPS is required outside loopback development. |
+| `PEEZY_IDENTITY_CLIENT_ID` | yes | Identity client identifier. |
+| `PEEZY_IDENTITY_APP_CLIENT_SECRET` | yes | Confidential Identity API secret. |
+| `PEEZY_IDENTITY_OIDC_CLIENT_SECRET` | yes | Distinct OIDC exchange secret. |
 
 Shared Identity is authoritative for credential ownership. Local `authWallets`,
 `walletOwners`, and `wallets` rows bind those credentials to one PledgeCash
-product user; a wallet address cannot cross product principals. Wallet linking
-uses bounded SIWE messages, one-time nonces, per-client quotas, and advisory
-locks around ownership changes.
+product user; a wallet address cannot cross product principals. Identity issues
+wallet-link challenges and grants, while Sentinel enforces bounded SIWE messages,
+per-client quotas, reconciliation, and advisory locks around ownership changes.
 
 ## Validation
 

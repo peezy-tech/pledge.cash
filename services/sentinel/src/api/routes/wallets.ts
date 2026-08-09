@@ -21,11 +21,9 @@ import {
   LinkWalletResponseSchema,
   WalletNonceRequestSchema,
   WalletNonceResponseSchema,
-  type AddressDto,
-  type WalletNonceResponse
+  type AddressDto
 } from "../dto";
 
-const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
 const WALLET_LINK_JSON_MAX_BODY_BYTES = AUTH_SIWE_MAX_MESSAGE_LENGTH * 2;
 
 function webOriginHost(webOrigin: string): string {
@@ -34,31 +32,6 @@ function webOriginHost(webOrigin: string): string {
 
 export function normalizeAddress(address: string): AddressDto {
   return getAddress(address).toLowerCase() as AddressDto;
-}
-
-function buildWalletNonceResponse(input: {
-  readonly address?: AddressDto;
-  readonly chainId?: number;
-  readonly deps: SentinelApiDeps;
-  readonly expiresAt: Date;
-  readonly issuedAt: Date;
-  readonly nonce: string;
-}): WalletNonceResponse {
-  const base = {
-    domain: webOriginHost(input.deps.config.webOrigin),
-    expirationTime: input.expiresAt.toISOString(),
-    issuedAt: input.issuedAt.toISOString(),
-    nonce: input.nonce,
-    statement: WALLET_LINK_SIWE_STATEMENT,
-    uri: input.deps.config.webOrigin,
-    version: "1" as const
-  };
-
-  return WalletNonceResponseSchema.parse({
-    ...base,
-    ...(input.address === undefined ? {} : { address: input.address }),
-    ...(input.chainId === undefined ? {} : { chainId: input.chainId })
-  });
 }
 
 export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
@@ -78,39 +51,18 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return parsed.response;
     }
 
-    if (deps.auth.createWalletChallenge !== undefined) {
-      if (parsed.value.address === undefined || parsed.value.chainId === undefined) {
-        return jsonError(c, 400, "address and chainId are required");
-      }
-      const user = c.get("user");
-      const challenge = await deps.auth.createWalletChallenge({
-        address: normalizeAddress(parsed.value.address),
-        chainId: parsed.value.chainId,
-        ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
-        purpose: "link",
-        userId: user.id
-      });
-      return c.json(WalletNonceResponseSchema.parse(challenge));
+    if (parsed.value.address === undefined || parsed.value.chainId === undefined) {
+      return jsonError(c, 400, "address and chainId are required");
     }
-
-    const issuedAt = getNow(deps);
-    const expiresAt = new Date(issuedAt.getTime() + WALLET_NONCE_TTL_MS);
-    const nonce = deps.generateNonce?.() ?? crypto.randomUUID().replaceAll("-", "");
     const user = c.get("user");
-    await deps.store.createWalletNonce({ expiresAt, nonce, userId: user.id });
-
-    const address =
-      parsed.value.address === undefined ? undefined : normalizeAddress(parsed.value.address);
-    const response = buildWalletNonceResponse({
-      deps,
-      expiresAt,
-      issuedAt,
-      nonce,
-      ...(address === undefined ? {} : { address }),
-      ...(parsed.value.chainId === undefined ? {} : { chainId: parsed.value.chainId })
+    const challenge = await deps.auth.createWalletChallenge({
+      address: normalizeAddress(parsed.value.address),
+      chainId: parsed.value.chainId,
+      ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
+      purpose: "link",
+      userId: user.id
     });
-
-    return c.json(response);
+    return c.json(WalletNonceResponseSchema.parse(challenge));
   });
 
   app.post("/", walletLinkBodyLimit, rateLimit, async (c) => {
@@ -120,7 +72,6 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const siwe = parseSiweMessage(parsed.value.message);
-    const delegatesCredentialLink = deps.auth.linkWalletCredential !== undefined;
     if (
       siwe.address === undefined ||
       siwe.chainId === undefined ||
@@ -164,110 +115,64 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
-    if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
-      // Identity v0.1 accepts only standard 65-byte EOA signatures. Reject invalid
-      // proofs locally so they cannot consume the shared wallet-grant quota.
-      let signatureValid = false;
-      if (parsed.value.signature.length === 132) {
-        try {
-          signatureValid = await verifyMessage({
-            address: siwe.address as Address,
-            message: parsed.value.message,
-            signature: parsed.value.signature as Hex
-          });
-        } catch {
-          signatureValid = false;
-        }
-      }
-      if (!signatureValid) {
-        return jsonError(c, 400, "SIWE signature is invalid");
-      }
-
-      let wallet;
+    // Identity v0.1 accepts only standard 65-byte EOA signatures. Reject invalid
+    // proofs locally so they cannot consume the shared wallet-grant quota.
+    let signatureValid = false;
+    if (parsed.value.signature.length === 132) {
       try {
-        wallet = await deps.auth.linkWalletCredential({
-          address: normalizeAddress(siwe.address),
-          chainId: siwe.chainId,
+        signatureValid = await verifyMessage({
+          address: siwe.address as Address,
           message: parsed.value.message,
-          signature: parsed.value.signature,
-          userId: user.id,
-          verifiedAt: now
+          signature: parsed.value.signature as Hex
         });
-      } catch (error) {
-        if (error instanceof AuthRateLimitError) {
-          return jsonError(c, 429, error.message);
-        }
-        const message = error instanceof Error ? error.message : "";
-        const migrationRequired =
-          /must sign in through peezy\.tech Identity/i.test(message);
-        const credentialConflict =
-          /already linked|another account|multiple PledgeCash users/i.test(
-            message
-          );
-        if (migrationRequired) {
-          return jsonError(
-            c,
-            409,
-            "Sign in through peezy.tech Identity before linking another wallet"
-          );
-        }
-        if (credentialConflict) {
-          return jsonError(
-            c,
-            409,
-            "Wallet is already linked to another account"
-          );
-        }
-        if (error instanceof AuthWalletCredentialRejectedError) {
-          return jsonError(c, 400, "SIWE signature is invalid");
-        }
-        return jsonError(c, 503, "Wallet linking is temporarily unavailable");
+      } catch {
+        signatureValid = false;
       }
-      return c.json(LinkWalletResponseSchema.parse({ wallet }));
     }
-
-    const nonce = await deps.store.getWalletNonce(siwe.nonce);
-    if (nonce === null || nonce.userId !== user.id) {
-      return jsonError(c, 400, "Unknown SIWE nonce");
-    }
-
-    if (nonce.usedAt !== null) {
-      return jsonError(c, 409, "SIWE nonce has already been used");
-    }
-
-    if (nonce.expiresAt.getTime() <= now.getTime()) {
-      return jsonError(c, 400, "SIWE nonce has expired");
-    }
-
-    const address = normalizeAddress(siwe.address);
-    const signatureOk = await deps.verifySiweSignature?.({
-      address,
-      chainId: siwe.chainId,
-      message: parsed.value.message,
-      signature: parsed.value.signature
-    });
-
-    if (signatureOk !== true) {
+    if (!signatureValid) {
       return jsonError(c, 400, "SIWE signature is invalid");
     }
 
-    const consumed = await deps.store.consumeWalletNonce({ nonce: siwe.nonce, now, userId: user.id });
-    if (!consumed) {
-      return jsonError(c, 409, "SIWE nonce has already been used");
+    let wallet;
+    try {
+      wallet = await deps.auth.linkWalletCredential({
+        address: normalizeAddress(siwe.address),
+        chainId: siwe.chainId,
+        message: parsed.value.message,
+        signature: parsed.value.signature,
+        userId: user.id,
+        verifiedAt: now
+      });
+    } catch (error) {
+      if (error instanceof AuthRateLimitError) {
+        return jsonError(c, 429, error.message);
+      }
+      const message = error instanceof Error ? error.message : "";
+      const migrationRequired =
+        /must sign in through peezy\.tech Identity/i.test(message);
+      const credentialConflict =
+        /already linked|another account|multiple PledgeCash users/i.test(
+          message
+        );
+      if (migrationRequired) {
+        return jsonError(
+          c,
+          409,
+          "Sign in through peezy.tech Identity before linking another wallet"
+        );
+      }
+      if (credentialConflict) {
+        return jsonError(
+          c,
+          409,
+          "Wallet is already linked to another account"
+        );
+      }
+      if (error instanceof AuthWalletCredentialRejectedError) {
+        return jsonError(c, 400, "SIWE signature is invalid");
+      }
+      return jsonError(c, 503, "Wallet linking is temporarily unavailable");
     }
-
-    const wallet = await deps.store.linkWallet({
-      address,
-      chainId: siwe.chainId,
-      siweMessage: parsed.value.message,
-      userId: user.id,
-      verifiedAt: now
-    });
-
-    if (wallet === null) {
-      return jsonError(c, 409, "Wallet is already linked to another account");
-    }
-
     return c.json(LinkWalletResponseSchema.parse({ wallet }));
   });
 

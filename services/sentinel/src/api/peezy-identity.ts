@@ -90,7 +90,7 @@ const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "twitter"
 ]);
 
-type IdentityConfig = NonNullable<Config["auth"]["identity"]>;
+type IdentityConfig = Config["auth"]["identity"];
 type IdentityFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type PeezyIdentityAuthAdapterOptions = {
   readonly hydrationCacheMs?: number;
@@ -157,9 +157,6 @@ export function createPeezyIdentityAuthAdapter(
   fetcher: IdentityFetch = fetch,
   options: PeezyIdentityAuthAdapterOptions = {}
 ): AuthAdapter {
-  if (config.auth.identity === undefined) {
-    throw new Error("peezy.tech Identity is not configured");
-  }
   const identity = config.auth.identity;
   const identityFetcher = createTimeoutFetcher(
     fetcher,
@@ -287,7 +284,6 @@ export function createPeezyIdentityAuthAdapter(
   return {
     socialProviders: [],
     sharedIdentityClientId: identity.clientId,
-    usesSharedIdentity: true,
     async createWalletChallenge({ address, chainId, clientIp, purpose }) {
       return gateway.createWalletChallenge({
         address,

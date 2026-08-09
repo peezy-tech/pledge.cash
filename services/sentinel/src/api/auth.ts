@@ -87,9 +87,8 @@ export type AuthSession = {
 
 export type AuthAdapter = {
   readonly socialProviders: readonly SocialProviderDto[];
-  readonly sharedIdentityClientId?: string;
-  readonly usesSharedIdentity?: boolean;
-  createWalletChallenge?(input: {
+  readonly sharedIdentityClientId: string;
+  createWalletChallenge(input: {
     readonly address: AddressDto;
     readonly chainId: number;
     readonly clientIp?: string;
@@ -105,18 +104,17 @@ export type AuthAdapter = {
     readonly uri: string;
     readonly version: "1";
   }>;
-  hydrateAuthSnapshot?(
+  hydrateAuthSnapshot(
     userId: string,
     snapshot: AuthSnapshot
   ): Promise<AuthSnapshot>;
-  getProviders?(userId: string): Promise<AuthProviderDto[]>;
-  getSocialProviders?(): Promise<SocialProviderDto[]>;
+  getSocialProviders(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
   handler(
     request: Request,
     context?: { readonly clientIp?: string }
   ): Promise<Response>;
-  linkWalletCredential?(input: {
+  linkWalletCredential(input: {
     readonly address: AddressDto;
     readonly chainId: number;
     readonly message: string;
@@ -124,7 +122,7 @@ export type AuthAdapter = {
     readonly userId: string;
     readonly verifiedAt: Date;
   }): Promise<WalletDto>;
-  startSocial?(input: {
+  startSocial(input: {
     readonly clientIp?: string;
     readonly headers: Headers;
     readonly link: boolean;
@@ -141,33 +139,8 @@ export type AuthSnapshot = {
   readonly wallets: WalletDto[];
 };
 
-export type WalletNonceRecord = {
-  readonly expiresAt: Date;
-  readonly nonce: string;
-  readonly usedAt: Date | null;
-  readonly userId: string;
-};
-
 export type SentinelApiStore = {
-  consumeWalletNonce(input: {
-    readonly nonce: string;
-    readonly now: Date;
-    readonly userId: string;
-  }): Promise<boolean>;
-  createWalletNonce(input: {
-    readonly expiresAt: Date;
-    readonly nonce: string;
-    readonly userId: string;
-  }): Promise<WalletNonceRecord>;
   getAuthSnapshot(userId: string): Promise<AuthSnapshot>;
-  getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;
-  linkWallet(input: {
-    readonly address: AddressDto;
-    readonly chainId: number;
-    readonly siweMessage: string;
-    readonly userId: string;
-    readonly verifiedAt: Date;
-  }): Promise<WalletDto | null>;
   ping(): Promise<void>;
   takeIdentityQuota(input: {
     readonly capacity: number;
@@ -193,11 +166,9 @@ export type RateLimitConfig = {
 export type SentinelApiDeps = {
   readonly auth: AuthAdapter;
   readonly config: ApiConfig;
-  readonly generateNonce?: () => string;
   readonly now?: () => Date;
   readonly rateLimit?: RateLimitConfig;
   readonly store: SentinelApiStore;
-  readonly verifySiweSignature?: SiweSignatureVerifier;
 };
 
 export type ApiVariables = {
@@ -367,7 +338,7 @@ function createIdentityQuotaMiddleware(
       capacity,
       now: getNow(deps),
       scope: identityQuotaScope(
-        deps.auth.sharedIdentityClientId ?? "shared-identity",
+        deps.auth.sharedIdentityClientId,
         kind
       ),
       windowMs
@@ -418,8 +389,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   app.get("/capabilities", async (c) => {
     let socialProviders = deps.auth.socialProviders;
     try {
-      socialProviders =
-        (await deps.auth.getSocialProviders?.()) ?? socialProviders;
+      socialProviders = await deps.auth.getSocialProviders();
     } catch {
       // Product sessions remain usable during an Identity outage; only new
       // central social authentication is unavailable.
@@ -427,8 +397,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     return c.json(
       AuthCapabilitiesResponseSchema.parse({
         socialProviders,
-        walletlessSocialSignIn:
-          deps.auth.usesSharedIdentity === true && socialProviders.length > 0
+        walletlessSocialSignIn: socialProviders.length > 0
       })
     );
   });
@@ -441,32 +410,19 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const user = UserDtoSchema.parse({ id: session.user.id });
     let snapshot = await deps.store.getAuthSnapshot(user.id);
-    if (deps.auth.hydrateAuthSnapshot !== undefined) {
-      try {
-        snapshot = await deps.auth.hydrateAuthSnapshot(user.id, snapshot);
-      } catch {
-        // Keep the product session readable during an Identity outage, but do
-        // not claim that any centrally owned credential is still active.
-        snapshot = {
-          ...snapshot,
-          providers: [],
-          wallets: snapshot.wallets.map((wallet) => ({
-            ...wallet,
-            canSignIn: false
-          }))
-        };
-      }
-    } else {
-      try {
-        snapshot = {
-          ...snapshot,
-          providers:
-            (await deps.auth.getProviders?.(user.id)) ?? snapshot.providers
-        };
-      } catch {
-        // Provider labels are presentation data. Do not turn an Identity outage
-        // into revocation of an otherwise valid PledgeCash product session.
-      }
+    try {
+      snapshot = await deps.auth.hydrateAuthSnapshot(user.id, snapshot);
+    } catch {
+      // Keep the product session readable during an Identity outage, but do
+      // not claim that any centrally owned credential is still active.
+      snapshot = {
+        ...snapshot,
+        providers: [],
+        wallets: snapshot.wallets.map((wallet) => ({
+          ...wallet,
+          canSignIn: false
+        }))
+      };
     }
     const response: AuthMeResponse = AuthMeResponseSchema.parse({
       user,
@@ -475,54 +431,50 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     return c.json(response);
   });
 
-  const startSocial = deps.auth.startSocial;
-  if (startSocial !== undefined) {
-    const start = async (
-      c: Context<ApiEnv>,
-      request: AuthRedirectRequest,
-      link: boolean,
-      userId?: string
-    ) => {
-      try {
-        const result = await startSocial({
-          headers: c.req.raw.headers,
-          link,
-          request,
-          ...(c.env?.clientIp === undefined
-            ? {}
-            : { clientIp: c.env.clientIp }),
-          ...(userId === undefined ? {} : { userId })
-        });
-        copySetCookies(c, result.headers);
-        return c.json(result.response);
-      } catch (error) {
-        if (error instanceof AuthSocialDependencyError) {
-          if (error.retryAfter !== undefined) {
-            c.header("Retry-After", error.retryAfter);
-          }
-          return jsonError(c, error.status, error.message);
+  const start = async (
+    c: Context<ApiEnv>,
+    request: AuthRedirectRequest,
+    link: boolean,
+    userId?: string
+  ) => {
+    try {
+      const result = await deps.auth.startSocial({
+        headers: c.req.raw.headers,
+        link,
+        request,
+        ...(c.env?.clientIp === undefined
+          ? {}
+          : { clientIp: c.env.clientIp }),
+        ...(userId === undefined ? {} : { userId })
+      });
+      copySetCookies(c, result.headers);
+      return c.json(result.response);
+    } catch (error) {
+      if (error instanceof AuthSocialDependencyError) {
+        if (error.retryAfter !== undefined) {
+          c.header("Retry-After", error.retryAfter);
         }
-        throw error;
+        return jsonError(c, error.status, error.message);
       }
-    };
+      throw error;
+    }
+  };
 
-    app.post("/peezy/sign-in", authBodyLimit, async (c) => {
+  app.post("/peezy/sign-in", authBodyLimit, async (c) => {
+    const body = await parseJson(c, AuthRedirectRequestSchema);
+    if (!body.ok) return body.response;
+    return start(c, body.value, false);
+  });
+  app.post(
+    "/peezy/link",
+    createSessionMiddleware(deps),
+    authBodyLimit,
+    async (c) => {
       const body = await parseJson(c, AuthRedirectRequestSchema);
       if (!body.ok) return body.response;
-      return start(c, body.value, false);
-    });
-    app.post(
-      "/peezy/link",
-      createSessionMiddleware(deps),
-      authBodyLimit,
-      async (c) => {
-        const body = await parseJson(c, AuthRedirectRequestSchema);
-        if (!body.ok) return body.response;
-        return start(c, body.value, true, c.get("user").id);
-      }
-    );
-
-  }
+      return start(c, body.value, true, c.get("user").id);
+    }
+  );
 
   const validateIdentitySiwe: MiddlewareHandler<ApiEnv> = async (c, next) => {
     const body = await parseJson(
@@ -591,39 +543,35 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp })
     });
 
-  if (deps.auth.usesSharedIdentity === true) {
-    app.post(
-      "/peezy/siwe/nonce",
-      authBodyLimit,
-      publicSiweChallengeClientRateLimit,
-      forwardAuthRequest
-    );
-    app.post(
-      "/siwe/nonce",
-      authBodyLimit,
-      publicSiweChallengeClientRateLimit,
-      forwardAuthRequest
-    );
-    app.post(
-      "/peezy/siwe/verify",
-      authBodyLimit,
-      publicSiweClientRateLimit,
-      publicSiweAttemptGlobalRateLimit,
-      validateIdentitySiwe,
-      publicSiweGlobalRateLimit,
-      forwardAuthRequest
-    );
-    app.post(
-      "/siwe/verify",
-      authBodyLimit,
-      publicSiweClientRateLimit,
-      publicSiweAttemptGlobalRateLimit,
-      validateIdentitySiwe,
-      forwardAuthRequest
-    );
-  } else {
-    app.post("/siwe/verify", forwardAuthRequest);
-  }
+  app.post(
+    "/peezy/siwe/nonce",
+    authBodyLimit,
+    publicSiweChallengeClientRateLimit,
+    forwardAuthRequest
+  );
+  app.post(
+    "/siwe/nonce",
+    authBodyLimit,
+    publicSiweChallengeClientRateLimit,
+    forwardAuthRequest
+  );
+  app.post(
+    "/peezy/siwe/verify",
+    authBodyLimit,
+    publicSiweClientRateLimit,
+    publicSiweAttemptGlobalRateLimit,
+    validateIdentitySiwe,
+    publicSiweGlobalRateLimit,
+    forwardAuthRequest
+  );
+  app.post(
+    "/siwe/verify",
+    authBodyLimit,
+    publicSiweClientRateLimit,
+    publicSiweAttemptGlobalRateLimit,
+    validateIdentitySiwe,
+    forwardAuthRequest
+  );
 
   return app;
 }

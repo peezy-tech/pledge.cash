@@ -193,13 +193,3 @@ export const identityWalletLinkReconciliations = pgTable(
     userIdx: index("identity_wallet_link_reconciliations_user_idx").on(table.userId)
   })
 );
-
-export const walletLinkNonces = pgTable("wallet_link_nonces", {
-  nonce: text("nonce").primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  usedAt: timestamp("used_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-});

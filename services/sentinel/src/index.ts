@@ -1,8 +1,3 @@
-import {
-  createBetterAuthAdapter,
-  createPledgeCashSiweVerifier,
-  WALLET_LINK_SIWE_STATEMENT,
-} from "./api/better-auth";
 import { createApp } from "./api/server";
 import { createPeezyIdentityAuthAdapter, discardOAuthTokensForSharedIdentity } from "./api/peezy-identity";
 import { createDrizzleApiStore } from "./api/store";
@@ -45,17 +40,12 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
   const config = options.config ?? loadConfig();
   const dbClient = createDbClient(config);
   await dbClient.migrate();
-  if (config.auth.identity !== undefined) {
-    await discardOAuthTokensForSharedIdentity(dbClient.db);
-  }
-  const auth = config.auth.identity === undefined
-    ? createBetterAuthAdapter(config, dbClient.db)
-    : createPeezyIdentityAuthAdapter(config, dbClient.db);
+  await discardOAuthTokensForSharedIdentity(dbClient.db);
+  const auth = createPeezyIdentityAuthAdapter(config, dbClient.db);
   const app = createApp({
     auth,
     config,
-    store: createDrizzleApiStore(dbClient.db),
-    verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT]),
+    store: createDrizzleApiStore(dbClient.db)
   });
   const server = Bun.serve({
     fetch(request, bunServer) {

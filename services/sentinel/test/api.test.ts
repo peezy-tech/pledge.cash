@@ -8,8 +8,7 @@ import {
   AuthSocialDependencyError,
   type AuthAdapter,
   type AuthSnapshot,
-  type RateLimitConfig,
-  type WalletNonceRecord
+  type RateLimitConfig
 } from "../src/api/auth";
 import { WALLET_LINK_SIWE_STATEMENT } from "../src/api/better-auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
@@ -41,9 +40,34 @@ class StubAuth implements AuthAdapter {
   readonly forwarded: ForwardedAuthRequest[] = [];
   socialFailure?: Error;
   readonly socialStarts: Array<
-    Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+    Parameters<AuthAdapter["startSocial"]>[0]
   > = [];
   readonly socialProviders = ["discord", "twitter", "telegram"] as const;
+  readonly sharedIdentityClientId = "pledge-cash-test";
+
+  createWalletChallenge = async (input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+  }) => ({
+    address: input.address,
+    chainId: input.chainId,
+    domain: "pledge.cash",
+    expirationTime: new Date(FIXED_NOW.getTime() + 10 * 60_000).toISOString(),
+    issuedAt: FIXED_NOW.toISOString(),
+    message: "Identity challenge",
+    nonce: "0123456789abcdef",
+    statement: WALLET_LINK_SIWE_STATEMENT,
+    uri: WEB_ORIGIN,
+    version: "1" as const
+  });
+
+  async getSocialProviders() {
+    return this.socialProviders;
+  }
+
+  async hydrateAuthSnapshot(_userId: string, snapshot: AuthSnapshot) {
+    return snapshot;
+  }
 
   async getSession(input: { readonly headers: Headers }) {
     return input.headers.get("cookie")?.includes(SESSION_COOKIE) === true
@@ -68,8 +92,19 @@ class StubAuth implements AuthAdapter {
     return new Response(JSON.stringify({ forwarded: true, path }), { headers, status: 200 });
   }
 
+  async linkWalletCredential(input: {
+    readonly address: AddressDto;
+    readonly verifiedAt: Date;
+  }): Promise<WalletDto> {
+    return {
+      address: input.address,
+      canSignIn: true,
+      verifiedAt: input.verifiedAt.toISOString()
+    };
+  }
+
   startSocial = async (
-    input: Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+    input: Parameters<AuthAdapter["startSocial"]>[0]
   ) => {
     if (this.socialFailure !== undefined) {
       throw this.socialFailure;
@@ -85,16 +120,7 @@ class StubAuth implements AuthAdapter {
 }
 
 class InMemoryStore implements SentinelApiStore {
-  readonly nonces = new Map<string, WalletNonceRecord>();
   readonly identityQuotaEvents = new Map<string, number[]>();
-  conflictedWallets = new Set<AddressDto>();
-  lastLinkedWalletInput:
-    | {
-        readonly address: AddressDto;
-        readonly chainId: number;
-        readonly userId: string;
-      }
-    | undefined;
   pingCount = 0;
   providersByUser = new Map<
     string,
@@ -102,69 +128,11 @@ class InMemoryStore implements SentinelApiStore {
   >();
   walletsByUser = new Map<string, WalletDto[]>();
 
-  async consumeWalletNonce(input: {
-    readonly nonce: string;
-    readonly now: Date;
-    readonly userId: string;
-  }): Promise<boolean> {
-    const nonce = this.nonces.get(input.nonce);
-    if (nonce === undefined || nonce.userId !== input.userId || nonce.usedAt !== null) {
-      return false;
-    }
-
-    this.nonces.set(input.nonce, { ...nonce, usedAt: input.now });
-    return true;
-  }
-
-  async createWalletNonce(input: {
-    readonly expiresAt: Date;
-    readonly nonce: string;
-    readonly userId: string;
-  }): Promise<WalletNonceRecord> {
-    const record = { expiresAt: input.expiresAt, nonce: input.nonce, usedAt: null, userId: input.userId };
-    this.nonces.set(input.nonce, record);
-    return record;
-  }
-
   async getAuthSnapshot(userId: string) {
     return {
       providers: this.providersByUser.get(userId) ?? [],
       wallets: this.walletsByUser.get(userId) ?? []
     };
-  }
-
-  async getWalletNonce(nonce: string): Promise<WalletNonceRecord | null> {
-    return this.nonces.get(nonce) ?? null;
-  }
-
-  async linkWallet(input: {
-    readonly address: AddressDto;
-    readonly chainId: number;
-    readonly siweMessage: string;
-    readonly userId: string;
-    readonly verifiedAt: Date;
-  }): Promise<WalletDto | null> {
-    expect(input.siweMessage.toLowerCase()).toContain(input.address.slice(2));
-    this.lastLinkedWalletInput = {
-      address: input.address,
-      chainId: input.chainId,
-      userId: input.userId
-    };
-    if (this.conflictedWallets.has(input.address)) {
-      return null;
-    }
-
-    const wallet = {
-      address: input.address,
-      canSignIn: true as const,
-      verifiedAt: input.verifiedAt.toISOString()
-    };
-    const wallets = this.walletsByUser.get(input.userId) ?? [];
-    this.walletsByUser.set(input.userId, [
-      ...wallets.filter((existing) => existing.address !== input.address),
-      wallet
-    ]);
-    return wallet;
   }
 
   async ping(): Promise<void> {
@@ -194,27 +162,15 @@ class InMemoryStore implements SentinelApiStore {
 function createHarness(
   options: {
     readonly rateLimit?: RateLimitConfig;
-    readonly sharedIdentity?: boolean;
     readonly store?: InMemoryStore;
   } = {}
 ) {
   const auth = new StubAuth();
-  if (options.sharedIdentity === true) {
-    Object.assign(auth, {
-      sharedIdentityClientId: "pledge-cash-test",
-      usesSharedIdentity: true
-    });
-  }
   const store = options.store ?? new InMemoryStore();
-  let nonceSequence = 0;
   const deps: SentinelApiDeps = {
     auth,
     config: {
       webOrigin: WEB_ORIGIN
-    },
-    generateNonce: () => {
-      nonceSequence += 1;
-      return `nonce${nonceSequence.toString().padStart(4, "0")}`;
     },
     now: () => FIXED_NOW,
     rateLimit: options.rateLimit ?? { capacity: 100 },
@@ -290,7 +246,7 @@ describe("PledgeCash identity API", () => {
       }>(capabilities)
     ).toEqual({
       socialProviders: ["discord", "twitter", "telegram"],
-      walletlessSocialSignIn: false
+      walletlessSocialSignIn: true
     });
 
     harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
@@ -323,7 +279,7 @@ describe("PledgeCash identity API", () => {
 
   test("keeps an existing product session readable when Identity metadata is unavailable", async () => {
     Object.assign(harness.auth, {
-      getProviders: async () => {
+      hydrateAuthSnapshot: async () => {
         throw new Error("Identity unavailable");
       },
       getSocialProviders: async () => {
@@ -342,7 +298,7 @@ describe("PledgeCash identity API", () => {
       }>(capabilities)
     ).toEqual({
       socialProviders: ["discord", "twitter", "telegram"],
-      walletlessSocialSignIn: false
+      walletlessSocialSignIn: true
     });
 
     const me = await harness.app.request("/auth/me", {
@@ -350,7 +306,7 @@ describe("PledgeCash identity API", () => {
     });
     expect(me.status).toBe(200);
     expect(await readJson<AuthMeResponse>(me)).toMatchObject({
-      providers: ["siwe"],
+      providers: [],
       user: { id: USER_ID }
     });
   });
@@ -427,7 +383,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("does not expose internal legacy Identity SIWE routes", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const responses = await Promise.all([
       identityHarness.app.request("/auth/legacy/siwe/nonce", {
         body: "{}",
@@ -446,7 +402,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("starts canonical social sign-in and linking routes", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const capabilities = await identityHarness.app.request(
       "/auth/capabilities"
     );
@@ -515,7 +471,7 @@ describe("PledgeCash identity API", () => {
         throw new Error("Identity unavailable");
       }
     ]) {
-      const identityHarness = createHarness({ sharedIdentity: true });
+      const identityHarness = createHarness();
       Object.assign(identityHarness.auth, {
         getSocialProviders,
         socialProviders: []
@@ -546,7 +502,7 @@ describe("PledgeCash identity API", () => {
         status: 503
       }
     ] as const) {
-      const identityHarness = createHarness({ sharedIdentity: true });
+      const identityHarness = createHarness();
       identityHarness.auth.socialFailure = expected.error;
 
       const response = await identityHarness.app.request(
@@ -570,7 +526,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rejects oversized social-auth request bodies before parsing them", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const oversizedPadding = "a".repeat(129 * 1024);
     const requests = [
       {
@@ -607,7 +563,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rejects invalid EOA SIWE proofs before forwarding them", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (const signature of [
@@ -627,7 +583,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rate limits malformed SIWE bodies before parsing them", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const clientAddress = "192.0.2.1";
     const malformed = await identityHarness.app.request("/auth/peezy/siwe/verify", {
       body: "{",
@@ -659,7 +615,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("keeps public Identity challenge limits independent across resolved edge clients", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
       const response = await identityHarness.app.request(
@@ -687,7 +643,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rejects oversized public SIWE requests before parsing or quota work", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const request = await authSiweRequest();
     const requests = [
       {
@@ -728,7 +684,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rate limits invalid signatures before signature recovery", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
@@ -768,7 +724,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("globally rate limits SIWE attempts before JSON parsing", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const statuses: number[] = [];
     for (let index = 0; index < 301; index += 1) {
       const response = await identityHarness.app.request(
@@ -799,8 +755,8 @@ describe("PledgeCash identity API", () => {
   test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
     const store = new InMemoryStore();
     const identityHarnesses = [
-      createHarness({ sharedIdentity: true, store }),
-      createHarness({ sharedIdentity: true, store })
+      createHarness({ store }),
+      createHarness({ store })
     ] as const;
     const request = await authSiweRequest();
     const statuses: number[] = [];
@@ -832,7 +788,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("ignores every caller-controlled forwarding address for client quota", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
@@ -854,23 +810,6 @@ describe("PledgeCash identity API", () => {
     expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
     expect(statuses[10]).toBe(429);
     expect(identityHarness.auth.forwarded).toHaveLength(10);
-  });
-
-  test("does not apply shared Identity quotas when shared Identity is disabled", async () => {
-    const request = await authSiweRequest();
-    const statuses = await Promise.all(
-      Array.from({ length: 51 }, async () => {
-        const response = await harness.app.request("/auth/siwe/verify", {
-          body: JSON.stringify(request),
-          headers: { "Content-Type": "application/json" },
-          method: "POST"
-        });
-        return response.status;
-      })
-    );
-
-    expect(statuses.every((status) => status === 200)).toBe(true);
-    expect(harness.auth.forwarded).toHaveLength(51);
   });
 
   test("caller-controlled addresses cannot create fresh rate-limit buckets", async () => {
@@ -895,18 +834,18 @@ describe("PledgeCash identity API", () => {
       statuses.push(response.status);
     }
 
-    expect(statuses).toEqual([200, 429, 429, 429]);
+    expect(statuses).toEqual([400, 429, 429, 429]);
   });
 
   test("reserves ten shared Identity grants for authenticated wallet links", async () => {
     const store = new InMemoryStore();
     const identityHarnesses = [
-      createHarness({ sharedIdentity: true, store }),
-      createHarness({ sharedIdentity: true, store })
+      createHarness({ store }),
+      createHarness({ store })
     ] as const;
     let linkCalls = 0;
     const linkWalletCredential = async (
-        input: Parameters<NonNullable<AuthAdapter["linkWalletCredential"]>>[0]
+        input: Parameters<AuthAdapter["linkWalletCredential"]>[0]
       ): Promise<WalletDto> => {
         const admitted = await store.takeIdentityQuota({
           capacity: 10,
@@ -983,7 +922,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("returns Identity's exact wallet-link challenge", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     const cookie = await signedInCookie(identityHarness);
     let challengeClientIp: string | undefined;
     const address = "0x8ba1f109551bd432803012645ac136ddd64dba72";
@@ -1032,7 +971,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rejects oversized wallet-link messages and request bodies before linking", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     let linkCalls = 0;
     Object.assign(identityHarness.auth, {
       linkWalletCredential: async () => {
@@ -1064,7 +1003,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("reports wallet-link dependency failures as retryable", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     Object.assign(identityHarness.auth, {
       linkWalletCredential: async () => {
         throw new Error("Identity request timed out after 2000ms");
@@ -1091,7 +1030,7 @@ describe("PledgeCash identity API", () => {
   });
 
   test("rejects non-link SIWE messages before delegated wallet linking", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const identityHarness = createHarness();
     let linkCalls = 0;
     Object.assign(identityHarness.auth, {
       linkWalletCredential: async () => {
@@ -1120,126 +1059,6 @@ describe("PledgeCash identity API", () => {
       }
     });
     expect(linkCalls).toBe(0);
-  });
-
-  test("links equal wallet credentials with nonce, replay, chain, and conflict checks", async () => {
-    const cookie = await signedInCookie(harness);
-    harness.store.walletsByUser.set(USER_ID, [
-      {
-        address: PRIMARY_WALLET,
-        canSignIn: true,
-        verifiedAt: FIXED_NOW.toISOString()
-      }
-    ]);
-    const account = privateKeyToAccount(
-      "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    );
-
-    const nonceResponse = await harness.app.request("/wallets/nonce", {
-      body: JSON.stringify({ address: account.address, chainId: 31337 }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-    expect(nonceResponse.status).toBe(200);
-    const nonce = await readJson<{
-      address: AddressDto;
-      chainId: number;
-      domain: string;
-      expirationTime: string;
-      issuedAt: string;
-      nonce: string;
-      statement: string;
-      uri: string;
-      version: "1";
-    }>(nonceResponse);
-    expect(nonce).toMatchObject({
-      address: account.address.toLowerCase(),
-      chainId: 31337,
-      domain: "pledge.cash",
-      nonce: "nonce0001",
-      uri: WEB_ORIGIN,
-      version: "1"
-    });
-
-    const message = createSiweMessage({
-      address: account.address,
-      chainId: 31337,
-      domain: nonce.domain,
-      expirationTime: new Date(nonce.expirationTime),
-      issuedAt: new Date(nonce.issuedAt),
-      nonce: nonce.nonce,
-      statement: nonce.statement,
-      uri: nonce.uri,
-      version: "1"
-    });
-    const signature = await account.signMessage({ message });
-
-    const link = await harness.app.request("/wallets", {
-      body: JSON.stringify({ message, signature }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-    expect(link.status).toBe(200);
-    const linked = await readJson<{ wallet: WalletDto }>(link);
-    expect(linked.wallet).toEqual({
-      address: account.address.toLowerCase(),
-      canSignIn: true,
-      verifiedAt: FIXED_NOW.toISOString()
-    });
-    expect(harness.store.lastLinkedWalletInput).toEqual({
-      address: account.address.toLowerCase(),
-      chainId: 31337,
-      userId: USER_ID
-    });
-
-    const replay = await harness.app.request("/wallets", {
-      body: JSON.stringify({ message, signature }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-    expect(replay.status).toBe(409);
-
-    const conflictedAccount = privateKeyToAccount(
-      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-    );
-    const conflictedAddress = conflictedAccount.address.toLowerCase() as AddressDto;
-    harness.store.conflictedWallets.add(conflictedAddress);
-    const conflictedNonceResponse = await harness.app.request("/wallets/nonce", {
-      body: JSON.stringify({ address: conflictedAccount.address, chainId: 1 }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-    const conflictedNonce = await readJson<{
-      domain: string;
-      expirationTime: string;
-      issuedAt: string;
-      nonce: string;
-      statement: string;
-      uri: string;
-    }>(conflictedNonceResponse);
-    const conflictedMessage = createSiweMessage({
-      address: conflictedAccount.address,
-      chainId: 1,
-      domain: conflictedNonce.domain,
-      expirationTime: new Date(conflictedNonce.expirationTime),
-      issuedAt: new Date(conflictedNonce.issuedAt),
-      nonce: conflictedNonce.nonce,
-      statement: conflictedNonce.statement,
-      uri: conflictedNonce.uri,
-      version: "1"
-    });
-    const conflictedSignature = await conflictedAccount.signMessage({ message: conflictedMessage });
-    const conflict = await harness.app.request("/wallets", {
-      body: JSON.stringify({ message: conflictedMessage, signature: conflictedSignature }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-
-    expect(conflict.status).toBe(409);
-    expect(await readJson<{ error: { message: string } }>(conflict)).toEqual({
-      error: { message: "Wallet is already linked to another account" }
-    });
-    expect(harness.store.lastLinkedWalletInput?.chainId).toBe(1);
   });
 
   test("does not expose deleted surveillance and fanout routes", async () => {

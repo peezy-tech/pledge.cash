@@ -20,8 +20,7 @@ const config = {
       clientId: "pledge-cash",
       oidcClientSecret: "oidc-secret-at-least-32-characters"
     },
-    secret: "sentinel-secret-at-least-32-characters",
-    socialProviders: {}
+    secret: "sentinel-secret-at-least-32-characters"
   },
   webOrigin: "http://localhost:5173"
 } satisfies Pick<Config, "auth" | "webOrigin">;
@@ -62,12 +61,12 @@ test("returns a retryable failure for stalled Identity sign-in requests", async 
   );
 
   const results = await Promise.allSettled([
-    adapter.createWalletChallenge?.({
+    adapter.createWalletChallenge({
       address: "0x1111111111111111111111111111111111111111",
       chainId: 1,
       purpose: "sign-in"
     }),
-    adapter.getSocialProviders?.(),
+    adapter.getSocialProviders(),
     adapter.handler(
       new Request("http://localhost:8787/auth/peezy/siwe/verify", {
         body: JSON.stringify({
@@ -163,7 +162,7 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
     { requestTimeoutMs: 10 }
   );
 
-  await expect(adapter.getSocialProviders?.()).rejects.toThrow(
+  await expect(adapter.getSocialProviders()).rejects.toThrow(
     "Identity request timed out after 10ms"
   );
   expect(signal?.aborted).toBe(true);
@@ -199,7 +198,7 @@ test("forwards only Sentinel's resolved client address to the Identity challenge
     }
   );
 
-  await adapter.createWalletChallenge?.({
+  await adapter.createWalletChallenge({
     address: "0x1111111111111111111111111111111111111111",
     chainId: 1,
     clientIp: "198.51.100.8",
@@ -571,7 +570,7 @@ test("rejects oversized Identity credential sets during session hydration withou
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await expect(
-      adapter.hydrateAuthSnapshot?.(subject, snapshot)
+      adapter.hydrateAuthSnapshot(subject, snapshot)
     ).rejects.toThrow(
       "peezy.tech identity exceeds the 256-credential provisioning limit"
     );
@@ -584,7 +583,7 @@ test("rejects oversized Identity credential sets during session hydration withou
     async () => new Response("x".repeat(256 * 1024 + 1))
   );
   await expect(
-    responseLimitedAdapter.hydrateAuthSnapshot?.(subject, snapshot)
+    responseLimitedAdapter.hydrateAuthSnapshot(subject, snapshot)
   ).rejects.toThrow(
     "peezy.tech identity exceeds the 262144-byte response limit"
   );
@@ -704,12 +703,12 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
   };
   await expect(
     Promise.all([
-      adapter.hydrateAuthSnapshot?.(subject, snapshot),
-      adapter.hydrateAuthSnapshot?.(subject, snapshot)
+      adapter.hydrateAuthSnapshot(subject, snapshot),
+      adapter.hydrateAuthSnapshot(subject, snapshot)
     ])
   ).resolves.toEqual([expected, expected]);
   await expect(
-    adapter.hydrateAuthSnapshot?.(subject, snapshot)
+    adapter.hydrateAuthSnapshot(subject, snapshot)
   ).resolves.toEqual(expected);
   expect(identityReads).toBe(1);
 });
@@ -775,7 +774,7 @@ test("caps presentation reads at 230 to preserve wallet authentication capacity"
   };
 
   await expect(
-    adapter.hydrateAuthSnapshot?.(subject, snapshot)
+    adapter.hydrateAuthSnapshot(subject, snapshot)
   ).rejects.toThrow("Identity presentation read budget exhausted");
   expect(identityReads).toBe(0);
   expect(quotaInserts).toBe(0);

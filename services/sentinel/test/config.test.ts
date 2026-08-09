@@ -6,6 +6,10 @@ const baseEnv = {
   BETTER_AUTH_SECRET: "sentinel-test-secret-at-least-32-characters",
   BETTER_AUTH_URL: "https://api.pledge.cash",
   DATABASE_URL: "postgres://sentinel:sentinel@127.0.0.1:5432/sentinel",
+  PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+  PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+  PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+  PEEZY_IDENTITY_URL: "https://identity.peezy.tech",
   SENTINEL_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
   SENTINEL_WEB_ORIGIN: "http://localhost:5173"
 };
@@ -22,8 +26,13 @@ describe("identity service config", () => {
     expect(config).toEqual({
       auth: {
         baseUrl: "https://api.pledge.cash",
-        secret: baseEnv.BETTER_AUTH_SECRET,
-        socialProviders: {}
+        identity: {
+          appClientSecret: baseEnv.PEEZY_IDENTITY_APP_CLIENT_SECRET,
+          baseUrl: baseEnv.PEEZY_IDENTITY_URL,
+          clientId: baseEnv.PEEZY_IDENTITY_CLIENT_ID,
+          oidcClientSecret: baseEnv.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
+        },
+        secret: baseEnv.BETTER_AUTH_SECRET
       },
       databaseUrl: baseEnv.DATABASE_URL,
       port: 8787,
@@ -32,61 +41,16 @@ describe("identity service config", () => {
     });
   });
 
-  test("loads complete optional social provider credentials", () => {
-    const config = loadConfig({
-      ...baseEnv,
-      DISCORD_CLIENT_ID: "discord-client",
-      DISCORD_CLIENT_SECRET: "discord-secret",
-      GITHUB_CLIENT_ID: "github-client",
-      GITHUB_CLIENT_SECRET: "github-secret",
-      TELEGRAM_OAUTH_CLIENT_ID: "telegram-client",
-      TELEGRAM_OAUTH_CLIENT_SECRET: "telegram-secret",
-      TWITTER_CLIENT_ID: "twitter-client",
-      TWITTER_CLIENT_SECRET: "twitter-secret"
-    });
-
-    expect(config.auth.socialProviders).toEqual({
-      discord: { clientId: "discord-client", clientSecret: "discord-secret" },
-      github: { clientId: "github-client", clientSecret: "github-secret" },
-      telegram: { clientId: "telegram-client", clientSecret: "telegram-secret" },
-      twitter: { clientId: "twitter-client", clientSecret: "twitter-secret" }
-    });
-  });
-
-  test("requires each social provider client id and secret as a pair", () => {
-    for (const provider of [
-      { GITHUB_CLIENT_ID: "github-client" },
-      { APPLE_CLIENT_ID: "apple-client" },
-      { DISCORD_CLIENT_SECRET: "discord-secret" },
-      { TELEGRAM_OAUTH_CLIENT_ID: "telegram-client" },
-      { TWITTER_CLIENT_SECRET: "twitter-secret" }
-    ]) {
-      expect(() => loadConfig({ ...baseEnv, ...provider })).toThrow(
-        /_CLIENT_ID and .*_CLIENT_SECRET must be configured together/
-      );
-    }
-  });
-
-  test("loads shared Identity only when all confidential values are present", () => {
-    const identity = {
-      PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
-      PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
-      PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
-      PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
-    };
-    expect(loadConfig({ ...baseEnv, ...identity }).auth.identity).toEqual({
-      appClientSecret: identity.PEEZY_IDENTITY_APP_CLIENT_SECRET,
-      baseUrl: identity.PEEZY_IDENTITY_URL,
-      clientId: identity.PEEZY_IDENTITY_CLIENT_ID,
-      oidcClientSecret: identity.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
-    });
-
-    for (const omitted of Object.keys(identity)) {
-      const incomplete = { ...identity };
-      delete incomplete[omitted as keyof typeof incomplete];
-      expect(() => loadConfig({ ...baseEnv, ...incomplete })).toThrow(
-        "PEEZY_IDENTITY_URL, PEEZY_IDENTITY_CLIENT_ID, PEEZY_IDENTITY_APP_CLIENT_SECRET, and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be configured together"
-      );
+  test("requires every shared Identity setting", () => {
+    for (const omitted of [
+      "PEEZY_IDENTITY_URL",
+      "PEEZY_IDENTITY_CLIENT_ID",
+      "PEEZY_IDENTITY_APP_CLIENT_SECRET",
+      "PEEZY_IDENTITY_OIDC_CLIENT_SECRET"
+    ] as const) {
+      const incomplete: Record<string, string | undefined> = { ...baseEnv };
+      delete incomplete[omitted];
+      expect(() => loadConfig(incomplete)).toThrow();
     }
   });
 
@@ -95,10 +59,10 @@ describe("identity service config", () => {
     expect(() =>
       loadConfig({
         ...withoutTrustedProxy,
-        PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
-        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
-        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
-        PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: baseEnv.PEEZY_IDENTITY_APP_CLIENT_SECRET,
+        PEEZY_IDENTITY_CLIENT_ID: baseEnv.PEEZY_IDENTITY_CLIENT_ID,
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: baseEnv.PEEZY_IDENTITY_OIDC_CLIENT_SECRET,
+        PEEZY_IDENTITY_URL: baseEnv.PEEZY_IDENTITY_URL
       })
     ).toThrow("SENTINEL_TRUSTED_PROXY_IPS must identify the HTTPS edge in shared Identity mode");
     expect(() =>
@@ -107,16 +71,11 @@ describe("identity service config", () => {
   });
 
   test("requires secure bare origins", () => {
-    const identity = {
-      PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
-      PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
-      PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters"
-    };
     expect(() =>
-      loadConfig({ ...baseEnv, ...identity, PEEZY_IDENTITY_URL: "https://identity.peezy.tech/oauth" })
+      loadConfig({ ...baseEnv, PEEZY_IDENTITY_URL: "https://identity.peezy.tech/oauth" })
     ).toThrow("PEEZY_IDENTITY_URL must be an origin");
     expect(() =>
-      loadConfig({ ...baseEnv, ...identity, PEEZY_IDENTITY_URL: "http://identity.peezy.tech" })
+      loadConfig({ ...baseEnv, PEEZY_IDENTITY_URL: "http://identity.peezy.tech" })
     ).toThrow("PEEZY_IDENTITY_URL must use HTTPS outside loopback development");
     expect(() => loadConfig({ ...baseEnv, BETTER_AUTH_URL: "https://api.pledge.cash/auth" })).toThrow(
       "BETTER_AUTH_URL must be an origin"

@@ -27,7 +27,6 @@
     "better-auth": "1.6.23",
     "drizzle-orm": "0.45.2",
     "hono": "^4.6.13",
-    "jose": "6.2.3",
     "postgres": "^3.4.5",
     "viem": "catalog:",
     "zod": "^3.24.1"

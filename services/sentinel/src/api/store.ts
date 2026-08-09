@@ -1,15 +1,12 @@
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 
 import type { SentinelDb } from "../db/client";
 import {
   authAccounts,
-  authWallets,
-  walletLinkNonces,
-  walletOwners,
   wallets
 } from "../db/schema";
-import type { SentinelApiStore, WalletNonceRecord } from "./auth";
+import type { SentinelApiStore } from "./auth";
 import {
   AuthProviderSchema,
   type AddressDto,
@@ -20,103 +17,12 @@ import { takeIdentityQuota } from "./identity-quota";
 
 export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
   return {
-    async consumeWalletNonce(input) {
-      const [row] = await db
-        .update(walletLinkNonces)
-        .set({ usedAt: input.now })
-        .where(
-          and(
-            eq(walletLinkNonces.nonce, input.nonce),
-            eq(walletLinkNonces.userId, input.userId),
-            isNull(walletLinkNonces.usedAt),
-            gt(walletLinkNonces.expiresAt, input.now)
-          )
-        )
-        .returning({ nonce: walletLinkNonces.nonce });
-      return row !== undefined;
-    },
-    async createWalletNonce(input) {
-      const [row] = await db.insert(walletLinkNonces).values(input).returning();
-      return row ?? { ...input, usedAt: null };
-    },
     async getAuthSnapshot(userId) {
       const [providers, linkedWallets] = await Promise.all([
         listAuthProviders(db, userId),
         listWallets(db, userId)
       ]);
       return { providers, wallets: linkedWallets };
-    },
-    async getWalletNonce(nonce) {
-      const [row] = await db
-        .select()
-        .from(walletLinkNonces)
-        .where(eq(walletLinkNonces.nonce, nonce))
-        .limit(1);
-      return row ?? null;
-    },
-    async linkWallet(input) {
-      return db.transaction(async (transaction) => {
-        const checksumAddress = getAddress(input.address);
-        await transaction.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(lower(${checksumAddress})))`
-        );
-
-        await transaction
-          .insert(walletOwners)
-          .values({ address: checksumAddress.toLowerCase(), userId: input.userId })
-          .onConflictDoNothing();
-
-        const [owner] = await transaction
-          .select({ userId: walletOwners.userId })
-          .from(walletOwners)
-          .where(eq(walletOwners.address, checksumAddress.toLowerCase()))
-          .for("update")
-          .limit(1);
-        if (owner !== undefined && owner.userId !== input.userId) {
-          return null;
-        }
-
-        await transaction
-          .insert(authWallets)
-          .values({
-            address: checksumAddress,
-            chainId: input.chainId,
-            isPrimary: false,
-            userId: input.userId
-          })
-          .onConflictDoNothing();
-
-        const [credential] = await transaction
-          .select({ userId: authWallets.userId })
-          .from(authWallets)
-          .where(
-            and(
-              eq(authWallets.chainId, input.chainId),
-              sql`lower(${authWallets.address}) = lower(${checksumAddress})`
-            )
-          )
-          .limit(1);
-        if (credential === undefined || credential.userId !== input.userId) {
-          return null;
-        }
-
-        const [row] = await transaction
-          .update(wallets)
-          .set({
-            siweMessage: input.siweMessage,
-            verifiedAt: input.verifiedAt
-          })
-          .where(
-            and(
-              eq(wallets.userId, input.userId),
-              eq(wallets.chainId, input.chainId),
-              sql`lower(${wallets.address}) = lower(${checksumAddress})`
-            )
-          )
-          .returning();
-
-        return row === undefined ? null : toWalletDto(row);
-      });
     },
     async ping() {
       await db.execute(sql`SELECT 1`);
@@ -182,5 +88,3 @@ function toWalletDto(row: {
     verifiedAt: row.verifiedAt.toISOString()
   };
 }
-
-export type { WalletNonceRecord };
