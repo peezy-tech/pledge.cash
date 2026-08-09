@@ -27,7 +27,8 @@ position locking, fee collection, wind-down, locker exit, snapshotting, and rede
 
 The lean artifact includes only the deterministic deployer, Boardroom factory, grant
 factory, locker factory, fee router, external profile addresses, salts, code hashes,
-authorities, and release identity. See the deep [deployment
+canonical authorities, and release identity. Root-specific owner and fee-recipient
+relationships are derived and checked against the live contracts. See the deep [deployment
 specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md).
 
 None of these commands authorizes or performs a public-network broadcast.

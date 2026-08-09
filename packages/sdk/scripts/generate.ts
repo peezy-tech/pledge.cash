@@ -8,7 +8,7 @@ type Artifact = {
   abi?: unknown;
 };
 
-type DeploymentFieldKind = "address" | "bigint" | "boolean" | "number" | "string";
+type DeploymentFieldKind = "address" | "bigint" | "number" | "string";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../../..");
@@ -33,11 +33,8 @@ const deploymentFields = [
   ["status", "string"],
   ["reason", "string"],
   ["protocolVersion", "string"],
-  ["protocolReleaseCodeHash", "string"],
+  ["releaseCodeHash", "string"],
   ["sourceCommit", "string"],
-  ["deterministicDeployment", "boolean"],
-  ["deterministicDeploymentVersion", "string"],
-  ["deterministicReleaseCodeHash", "string"],
   ["deterministicDeployer", "address"],
   ["deterministicDeployerOwner", "address"],
   ["create2Factory", "address"],
@@ -57,12 +54,8 @@ const deploymentFields = [
   ["tokenGrantFactory", "address"],
   ["tokenGrantLogic", "address"],
   ["wrappedNative", "address"],
-  ["deployer", "address"],
-  ["tokenGrantFactoryOwner", "address"],
+  ["protocolOwner", "address"],
   ["protocolTreasury", "address"],
-  ["protocolFeeRouterOwner", "address"],
-  ["protocolFeeRouterRecipient", "address"],
-  ["tokenGrantFeeRecipient", "address"],
   ["creationFee", "bigint"],
   ["deploymentBlock", "bigint"],
   ["deterministicDeployerCodeHash", "string"],
@@ -88,7 +81,6 @@ function literal(value: unknown): string {
 function deploymentFieldType(kind: DeploymentFieldKind): string {
   if (kind === "address") return "Address";
   if (kind === "bigint") return "bigint";
-  if (kind === "boolean") return "boolean";
   if (kind === "number") return "number";
   return "string";
 }

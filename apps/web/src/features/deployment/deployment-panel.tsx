@@ -79,10 +79,10 @@ function summarizeDeployment({
   localProtocolFeeRecipient: Address | undefined;
 }): DeploymentSummary {
   return {
-    protocolFeeRecipient: deployment?.protocolFeeRouterRecipient ?? localProtocolFeeRecipient,
+    protocolFeeRecipient: deployment?.protocolTreasury ?? localProtocolFeeRecipient,
     liquidityState: describeLiquidityState(deployment),
     boardroomState: describeBoardroomState(deployment),
-    factoryOwner: factorySnapshot.owner ?? deployment?.tokenGrantFactoryOwner,
+    factoryOwner: factorySnapshot.owner ?? deployment?.protocolOwner,
     hasTokenGrantFactory: Boolean(deployment?.tokenGrantFactory),
     tokenGrantLogic: factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic,
   };

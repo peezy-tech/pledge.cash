@@ -20,8 +20,14 @@ A release artifact identifies:
 - `LiquidityLockerFactory`;
 - external wrapped-native, Uniswap v4 `PoolManager`, `PositionManager`, Universal Router,
   Quoter, StateView, and Permit2 addresses from the network profile;
-- release commit, chain ID, release and manifest hashes, runtime code hashes, owners,
-  fee recipient, and pending or finalized state.
+- release commit, chain ID, release and manifest hashes, runtime code hashes, the
+  deterministic-deployer owner, protocol owner, protocol treasury, and pending or
+  finalized state.
+
+The artifact records each authority once. Verification proves both owned roots match
+`protocolOwner`, the fee router pays `protocolTreasury`, and the grant factory pays the
+fee router. Those derived contract-specific owner and recipient aliases are not separate
+artifact fields.
 
 Removed governance, diamond, distribution, rewards, bond, hook, and position-vault
 contracts are not valid artifact fields.

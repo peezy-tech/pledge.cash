@@ -250,10 +250,7 @@ contract Deploy is Script {
         bytes32 releaseCodeHash = PledgeCashDeploymentSalts.releaseCodeHash();
         json.serialize("chainId", block.chainid);
         json.serialize("protocolVersion", PledgeCashDeploymentSalts.version());
-        json.serialize("protocolReleaseCodeHash", releaseCodeHash);
-        json.serialize("deterministicDeployment", true);
-        json.serialize("deterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
-        json.serialize("deterministicReleaseCodeHash", releaseCodeHash);
+        json.serialize("releaseCodeHash", releaseCodeHash);
         json.serialize("deterministicDeployer", address(state.deterministicDeployer));
         json.serialize("deterministicDeployerOwner", state.deterministicDeployerOwner);
         json.serialize("create2Factory", state.create2Factory);
@@ -273,12 +270,8 @@ contract Deploy is Script {
         json.serialize("tokenGrantFactory", address(state.tokenGrantFactory));
         json.serialize("tokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
         json.serialize("wrappedNative", state.wrappedNative);
-        json.serialize("deployer", state.deployer);
-        json.serialize("tokenGrantFactoryOwner", state.tokenGrantFactory.owner());
+        json.serialize("protocolOwner", state.protocolOwner);
         json.serialize("protocolTreasury", state.protocolTreasury);
-        json.serialize("protocolFeeRouterOwner", state.protocolFeeRouter.owner());
-        json.serialize("protocolFeeRouterRecipient", state.protocolFeeRouter.feeRecipient());
-        json.serialize("tokenGrantFeeRecipient", state.tokenGrantFactory.feeRecipient());
         json.serialize("creationFee", state.tokenGrantFactory.creationFee());
         json.serialize("deploymentBlock", block.number);
         json.serialize("deterministicDeployerCodeHash", address(state.deterministicDeployer).codehash);

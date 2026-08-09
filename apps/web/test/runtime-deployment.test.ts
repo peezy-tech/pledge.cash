@@ -21,7 +21,7 @@ describe("lean runtime deployment artifacts", () => {
       tokenGrantLogic: address("4"),
       liquidityLockerFactory: address("5"),
       protocolFeeRouter: address("6"),
-      protocolFeeRouterRecipient: address("7"),
+      protocolTreasury: address("7"),
       uniswapV4PoolManager: address("8"),
       uniswapV4PositionManager: address("9"),
       uniswapUniversalRouter: address("a"),
@@ -36,13 +36,13 @@ describe("lean runtime deployment artifacts", () => {
     expect(deployment.boardroomFactory).toBe(address("1"));
     expect(deployment.boardroomImplementation).toBe(address("2"));
     expect(deployment.liquidityLockerFactory).toBe(address("5"));
-    expect(deployment.protocolFeeRouterRecipient).toBe(address("7"));
+    expect(deployment.protocolTreasury).toBe(address("7"));
     expect(deployment.uniswapV4PositionManager).toBe(address("9"));
     expect(deployment.creationFee).toBe(12n);
     expect(deployment.deploymentBlock).toBe(42n);
   });
 
-  test("does not preserve deleted controller, facet, policy, or P4LP fields", () => {
+  test("does not preserve deleted protocol or deployment aliases", () => {
     const deployment = parseDeployment(JSON.stringify({
       chainId: 31337,
       boardroomControllerFactory: address("1"),
@@ -50,6 +50,12 @@ describe("lean runtime deployment artifacts", () => {
       assetPolicy: address("3"),
       pledgeV4LiquidityFactory: address("4"),
       deploymentTimestamp: 1_700_000_000,
+      deterministicDeployment: true,
+      deterministicDeploymentVersion: "duplicate",
+      deterministicReleaseCodeHash: "duplicate",
+      protocolReleaseCodeHash: "duplicate",
+      tokenGrantFactoryOwner: address("5"),
+      protocolFeeRouterRecipient: address("6"),
     })) as Record<string, unknown>;
 
     expect(deployment.boardroomControllerFactory).toBeUndefined();
@@ -57,6 +63,12 @@ describe("lean runtime deployment artifacts", () => {
     expect(deployment.assetPolicy).toBeUndefined();
     expect(deployment.pledgeV4LiquidityFactory).toBeUndefined();
     expect(deployment.deploymentTimestamp).toBeUndefined();
+    expect(deployment.deterministicDeployment).toBeUndefined();
+    expect(deployment.deterministicDeploymentVersion).toBeUndefined();
+    expect(deployment.deterministicReleaseCodeHash).toBeUndefined();
+    expect(deployment.protocolReleaseCodeHash).toBeUndefined();
+    expect(deployment.tokenGrantFactoryOwner).toBeUndefined();
+    expect(deployment.protocolFeeRouterRecipient).toBeUndefined();
   });
 
   test("accepts status-only placeholders and rejects wrong-chain artifacts", () => {

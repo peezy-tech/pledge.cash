@@ -4,10 +4,8 @@ const STRING_DEPLOYMENT_FIELDS = [
   "status",
   "reason",
   "protocolVersion",
-  "protocolReleaseCodeHash",
+  "releaseCodeHash",
   "sourceCommit",
-  "deterministicDeploymentVersion",
-  "deterministicReleaseCodeHash",
   "manifestHash",
   "boardroomArchitectureCodeHash",
   "moduleArchitectureCodeHash",
@@ -44,15 +42,10 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "tokenGrantFactory",
   "tokenGrantLogic",
   "wrappedNative",
-  "deployer",
-  "tokenGrantFactoryOwner",
+  "protocolOwner",
   "protocolTreasury",
-  "protocolFeeRouterOwner",
-  "protocolFeeRouterRecipient",
-  "tokenGrantFeeRecipient",
 ] as const;
 
-const BOOLEAN_DEPLOYMENT_FIELDS = ["deterministicDeployment"] as const;
 const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentBlock"] as const;
 const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null';
 
@@ -66,7 +59,6 @@ export function parseDeployment(raw: string): PledgeCashDeployment {
   const deployment: PledgeCashDeployment = { chainId: Number(json.chainId) };
   applyStringFields(deployment, json);
   applyAddressFields(deployment, json);
-  applyBooleanFields(deployment, json);
   applyBigintFields(deployment, raw);
   return deployment;
 }
@@ -80,12 +72,6 @@ function applyStringFields(deployment: PledgeCashDeployment, json: Record<string
 function applyAddressFields(deployment: PledgeCashDeployment, json: Record<string, unknown>): void {
   for (const field of ADDRESS_DEPLOYMENT_FIELDS) {
     if (typeof json[field] === "string") deployment[field] = json[field] as Address;
-  }
-}
-
-function applyBooleanFields(deployment: PledgeCashDeployment, json: Record<string, unknown>): void {
-  for (const field of BOOLEAN_DEPLOYMENT_FIELDS) {
-    if (typeof json[field] === "boolean") deployment[field] = json[field];
   }
 }
 

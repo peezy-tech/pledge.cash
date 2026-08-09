@@ -46,13 +46,11 @@ fi
 readonly -a live_fields=(
   boardroomArchitectureCodeHash boardroomFactory boardroomFactoryCodeHash
   boardroomImplementation boardroomImplementationCodeHash chainId create2Factory creationFee
-  deployer deploymentBlock deterministicDeployer deterministicDeployerCodeHash
-  deterministicDeployerOwner deterministicDeployment deterministicDeploymentVersion
-  deterministicReleaseCodeHash liquidityLockerFactory liquidityLockerFactoryCodeHash manifestHash
+  deploymentBlock deterministicDeployer deterministicDeployerCodeHash
+  deterministicDeployerOwner liquidityLockerFactory liquidityLockerFactoryCodeHash manifestHash
   moduleArchitectureCodeHash permit2 permit2CodeHash protocolFeeRouter protocolFeeRouterCodeHash
-  protocolFeeRouterOwner protocolFeeRouterRecipient protocolReleaseCodeHash protocolTreasury
-  protocolVersion sourceCommit tokenGrantFactory tokenGrantFactoryCodeHash tokenGrantFactoryOwner
-  tokenGrantFeeRecipient tokenGrantLogic tokenGrantLogicCodeHash uniswapUniversalRouter
+  protocolOwner protocolTreasury protocolVersion releaseCodeHash sourceCommit tokenGrantFactory
+  tokenGrantFactoryCodeHash tokenGrantLogic tokenGrantLogicCodeHash uniswapUniversalRouter
   uniswapUniversalRouterCodeHash uniswapV4PoolManager uniswapV4PoolManagerCodeHash
   uniswapV4PositionManager uniswapV4PositionManagerCodeHash uniswapV4Quoter
   uniswapV4QuoterCodeHash uniswapV4StateView uniswapV4StateViewCodeHash wrappedNative
@@ -63,7 +61,6 @@ required_fields_json="$(printf '%s\n' "${live_fields[@]}" | jq -R . | jq -s .)"
 jq -e --argjson fields "$required_fields_json" '
   (keys | sort) == ($fields | sort)
   and (.chainId | type == "number" and . > 0 and floor == .)
-  and .deterministicDeployment == true
   and (.creationFee | type == "number" and . >= 0 and floor == .)
   and (.deploymentBlock | type == "number" and . > 0 and floor == .)
   and all(to_entries[] | select(.key | endswith("CodeHash") or . == "manifestHash");
@@ -74,7 +71,7 @@ jq -e --argjson fields "$required_fields_json" '
     or (.key | endswith("Owner"))
     or (.key | endswith("Recipient"))
     or (.key | IN(
-      "create2Factory", "deployer", "deterministicDeployer", "permit2", "protocolFeeRouter",
+      "create2Factory", "deterministicDeployer", "permit2", "protocolFeeRouter", "protocolOwner",
       "protocolTreasury", "tokenGrantLogic", "uniswapUniversalRouter", "uniswapV4PoolManager",
       "uniswapV4PositionManager", "uniswapV4Quoter", "uniswapV4StateView", "wrappedNative"
     ))
@@ -102,8 +99,6 @@ rpc_chain_id="$(cast chain-id --rpc-url "$rpc_url")" || fail "could not read RPC
   || fail "RPC chain $rpc_chain_id does not match artifact chain $artifact_chain_id"
 
 [[ "$(field protocolVersion)" == "$PROTOCOL_VERSION" ]] || fail "protocolVersion mismatch"
-[[ "$(field deterministicDeploymentVersion)" == "$PROTOCOL_VERSION" ]] \
-  || fail "deterministicDeploymentVersion mismatch"
 source_commit="$(field sourceCommit)"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "sourceCommit must be an exact lowercase Git commit"
 [[ "$source_commit" == "$(git -C "$REPO_DIR" rev-parse HEAD)" ]] \
@@ -169,17 +164,17 @@ assert_address "BoardroomFactory wrapped native" "$(field wrappedNative)" \
   "$(call_value "$(field boardroomFactory)" 'wrappedNative()(address)')"
 assert_address "Boardroom implementation" "$(field boardroomImplementation)" \
   "$(call_value "$(field boardroomFactory)" 'boardroomImplementation()(address)')"
-assert_address "ProtocolFeeRouter owner" "$(field protocolFeeRouterOwner)" \
+assert_address "ProtocolFeeRouter owner" "$(field protocolOwner)" \
   "$(call_value "$(field protocolFeeRouter)" 'owner()(address)')"
-assert_address "ProtocolFeeRouter recipient" "$(field protocolFeeRouterRecipient)" \
+assert_address "ProtocolFeeRouter recipient" "$(field protocolTreasury)" \
   "$(call_value "$(field protocolFeeRouter)" 'feeRecipient()(address)')"
-assert_address "TokenGrantFactory owner" "$(field tokenGrantFactoryOwner)" \
+assert_address "TokenGrantFactory owner" "$(field protocolOwner)" \
   "$(call_value "$(field tokenGrantFactory)" 'owner()(address)')"
 assert_address "TokenGrantFactory BoardroomFactory" "$(field boardroomFactory)" \
   "$(call_value "$(field tokenGrantFactory)" 'boardroomFactory()(address)')"
 assert_address "TokenGrant logic" "$(field tokenGrantLogic)" \
   "$(call_value "$(field tokenGrantFactory)" 'tokenGrantLogic()(address)')"
-assert_address "TokenGrant fee recipient" "$(field tokenGrantFeeRecipient)" \
+assert_address "TokenGrant fee recipient" "$(field protocolFeeRouter)" \
   "$(call_value "$(field tokenGrantFactory)" 'feeRecipient()(address)')"
 [[ "$(field creationFee)" == "$(call_value "$(field tokenGrantFactory)" 'creationFee()(uint256)')" ]] \
   || fail "TokenGrant creation fee mismatch"
@@ -189,10 +184,6 @@ assert_address "LiquidityLockerFactory PositionManager" "$(field uniswapV4Positi
   "$(call_value "$(field liquidityLockerFactory)" 'positionManager()(address)')"
 assert_address "LiquidityLockerFactory fee router" "$(field protocolFeeRouter)" \
   "$(call_value "$(field liquidityLockerFactory)" 'protocolFeeRouter()(address)')"
-assert_address "protocol owner agreement" "$(field tokenGrantFactoryOwner)" "$(field protocolFeeRouterOwner)"
-assert_address "protocol treasury agreement" "$(field protocolTreasury)" "$(field protocolFeeRouterRecipient)"
-assert_address "grant fee routing" "$(field protocolFeeRouter)" "$(field tokenGrantFeeRecipient)"
-
 creation_code() {
   forge inspect "$1" bytecode
 }
@@ -240,9 +231,9 @@ assert_address "CREATE2 deterministic deployer" "$(field deterministicDeployer)"
 assert_root BoardroomFactory 'src/boardroom/BoardroomFactory.sol:BoardroomFactory' boardroomFactory \
   'constructor(address)' "$(field wrappedNative)"
 assert_root ProtocolFeeRouter 'src/fees/ProtocolFeeRouter.sol:ProtocolFeeRouter' protocolFeeRouter \
-  'constructor(address,address)' "$(field deployer)" "$(field protocolTreasury)"
+  'constructor(address,address)' "$(field deterministicDeployerOwner)" "$(field protocolTreasury)"
 assert_root TokenGrantFactory 'src/grants/TokenGrantFactory.sol:TokenGrantFactory' tokenGrantFactory \
-  'constructor(address,address)' "$(field deployer)" "$(field boardroomFactory)"
+  'constructor(address,address)' "$(field deterministicDeployerOwner)" "$(field boardroomFactory)"
 assert_root LiquidityLockerFactory 'src/uniswap/LiquidityLockerFactory.sol:LiquidityLockerFactory' \
   liquidityLockerFactory 'constructor(address,address,address)' "$(field boardroomFactory)" \
   "$(field uniswapV4PositionManager)" "$(field protocolFeeRouter)"
@@ -260,8 +251,7 @@ release_code_hash="$(cast keccak "$(cast abi-encode 'f(bytes32,bytes32,bytes32)'
   "$deterministic_creation_hash" "$boardroom_architecture_hash" "$module_architecture_hash")")"
 assert_hash "Boardroom architecture" "$boardroom_architecture_hash" "$(field boardroomArchitectureCodeHash)"
 assert_hash "module architecture" "$module_architecture_hash" "$(field moduleArchitectureCodeHash)"
-assert_hash "protocol release" "$release_code_hash" "$(field protocolReleaseCodeHash)"
-assert_hash "deterministic release" "$release_code_hash" "$(field deterministicReleaseCodeHash)"
+assert_hash "release" "$release_code_hash" "$(field releaseCodeHash)"
 
 external_hash="$(cast keccak "$(cast abi-encode 'f(address,address,address,address,address,address,address,address)' \
   "$(field create2Factory)" "$(field wrappedNative)" "$(field uniswapV4PoolManager)" \
@@ -271,7 +261,7 @@ roots_hash="$(cast keccak "$(cast abi-encode 'f(address,address,address,address,
   "$(field deterministicDeployer)" "$(field boardroomFactory)" "$(field protocolFeeRouter)" \
   "$(field tokenGrantFactory)" "$(field liquidityLockerFactory)")")"
 authority_hash="$(cast keccak "$(cast abi-encode 'f(address,address,address,uint256)' \
-  "$(field deterministicDeployerOwner)" "$(field protocolFeeRouterOwner)" \
+  "$(field deterministicDeployerOwner)" "$(field protocolOwner)" \
   "$(field protocolTreasury)" "$(field creationFee)")")"
 manifest_hash="$(cast keccak "$(cast abi-encode 'f(bytes32,uint256,bytes32,bytes32,bytes32)' \
   "$release_code_hash" "$artifact_chain_id" "$external_hash" "$roots_hash" "$authority_hash")")"

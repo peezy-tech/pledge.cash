@@ -85,12 +85,9 @@ if [[ -f "$PREVIOUS_ARTIFACT" ]] && ! jq -e '.status == "pending"' "$PREVIOUS_AR
   jq -e --argjson chainId "$CHAIN_ID" '
     .chainId == $chainId
     and (.deploymentBlock | type == "number" and . > 0 and floor == .)
+    and (.protocolVersion | type == "string" and length > 0)
     and (
-      .deterministicDeploymentVersion
-      | type == "string" and length > 0
-    )
-    and (
-      .deterministicReleaseCodeHash
+      .releaseCodeHash
       | type == "string" and test("^0x[0-9a-fA-F]{64}$")
     )
     and (
@@ -106,10 +103,10 @@ if [[ -f "$PREVIOUS_ARTIFACT" ]] && ! jq -e '.status == "pending"' "$PREVIOUS_AR
   if jq -e --slurpfile candidate "$ARTIFACT" '
     $candidate[0] as $candidate
     | .chainId == $candidate.chainId
-      and .deterministicDeploymentVersion == $candidate.deterministicDeploymentVersion
+      and .protocolVersion == $candidate.protocolVersion
       and (
-        (.deterministicReleaseCodeHash | ascii_downcase)
-        == ($candidate.deterministicReleaseCodeHash | ascii_downcase)
+        (.releaseCodeHash | ascii_downcase)
+        == ($candidate.releaseCodeHash | ascii_downcase)
       )
       and (
         (.deterministicDeployer | ascii_downcase)

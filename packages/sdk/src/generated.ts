@@ -8,11 +8,8 @@ export type PledgeCashDeployment = {
   status?: string;
   reason?: string;
   protocolVersion?: string;
-  protocolReleaseCodeHash?: string;
+  releaseCodeHash?: string;
   sourceCommit?: string;
-  deterministicDeployment?: boolean;
-  deterministicDeploymentVersion?: string;
-  deterministicReleaseCodeHash?: string;
   deterministicDeployer?: Address;
   deterministicDeployerOwner?: Address;
   create2Factory?: Address;
@@ -32,12 +29,8 @@ export type PledgeCashDeployment = {
   tokenGrantFactory?: Address;
   tokenGrantLogic?: Address;
   wrappedNative?: Address;
-  deployer?: Address;
-  tokenGrantFactoryOwner?: Address;
+  protocolOwner?: Address;
   protocolTreasury?: Address;
-  protocolFeeRouterOwner?: Address;
-  protocolFeeRouterRecipient?: Address;
-  tokenGrantFeeRecipient?: Address;
   creationFee?: bigint;
   deploymentBlock?: bigint;
   deterministicDeployerCodeHash?: string;

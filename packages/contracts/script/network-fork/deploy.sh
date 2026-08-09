@@ -219,7 +219,7 @@ jq -e --slurpfile rerun "$rerun_artifact_path" '
     and .tokenGrantFactory == $rerun.tokenGrantFactory
     and .liquidityLockerFactory == $rerun.liquidityLockerFactory
     and .manifestHash == $rerun.manifestHash
-    and .deterministicReleaseCodeHash == $rerun.deterministicReleaseCodeHash
+    and .releaseCodeHash == $rerun.releaseCodeHash
 ' "$artifact_path" >/dev/null || fail "idempotence run changed canonical deployment identity"
 
 verify_artifact "$evidence_dir/verify-after-rerun.log"

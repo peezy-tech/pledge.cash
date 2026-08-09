@@ -27,8 +27,10 @@ profiles only.
 
 A live artifact binds chain ID, release commit, deterministic salts and deployer,
 Boardroom factory, TokenGrant factory, LiquidityLocker factory, ProtocolFeeRouter,
-external Uniswap and wrapped-native addresses, owners, fee recipient, runtime code hashes,
-and verified transaction evidence.
+external Uniswap and wrapped-native addresses, canonical deployment and protocol
+authorities, protocol treasury, runtime code hashes, and verified transaction evidence.
+The verifier derives each root owner and fee recipient from those canonical authority
+fields and checks the live contracts directly.
 
 Local artifacts and fork receipts are proof fixtures. They never become public deployment
 records by changing a status string. Check [Deployment and local
