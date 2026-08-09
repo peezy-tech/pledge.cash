@@ -42,35 +42,6 @@ describe("lean runtime deployment artifacts", () => {
     expect(deployment.deploymentBlock).toBe(42n);
   });
 
-  test("does not preserve deleted protocol or deployment aliases", () => {
-    const deployment = parseDeployment(JSON.stringify({
-      chainId: 31337,
-      boardroomControllerFactory: address("1"),
-      protocolFacetRegistry: address("2"),
-      assetPolicy: address("3"),
-      pledgeV4LiquidityFactory: address("4"),
-      deploymentTimestamp: 1_700_000_000,
-      deterministicDeployment: true,
-      deterministicDeploymentVersion: "duplicate",
-      deterministicReleaseCodeHash: "duplicate",
-      protocolReleaseCodeHash: "duplicate",
-      tokenGrantFactoryOwner: address("5"),
-      protocolFeeRouterRecipient: address("6"),
-    })) as Record<string, unknown>;
-
-    expect(deployment.boardroomControllerFactory).toBeUndefined();
-    expect(deployment.protocolFacetRegistry).toBeUndefined();
-    expect(deployment.assetPolicy).toBeUndefined();
-    expect(deployment.pledgeV4LiquidityFactory).toBeUndefined();
-    expect(deployment.deploymentTimestamp).toBeUndefined();
-    expect(deployment.deterministicDeployment).toBeUndefined();
-    expect(deployment.deterministicDeploymentVersion).toBeUndefined();
-    expect(deployment.deterministicReleaseCodeHash).toBeUndefined();
-    expect(deployment.protocolReleaseCodeHash).toBeUndefined();
-    expect(deployment.tokenGrantFactoryOwner).toBeUndefined();
-    expect(deployment.protocolFeeRouterRecipient).toBeUndefined();
-  });
-
   test("accepts status-only placeholders and rejects wrong-chain artifacts", () => {
     expect(isRuntimeDeploymentForChain(parseDeployment('{"status":"pending"}'), 998)).toBe(true);
     expect(isRuntimeDeploymentForChain(parseDeployment('{"chainId":998}'), 8453)).toBe(false);

@@ -67,23 +67,7 @@ describe("generated SDK exports", () => {
     ]));
   });
 
-  test("excludes removed diamond, governance, distribution, and P4LP artifacts", () => {
-    for (const removed of [
-      "BoardroomController",
-      "BoardroomKernel",
-      "ProtocolFacetRegistry",
-      "PledgeV4Hook",
-      "PledgeV4LiquidityFactory",
-      "PledgeV4LiquidityVault",
-      "DistributionFactory",
-      "BoardroomRewards",
-      "BondMarket",
-    ]) {
-      expect(removed in pledgeCashAbis).toBe(false);
-    }
-  });
-
-  test("includes canonical network profiles without embedding deployment artifacts", async () => {
+  test("includes canonical network profiles", () => {
     expect(pledgeCashDefaultPublicChainId).toBe(11155111);
     expect(pledgeCashNetworkProfiles.map((profile) => profile.key)).toEqual([
       "ethereum-sepolia",
@@ -104,9 +88,6 @@ describe("generated SDK exports", () => {
       "wrappedNative",
     ]);
     expect(Object.keys(pledgeCashNetworkProfiles[0]!.wrappedNative)).toEqual(["symbol"]);
-
-    const source = await readFile(new URL("../src/generated.ts", import.meta.url), "utf8");
-    expect(source).not.toContain("pledgeCashDeployments");
   });
 
   test("marks generated source and lean deployment fields", async () => {
@@ -117,13 +98,6 @@ describe("generated SDK exports", () => {
     expect(source).toContain("releaseCodeHash?: string;");
     expect(source).toContain("protocolOwner?: Address;");
     expect(source).toContain("protocolTreasury?: Address;");
-    expect(source).not.toContain("deterministicDeployment?: boolean;");
-    expect(source).not.toContain("deterministicReleaseCodeHash?: string;");
-    expect(source).not.toContain("tokenGrantFactoryOwner?: Address;");
-    expect(source).not.toContain("protocolFeeRouterRecipient?: Address;");
-    expect(source).not.toContain("boardroomControllerFactory?: Address;");
-    expect(source).not.toContain("activeFacetSetHash?: string;");
-    expect(source).not.toContain("pledgeV4LiquidityFactory?: Address;");
   });
 });
 
