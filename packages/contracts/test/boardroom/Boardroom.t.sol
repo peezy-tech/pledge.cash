@@ -215,15 +215,10 @@ contract BoardroomTest is Test {
         implementation.initialize(address(this), "Other", "OTH");
     }
 
-    function testLaunchMintAndOwnershipAreOwnerBound() public {
+    function testMintAndOwnershipAreOwnerBound() public {
         vm.prank(alice);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        boardroom.launch();
-
-        boardroom.launch();
-        assertTrue(boardroom.launched());
-        vm.expectRevert(Boardroom.AlreadyLaunched.selector);
-        boardroom.launch();
+        boardroom.mint(alice, 4 ether);
 
         boardroom.mint(alice, 4 ether);
         assertEq(shares.balanceOf(alice), 4 ether);

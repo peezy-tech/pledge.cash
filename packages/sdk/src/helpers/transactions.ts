@@ -100,10 +100,6 @@ export function buildBoardroomMintTransaction(input: { boardroom: Address; to: A
   };
 }
 
-export function buildBoardroomLaunchTransaction(input: { boardroom: Address }) {
-  return { address: input.boardroom, abi: boardroomAbi, functionName: "launch" as const };
-}
-
 export function buildBoardroomSetRedemptionExcessRecipientTransaction(input: {
   boardroom: Address;
   recipient: Address;

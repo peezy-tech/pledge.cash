@@ -92,6 +92,9 @@ describe("frontend foundation", () => {
     const html = sections.map((section) => renderToString(<BoardroomWorkspace {...common} mode="studio" studioSection={section} />)).join("\n");
     expect(html).toContain("Authority and custody");
     expect(html).toContain("Share token");
+    expect(html).toContain("Minting");
+    expect(html).toContain("Mint shares");
+    expect(html).not.toContain(">Launch<");
     expect(html).toContain("Treasury-funded grant");
     expect(html).toContain("Position custody");
     expect(html).toContain("Wind down and redeem");
@@ -197,7 +200,6 @@ function boardroomState(): BoardroomState {
     shareToken: "0x1000000000000000000000000000000000000004",
     redemptionExcessRecipient: "0x1000000000000000000000000000000000000005",
     status: 0,
-    launched: true,
     windDownDelay: 100n,
     windDownStartedAt: 0n,
     totalShareSupply: 1_000n,

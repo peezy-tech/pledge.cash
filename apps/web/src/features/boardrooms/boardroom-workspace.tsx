@@ -20,7 +20,6 @@ import type {
 export type BoardroomAction =
   | "refresh"
   | "mint"
-  | "launch"
   | "create-grant"
   | "create-locker"
   | "prepare-position"
@@ -269,19 +268,18 @@ function TokenPanel({
   onAction: (action: BoardroomAction) => Promise<void>;
 }): React.JSX.Element {
   return (
-    <Panel title="Share token" description="Mint shares before launch. Launch permanently closes minting and prepares the project for external launchpad liquidity.">
+    <Panel title="Share token" description="Mint the intended share allocations while the Boardroom is Active. Starting wind-down permanently closes minting.">
       <Facts columns="three" items={[
         { label: "Share token", value: <AddressLink address={boardroom.shareToken} /> },
         { label: "Total supply", value: boardroom.totalShareSupply.toString() },
-        { label: "Launched", value: boardroom.launched ? "Yes" : "No" },
+        { label: "Minting", value: boardroom.status === 0 ? "Open" : "Closed" },
       ]} />
       <div className="grid gap-px border-t border-[var(--pc-border)] bg-[var(--pc-border)] md:grid-cols-2">
         <TextField label="Mint recipient" value={form.mintTo} onChange={(mintTo) => setForm((current) => ({ ...current, mintTo }))} />
         <TextField label="Mint amount (raw units)" value={form.mintAmount} onChange={(mintAmount) => setForm((current) => ({ ...current, mintAmount }))} />
       </div>
       <ActionRow>
-        <StudioAction action="mint" disabled={!canManage || boardroom.status !== 0 || boardroom.launched} label="Mint shares" pendingAction={pendingAction} onAction={onAction}><Coins className="h-4 w-4" /></StudioAction>
-        <StudioAction action="launch" disabled={!canManage || boardroom.status !== 0 || boardroom.launched} label="Launch" pendingAction={pendingAction} onAction={onAction}><Send className="h-4 w-4" /></StudioAction>
+        <StudioAction action="mint" disabled={!canManage || boardroom.status !== 0} label="Mint shares" pendingAction={pendingAction} onAction={onAction}><Coins className="h-4 w-4" /></StudioAction>
       </ActionRow>
     </Panel>
   );

@@ -5,7 +5,6 @@ import {
   buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomCreateLiquidityLockerTransaction,
   buildBoardroomCreateTransaction,
-  buildBoardroomLaunchTransaction,
   buildBoardroomLiquidityLockerCancelTransaction,
   buildBoardroomLiquidityLockerExitTransaction,
   buildBoardroomMintTransaction,
@@ -357,9 +356,6 @@ export function App(): React.JSX.Element {
     switch (action) {
       case "mint":
         request = buildBoardroomMintTransaction({ boardroom: boardroomAddress, to: requireAddress(workspaceForm.mintTo, "Mint recipient"), amount: uintInput(workspaceForm.mintAmount, "Mint amount") });
-        break;
-      case "launch":
-        request = buildBoardroomLaunchTransaction({ boardroom: boardroomAddress });
         break;
       case "create-grant":
         request = buildBoardroomAssetGrantIssuanceBatch({

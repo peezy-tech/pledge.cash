@@ -97,7 +97,6 @@ contract LeanCoreScenarioTest is Test {
                 ))
         );
         shares = BoardroomToken(boardroom.shareToken());
-        boardroom.launch();
 
         // Project-share grants use an external issuer because a Boardroom cannot
         // execute an approval against its own share token.

@@ -120,7 +120,6 @@ export type BoardroomState = {
   shareToken: Address;
   redemptionExcessRecipient: Address;
   status: BoardroomStatus;
-  launched: boolean;
   windDownDelay: bigint;
   windDownStartedAt: bigint;
   totalShareSupply: bigint;

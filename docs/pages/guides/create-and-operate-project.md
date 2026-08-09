@@ -18,8 +18,8 @@ timelock. There is no built-in governance or upgrade controller.
 
 1. In [Studio](../../studio), predict and create the Boardroom. Verify the factory event,
    owner, share token, and wrapped-native asset.
-2. Mint only the intended share allocations while Active, then set the one-way launch
-   marker when public presentation is ready.
+2. Mint only the intended share allocations while Active. Starting wind-down permanently
+   closes minting.
 3. Create escrow-backed grants. Use the Boardroom for grants of external treasury assets;
    use an external issuer for grants of the project share token.
 4. Create one locker through `Boardroom.execute` with the quote asset, fee, and tick

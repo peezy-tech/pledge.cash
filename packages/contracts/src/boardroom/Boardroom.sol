@@ -30,7 +30,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     address public override shareToken;
     address public override redemptionExcessRecipient;
     Status public override status;
-    bool public override launched;
     uint256 public override windDownDelay;
     uint256 public override windDownStartedAt;
 
@@ -60,7 +59,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     error InvalidAmount();
     error InvalidMetadata();
     error InvalidStatus(Status expected, Status actual);
-    error AlreadyLaunched();
     error OwnershipRenunciationDisabled();
     error EmptyBatch();
     error TooManyCalls(uint256 requested, uint256 maximum);
@@ -90,7 +88,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     event BoardroomInitialized(
         address indexed owner, address indexed shareToken, address indexed wrappedNative, string name, string symbol
     );
-    event BoardroomLaunched(address indexed owner);
     event BoardroomCallExecuted(
         address indexed target, bytes4 indexed selector, address indexed authority, uint256 value, bytes32 dataHash
     );
@@ -148,13 +145,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
 
         emit BoardroomInitialized(owner_, address(token), wrappedNative, name_, symbol_);
         emit RedemptionExcessRecipientSet(owner_);
-    }
-
-    function launch() external override onlyOwner {
-        _requireStatus(Status.Active);
-        if (launched) revert AlreadyLaunched();
-        launched = true;
-        emit BoardroomLaunched(msg.sender);
     }
 
     function mint(address to, uint256 amount) external override onlyOwner {

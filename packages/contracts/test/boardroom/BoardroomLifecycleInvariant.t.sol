@@ -29,11 +29,6 @@ contract BoardroomLifecycleHandler {
         _record();
     }
 
-    function launch() external {
-        try boardroom.launch() {} catch {}
-        _record();
-    }
-
     function startWindDown() external {
         try boardroom.startWindDown() {} catch {}
         _record();

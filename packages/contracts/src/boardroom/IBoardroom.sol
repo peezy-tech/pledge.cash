@@ -46,15 +46,11 @@ interface IBoardroom {
 
     function status() external view returns (Status);
 
-    function launched() external view returns (bool);
-
     function windDownDelay() external view returns (uint256);
 
     function windDownStartedAt() external view returns (uint256);
 
     function initialize(address owner, string calldata name, string calldata symbol) external;
-
-    function launch() external;
 
     function mint(address to, uint256 amount) external;
 

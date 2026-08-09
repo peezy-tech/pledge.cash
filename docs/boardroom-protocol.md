@@ -19,9 +19,6 @@ clone of an immutable implementation. Initialization deploys the Boardroom's ERC
 share token and registers the profile's wrapped-native token as the first redeemable
 asset. The factory records both identities in `isBoardroom` and `isShareToken`.
 
-`launch()` is a one-way public marker. It does not change ownership or enable a second
-authority system.
-
 ## Active state
 
 Only the owner can mint shares, transfer ownership, configure the excess recipient,

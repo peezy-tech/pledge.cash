@@ -174,7 +174,6 @@ describe("lean readers", () => {
       shareToken,
       redemptionExcessRecipient: recipient,
       status: 1,
-      launched: true,
       windDownDelay: 86_400n,
       windDownStartedAt: 1_000n,
       redeemableAssetCount: 2n,

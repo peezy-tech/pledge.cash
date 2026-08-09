@@ -38,7 +38,7 @@ and redeems shares. It sends no public-network transaction.
 ## Operator sequence
 
 1. Choose the Boardroom owner and fee recipient deliberately.
-2. Create the Boardroom, issue shares, and launch its public marker.
+2. Create the Boardroom and issue the intended shares while it is Active.
 3. Create a locker through `Boardroom.execute` with the intended quote asset, pool fee,
    and tick spacing.
 4. Run the external launch with the locker as `positionRecipient`.
