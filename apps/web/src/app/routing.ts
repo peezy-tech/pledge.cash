@@ -11,7 +11,7 @@ export type CanonicalAppRoute =
   | { kind: "studio"; chainId?: number | undefined }
   | { kind: "project"; chainId: number; boardroom: Address; section: ProjectSection }
   | { kind: "studio-project"; chainId: number; boardroom: Address; section: StudioSection }
-  | { kind: "grant"; chainId: number; grant: Address; returnBoardroom?: Address | undefined }
+  | { kind: "grant"; chainId: number; grant: Address }
   | { kind: "identity" }
   | { kind: "tools" };
 
@@ -32,10 +32,6 @@ export function routeFromLocation(
   env: RouteEnvironment = import.meta.env,
 ): AppRoute {
   const route = routeFromPath(pathname, env);
-  if (route.kind === "grant") {
-    const returnBoardroom = routeGrantReturnBoardroom(search);
-    return returnBoardroom ? { ...route, returnBoardroom } : route;
-  }
   if (!isPrimaryRoute(route)) return route;
   const chainId = routeChainFromSearch(search);
   return chainId === undefined ? route : { ...route, chainId };
@@ -60,28 +56,10 @@ export function routeFromPath(pathname: string, env: RouteEnvironment = import.m
 export function appRouteHref(route: CanonicalAppRoute, baseUrl = import.meta.env.BASE_URL || "/"): string {
   const base = normalizeBaseUrl(baseUrl);
   const path = routePath(route);
-  const search = route.kind === "grant" && route.returnBoardroom
-    ? `?project=${route.returnBoardroom.toLowerCase()}`
-    : "chainId" in route && route.chainId !== undefined && isPrimaryRoute(route)
-      ? `?chain=${route.chainId.toString()}`
-      : "";
+  const search = "chainId" in route && route.chainId !== undefined && isPrimaryRoute(route)
+    ? `?chain=${route.chainId.toString()}`
+    : "";
   return `${base}${path}${search}`;
-}
-
-export function projectGrantRoute(
-  chainId: number,
-  grant: Address,
-  returnBoardroom: Address,
-): Extract<CanonicalAppRoute, { kind: "grant" }> {
-  return { kind: "grant", chainId, grant, returnBoardroom };
-}
-
-export function grantReturnRoute(
-  route: Extract<AppRoute, { kind: "grant" }>,
-): Extract<CanonicalAppRoute, { kind: "portfolio" | "project" }> {
-  return route.returnBoardroom
-    ? { kind: "project", chainId: route.chainId, boardroom: route.returnBoardroom, section: "overview" }
-    : { kind: "portfolio", chainId: route.chainId };
 }
 
 export function projectRouteHref(
@@ -163,14 +141,6 @@ function routeChainId(value: string | undefined): number | undefined {
 function routeChainFromSearch(search: string): number | undefined {
   try {
     return routeChainId(new URLSearchParams(search).get("chain") ?? undefined);
-  } catch {
-    return undefined;
-  }
-}
-
-function routeGrantReturnBoardroom(search: string): Address | undefined {
-  try {
-    return routeAddress(new URLSearchParams(search).get("project") ?? undefined);
   } catch {
     return undefined;
   }

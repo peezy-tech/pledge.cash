@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
 import {
   appRouteHref,
-  grantReturnRoute,
   primaryDestination,
-  projectGrantRoute,
   projectRouteHref,
   routeFromLocation,
   routeFromPath,
@@ -32,17 +30,15 @@ describe("lean application routing", () => {
     expect(routeFromPath(`/studio/31337/${boardroom}/distributions`)).toEqual({ kind: "not-found" });
   });
 
-  test("round-trips Boardroom and grant links under a non-root base path", () => {
+  test("round-trips canonical links under a non-root base path", () => {
     expect(projectRouteHref(31337, boardroom, "overview", "/pledge-cash/")).toBe(`/pledge-cash/projects/31337/${boardroom}/overview`);
     expect(studioRouteHref(31337, boardroom, "liquidity", "/pledge-cash/")).toBe(`/pledge-cash/studio/31337/${boardroom}/liquidity`);
-    const grantRoute = projectGrantRoute(31337, grant, boardroom);
-    expect(appRouteHref(grantRoute, "/pledge-cash/")).toBe(`/pledge-cash/grants/31337/${grant}?project=${boardroom}`);
-    expect(routeFromLocation(`/pledge-cash/grants/31337/${grant}`, `?project=${boardroom}`, { BASE_URL: "/pledge-cash/" })).toEqual(grantRoute);
+    const grantRoute = { kind: "grant", chainId: 31337, grant } as const;
+    expect(appRouteHref(grantRoute, "/pledge-cash/")).toBe(`/pledge-cash/grants/31337/${grant}`);
+    expect(routeFromLocation(`/pledge-cash/grants/31337/${grant}`, "", { BASE_URL: "/pledge-cash/" })).toEqual(grantRoute);
   });
 
-  test("returns a grant to its project or portfolio and maps primary navigation", () => {
-    expect(grantReturnRoute({ kind: "grant", chainId: 31337, grant, returnBoardroom: boardroom })).toEqual({ kind: "project", chainId: 31337, boardroom, section: "overview" });
-    expect(grantReturnRoute({ kind: "grant", chainId: 31337, grant })).toEqual({ kind: "portfolio", chainId: 31337 });
+  test("maps primary navigation", () => {
     expect(primaryDestination({ kind: "studio-project", chainId: 31337, boardroom, section: "token" })).toBe("studio");
     expect(primaryDestination({ kind: "project", chainId: 31337, boardroom, section: "swap" })).toBe("explore");
   });
