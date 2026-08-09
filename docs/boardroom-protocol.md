@@ -18,6 +18,9 @@ assets while the old one is Active.
 clone of an immutable implementation. Initialization deploys the Boardroom's ERC20
 share token and registers the profile's wrapped-native token as the first redeemable
 asset. The factory records both identities in `isBoardroom` and `isShareToken`.
+It does not maintain an on-chain catalog. Discover creations from
+`BoardroomCreated` logs, then verify current identity through those mappings and the
+Boardroom's own fields.
 
 ## Active state
 

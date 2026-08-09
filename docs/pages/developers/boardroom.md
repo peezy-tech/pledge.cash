@@ -13,8 +13,9 @@ specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroo
 
 Read `BoardroomFactory.isBoardroom(address)`, then verify `factory`, `owner`,
 `shareToken`, `wrappedNative`, and `status` from the Boardroom itself. Confirm the share
-token with `BoardroomFactory.isShareToken`. Creation events are an index, not a
-substitute for current reads.
+token with `BoardroomFactory.isShareToken`. Discover Boardrooms from
+`BoardroomCreated` logs; the factory intentionally has no enumerable catalog. Creation
+events are an index, not a substitute for current reads.
 
 ## Write boundaries
 

@@ -20,7 +20,7 @@ const quoteAsset = "0x7000000000000000000000000000000000000001" as Address;
 const salt = `0x${"11".repeat(32)}` as Hex;
 
 describe("lean protocol discovery and errors", () => {
-  test("discovers flat Boardroom creation identity", async () => {
+  test("discovers Boardrooms from factory creation events", async () => {
     const client = logClient((eventName) => eventName === "BoardroomCreated" ? [
       {
         blockNumber: 42n,

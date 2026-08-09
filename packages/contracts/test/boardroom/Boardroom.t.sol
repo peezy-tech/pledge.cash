@@ -171,6 +171,16 @@ contract BoardroomReentrantOwner {
 }
 
 contract BoardroomTest is Test {
+    event BoardroomCreated(
+        address indexed boardroom,
+        address indexed owner,
+        address indexed shareToken,
+        address wrappedNative,
+        string name,
+        string symbol,
+        bytes32 salt
+    );
+
     BoardroomTestWrappedNative internal wrappedNative;
     BoardroomFactory internal factory;
     Boardroom internal boardroom;
@@ -196,7 +206,6 @@ contract BoardroomTest is Test {
     function testFactoryCreatesDeterministicCanonicalBoardroom() public view {
         assertTrue(factory.isBoardroom(address(boardroom)));
         assertTrue(factory.isShareToken(address(shares)));
-        assertEq(factory.allBoardroomsLength(), 1);
         assertEq(factory.boardroomImplementation() == address(boardroom), false);
         assertEq(boardroom.factory(), address(factory));
         assertEq(boardroom.owner(), address(this));
@@ -206,6 +215,19 @@ contract BoardroomTest is Test {
         assertEq(shares.boardroom(), address(boardroom));
         assertEq(shares.name(), "Pledge");
         assertEq(shares.symbol(), "PLDG");
+    }
+
+    function testFactoryEmitsBoardroomDiscoveryEvent() public {
+        bytes32 salt = keccak256("second-boardroom");
+        address predicted = factory.predictBoardroomAddress(alice, "Second", "SCND", salt);
+
+        vm.expectEmit(true, true, false, false, address(factory));
+        emit BoardroomCreated(predicted, alice, address(0), address(0), "", "", bytes32(0));
+
+        address created = factory.createBoardroom(alice, "Second", "SCND", salt);
+        assertEq(created, predicted);
+        assertTrue(factory.isBoardroom(created));
+        assertTrue(factory.isShareToken(Boardroom(payable(created)).shareToken()));
     }
 
     function testImplementationCannotBeInitialized() public {

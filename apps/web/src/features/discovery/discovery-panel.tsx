@@ -71,7 +71,6 @@ export function WalletAccessPanel({
           { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
           { label: "Status", value: view.loadedForCurrentAccount ? <Badge>Loaded</Badge> : <Badge variant="muted">Not synced</Badge> },
           { label: "Last scanned block", value: bigintString(discovery.lastScannedBlock) },
-          { label: "Managed Boardrooms", value: view.boardrooms.length.toString() },
           { label: "Relevant grants", value: view.grants.length.toString() },
           { label: "Liquidity lockers", value: view.lockers.length.toString() },
         ]} />

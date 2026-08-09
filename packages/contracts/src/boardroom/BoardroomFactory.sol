@@ -10,7 +10,6 @@ contract BoardroomFactory {
     address public immutable wrappedNative;
     address public immutable boardroomImplementation;
 
-    address[] public allBoardrooms;
     mapping(address boardroom => bool canonical) public isBoardroom;
     mapping(address shareToken => bool canonical) public isShareToken;
 
@@ -47,7 +46,6 @@ contract BoardroomFactory {
         IBoardroom(boardroom).initialize(owner, name, symbol);
         address token = IBoardroom(boardroom).shareToken();
         isShareToken[token] = true;
-        allBoardrooms.push(boardroom);
 
         emit BoardroomCreated(boardroom, owner, token, wrappedNative, name, symbol, salt);
     }
@@ -60,10 +58,6 @@ contract BoardroomFactory {
         return LibClone.predictDeterministicAddress(
             boardroomImplementation, _deploymentSalt(owner, name, symbol, salt), address(this)
         );
-    }
-
-    function allBoardroomsLength() external view returns (uint256) {
-        return allBoardrooms.length;
     }
 
     function _deploymentSalt(address owner, string calldata name, string calldata symbol, bytes32 salt)
