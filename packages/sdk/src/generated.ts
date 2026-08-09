@@ -860,26 +860,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "launch",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "launched",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "liquidityMutationAllowed",
     "inputs": [],
     "outputs": [
@@ -1464,19 +1444,6 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomLaunched",
-    "inputs": [
-      {
-        "name": "owner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "BoardroomRedemptionsOpened",
     "inputs": [
       {
@@ -1814,11 +1781,6 @@ export const boardroomAbi = [
   {
     "type": "error",
     "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "AlreadyLaunched",
     "inputs": []
   },
   {
@@ -3227,19 +3189,6 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "function",
-    "name": "BPS_DENOMINATOR",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "MAX_STATIC_POOL_FEE",
     "inputs": [],
     "outputs": [
@@ -3266,19 +3215,6 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "function",
-    "name": "PROTOCOL_FEE_SHARE_BPS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "boardroom",
     "inputs": [],
     "outputs": [
@@ -3293,13 +3229,6 @@ export const liquidityLockerAbi = [
   {
     "type": "function",
     "name": "cancel",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "cancelPositionTransfer",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
@@ -3407,53 +3336,6 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "function",
-    "name": "onERC721Received",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "receivedTokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "pendingTokenId",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "poolFee",
     "inputs": [],
     "outputs": [
@@ -3493,19 +3375,6 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "function",
-    "name": "preparePositionTransfer",
-    "inputs": [
-      {
-        "name": "expectedTokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "protocolFeeRouter",
     "inputs": [],
     "outputs": [
@@ -3529,24 +3398,6 @@ export const liquidityLockerAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "recoverUntrackedPosition",
-    "inputs": [
-      {
-        "name": "untrackedTokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -3596,19 +3447,6 @@ export const liquidityLockerAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "transferPrepared",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -3702,51 +3540,6 @@ export const liquidityLockerAbi = [
         "type": "int24",
         "indexed": false,
         "internalType": "int24"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PositionTransferPreparationCancelled",
-    "inputs": [
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PositionTransferPrepared",
-    "inputs": [
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "UntrackedPositionRecovered",
-    "inputs": [
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -3866,17 +3659,6 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "error",
-    "name": "OnlyPositionManager",
-    "inputs": [
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "PositionAlreadyRegistered",
     "inputs": [
       {
@@ -3909,34 +3691,12 @@ export const liquidityLockerAbi = [
   },
   {
     "type": "error",
-    "name": "PositionTransferNotPrepared",
-    "inputs": [
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "Reentrancy",
     "inputs": []
   },
   {
     "type": "error",
     "name": "SubscribedPosition",
-    "inputs": [
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TrackedPosition",
     "inputs": [
       {
         "name": "tokenId",
@@ -3997,38 +3757,6 @@ export const liquidityLockerFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "allLockers",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "allLockersLength",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "boardroomFactory",
     "inputs": [],
     "outputs": [
@@ -4076,25 +3804,6 @@ export const liquidityLockerFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "isLocker",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "canonical",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "lockerOfBoardroom",
     "inputs": [
       {
@@ -4121,45 +3830,6 @@ export const liquidityLockerFactoryAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract IPositionManager"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "predictLockerAddress",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolFee",
-        "type": "uint24",
-        "internalType": "uint24"
-      },
-      {
-        "name": "tickSpacing",
-        "type": "int24",
-        "internalType": "int24"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "predicted",
-        "type": "address",
-        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -4257,11 +3927,6 @@ export const liquidityLockerFactoryAbi = [
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "Reentrancy",
-    "inputs": []
   }
 ] as const;
 
@@ -4372,29 +4037,6 @@ export const positionManagerAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "safeTransferFrom",
-    "inputs": [
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   }
 ] as const;
 
@@ -4682,11 +4324,6 @@ export const protocolFeeRouterAbi = [
   {
     "type": "error",
     "name": "NoHandoverRequest",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "Reentrancy",
     "inputs": []
   },
   {
@@ -5262,24 +4899,6 @@ export const tokenGrantAbi = [
   },
   {
     "type": "function",
-    "name": "onGrantRightTransferred",
-    "inputs": [
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "paymentToken",
     "inputs": [],
     "outputs": [
@@ -5701,22 +5320,6 @@ export const tokenGrantAbi = [
   },
   {
     "type": "error",
-    "name": "HolderSyncMismatch",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actual",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "InsufficientVestedAmount",
     "inputs": [
       {
@@ -5796,11 +5399,6 @@ export const tokenGrantAbi = [
   {
     "type": "error",
     "name": "NotYetExpired",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OnlyFactory",
     "inputs": []
   },
   {
