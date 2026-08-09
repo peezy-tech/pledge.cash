@@ -94,8 +94,6 @@ interface IBoardroom {
 
     function sweepRedemptionExcess(address asset) external returns (uint256 amount);
 
-    function burnTreasuryShares() external returns (uint256 burned);
-
     function redemptionCredits(address holder) external view returns (uint256);
 
     function allocatedRedemptionShares(address holder, address asset) external view returns (uint256);

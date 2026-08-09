@@ -88,7 +88,6 @@ const MODULE_FACTORY_ABIS = [
 const FUNCTION_LABELS: Record<string, string> = {
   approve: "Approve token spending",
   beginSnapshot: "Freeze redemption inputs",
-  burnTreasuryShares: "Burn treasury-held project shares",
   cancel: "Cancel an empty liquidity locker",
   collectFees: "Collect locked-position fees",
   createGrant: "Create a token grant",
@@ -395,7 +394,6 @@ function formatParameterValue(value: unknown): string {
 }
 
 const IRREVERSIBLE_FUNCTIONS = new Set([
-  "burnTreasuryShares",
   "cancel",
   "closeGrant",
   "exit",

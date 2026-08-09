@@ -156,10 +156,6 @@ export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: A
   return { address: input.boardroom, abi: boardroomAbi, functionName: "wrapNativeBalance" as const };
 }
 
-export function buildBoardroomBurnTreasurySharesTransaction(input: { boardroom: Address }) {
-  return { address: input.boardroom, abi: boardroomAbi, functionName: "burnTreasuryShares" as const };
-}
-
 export function buildBoardroomOpenRedemptionsTransaction(input: { boardroom: Address }) {
   return { address: input.boardroom, abi: boardroomAbi, functionName: "openRedemptions" as const };
 }

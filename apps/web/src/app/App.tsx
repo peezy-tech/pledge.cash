@@ -1,7 +1,6 @@
 import {
   buildBoardroomAssetGrantIssuanceBatch,
   buildBoardroomBeginSnapshotTransaction,
-  buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomCreateLiquidityLockerTransaction,
   buildBoardroomCreateTransaction,
@@ -406,9 +405,6 @@ export function App(): React.JSX.Element {
         break;
       case "wrap-native":
         request = buildBoardroomWrapNativeBalanceTransaction({ boardroom: boardroomAddress });
-        break;
-      case "burn-treasury-shares":
-        request = buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroomAddress });
         break;
       case "open-redemptions":
         request = buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroomAddress });

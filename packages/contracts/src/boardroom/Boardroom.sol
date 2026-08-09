@@ -402,11 +402,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         emit RedemptionExcessSwept(asset, redemptionExcessRecipient, amount);
     }
 
-    function burnTreasuryShares() external override nonReentrant returns (uint256 burned) {
-        _requireStatus(Status.WindingDown);
-        return _burnTreasuryShares();
-    }
-
     function redemptionAssetState(address asset) external view override returns (uint256 balance, uint256 amountPaid) {
         return (snapshotBalance[asset], paid[asset]);
     }

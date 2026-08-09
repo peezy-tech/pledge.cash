@@ -31,7 +31,6 @@ export type BoardroomAction =
   | "begin-snapshot"
   | "snapshot-assets"
   | "wrap-native"
-  | "burn-treasury-shares"
   | "open-redemptions"
   | "redeem"
   | "claim-asset";
@@ -419,7 +418,6 @@ function ClosePanel({
           <StudioAction action="begin-snapshot" disabled={!canWrite || boardroom.status !== 1 || boardroom.openEscrowCount !== 0n} label="Begin snapshot" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="snapshot-assets" disabled={!canWrite || boardroom.status !== 2 || boardroom.snapshotFrozen} label="Snapshot assets" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="wrap-native" disabled={!canWrite || boardroom.status !== 2} label="Wrap native" pendingAction={pendingAction} onAction={onAction} />
-          <StudioAction action="burn-treasury-shares" disabled={!canWrite || boardroom.status !== 1} label="Burn treasury shares" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="open-redemptions" disabled={!canWrite || boardroom.status !== 2 || !boardroom.snapshotFrozen || boardroom.snapshotCursor !== boardroom.snapshotAssetCount} label="Open redemptions" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="redeem" disabled={!canWrite || boardroom.status !== 3} label="Redeem shares" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="claim-asset" disabled={!canWrite || boardroom.status !== 3} label="Claim asset" pendingAction={pendingAction} onAction={onAction} />
