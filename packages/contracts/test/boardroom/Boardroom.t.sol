@@ -9,78 +9,11 @@ import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
-
-contract BoardroomTestERC20 is ERC20 {
-    string internal tokenName;
-    string internal tokenSymbol;
-
-    constructor(string memory name_, string memory symbol_) {
-        tokenName = name_;
-        tokenSymbol = symbol_;
-    }
-
-    function name() public view override returns (string memory) {
-        return tokenName;
-    }
-
-    function symbol() public view override returns (string memory) {
-        return tokenSymbol;
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
-
-contract BoardroomTestWrappedNative is BoardroomTestERC20 {
-    constructor() BoardroomTestERC20("Wrapped Ether", "WETH") {}
-
-    receive() external payable {
-        deposit();
-    }
-
-    function deposit() public payable {
-        _mint(msg.sender, msg.value);
-    }
-}
-
-contract BoardroomFeeOnTransferToken {
-    string public constant name = "Fee Token";
-    string public constant symbol = "FEE";
-    uint8 public constant decimals = 18;
-    uint256 public totalSupply;
-    mapping(address account => uint256 balance) public balanceOf;
-    mapping(address owner => mapping(address spender => uint256 amount)) public allowance;
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        return true;
-    }
-
-    function transfer(address to, uint256 amount) external returns (bool) {
-        _move(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
-        _move(from, to, amount);
-        return true;
-    }
-
-    function _move(address from, address to, uint256 amount) internal {
-        uint256 fee = amount / 100;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount - fee;
-        totalSupply -= fee;
-    }
-}
+import {
+    OnePercentFeeTestERC20 as BoardroomFeeOnTransferToken,
+    SoladyTestERC20 as BoardroomTestERC20,
+    TestWrappedNative as BoardroomTestWrappedNative
+} from "../helpers/TestTokens.sol";
 
 contract BoardroomMutableToken is BoardroomTestERC20 {
     bool public balanceReadsFail;

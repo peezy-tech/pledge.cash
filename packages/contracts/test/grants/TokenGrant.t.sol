@@ -7,48 +7,11 @@ import {Base64} from "solady/utils/Base64.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
-
-contract GrantERC20 {
-    string public name;
-    string public symbol;
-    uint8 public immutable decimals;
-    uint256 public totalSupply;
-
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-
-    constructor(string memory name_, string memory symbol_, uint8 decimals_) {
-        name = name_;
-        symbol = symbol_;
-        decimals = decimals_;
-    }
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function approve(address spender, uint256 amount) public virtual returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        return true;
-    }
-
-    function transfer(address to, uint256 amount) public virtual returns (bool) {
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) public virtual returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) {
-            allowance[from][msg.sender] = allowed - amount;
-        }
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        return true;
-    }
-}
+import {
+    FeeOnTransferTestERC20 as FeeOnTransferERC20,
+    MutableFailureTestERC20 as MutableFailureGrantERC20,
+    TestERC20 as GrantERC20
+} from "../helpers/TestTokens.sol";
 
 contract NoReturnERC20 {
     string public name;
@@ -134,46 +97,6 @@ contract FalseReturnERC20 is GrantERC20 {
     }
 }
 
-contract FeeOnTransferERC20 is GrantERC20 {
-    uint256 internal immutable feeBps;
-    bool internal immutable feeOnTransfer;
-    bool internal immutable feeOnTransferFrom;
-
-    constructor(
-        string memory name_,
-        string memory symbol_,
-        uint8 decimals_,
-        uint256 feeBps_,
-        bool feeOnTransfer_,
-        bool feeOnTransferFrom_
-    ) GrantERC20(name_, symbol_, decimals_) {
-        feeBps = feeBps_;
-        feeOnTransfer = feeOnTransfer_;
-        feeOnTransferFrom = feeOnTransferFrom_;
-    }
-
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        _move(msg.sender, to, amount, feeOnTransfer);
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) {
-            allowance[from][msg.sender] = allowed - amount;
-        }
-        _move(from, to, amount, feeOnTransferFrom);
-        return true;
-    }
-
-    function _move(address from, address to, uint256 amount, bool applyFee) internal {
-        uint256 fee = applyFee ? (amount * feeBps) / 10_000 : 0;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount - fee;
-        totalSupply -= fee;
-    }
-}
-
 contract SenderSurchargeERC20 is GrantERC20 {
     uint256 internal immutable surchargeBps;
     bool internal immutable surchargeTransfer;
@@ -208,8 +131,8 @@ contract SenderSurchargeERC20 is GrantERC20 {
 
     function _moveWithSenderSurcharge(address from, address to, uint256 amount, bool applySurcharge) internal {
         uint256 surcharge = applySurcharge ? (amount * surchargeBps) / 10_000 : 0;
-        balanceOf[from] -= amount + surcharge;
-        balanceOf[to] += amount;
+        balances[from] -= amount + surcharge;
+        balances[to] += amount;
         totalSupply -= surcharge;
     }
 }
@@ -238,21 +161,6 @@ contract ReentrantPaymentERC20 is GrantERC20 {
             (reenteredOk,) = target.call(payload);
         }
         return super.transferFrom(from, to, amount);
-    }
-}
-
-contract MutableFailureGrantERC20 is GrantERC20 {
-    bool public transfersFail;
-
-    constructor() GrantERC20("Mutable Grant", "MGRANT", 18) {}
-
-    function setTransfersFail(bool fail_) external {
-        transfersFail = fail_;
-    }
-
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        if (transfersFail) return false;
-        return super.transfer(to, amount);
     }
 }
 

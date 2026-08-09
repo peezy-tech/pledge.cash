@@ -14,74 +14,11 @@ import {LiquidityLocker} from "../../src/uniswap/LiquidityLocker.sol";
 import {LiquidityLockerFactory} from "../../src/uniswap/LiquidityLockerFactory.sol";
 import {PositionManagerActions} from "../../src/uniswap/PositionManagerActions.sol";
 import {PositionManagerMock} from "../helpers/PositionManagerMock.sol";
-
-contract LockerTestToken is ERC20 {
-    string internal tokenName;
-    string internal tokenSymbol;
-
-    constructor(string memory name_, string memory symbol_) {
-        tokenName = name_;
-        tokenSymbol = symbol_;
-    }
-
-    function name() public view override returns (string memory) {
-        return tokenName;
-    }
-
-    function symbol() public view override returns (string memory) {
-        return tokenSymbol;
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
-
-contract LockerWrappedNative is LockerTestToken {
-    constructor() LockerTestToken("Wrapped Ether", "WETH") {}
-
-    function deposit() external payable {
-        _mint(msg.sender, msg.value);
-    }
-}
-
-contract LockerFeeToken {
-    string public constant name = "Fee Token";
-    string public constant symbol = "FEE";
-    uint8 public constant decimals = 18;
-    uint256 public totalSupply;
-    mapping(address account => uint256 balance) public balanceOf;
-    mapping(address owner => mapping(address spender => uint256 amount)) public allowance;
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function transfer(address to, uint256 amount) external returns (bool) {
-        _move(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
-        _move(from, to, amount);
-        return true;
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        return true;
-    }
-
-    function _move(address from, address to, uint256 amount) internal {
-        uint256 fee = amount / 100;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount - fee;
-        totalSupply -= fee;
-    }
-}
+import {
+    OnePercentFeeTestERC20 as LockerFeeToken,
+    SoladyTestERC20 as LockerTestToken,
+    DepositOnlyTestWrappedNative as LockerWrappedNative
+} from "../helpers/TestTokens.sol";
 
 contract LiquidityLockerTest is Test {
     uint256 internal constant TOKEN_ID = 41;
@@ -328,7 +265,7 @@ contract LiquidityLockerTest is Test {
         _mintPosition(feeLocker, 77, address(0), 100, 200, 1_000);
         _executeLocker(feeBoardroom, feeLocker, abi.encodeCall(feeLocker.registerPosition, (77)));
 
-        _fundManager(feeBoardroom, feeLocker, feeToken, 1_000, 1_000);
+        _fundManager(feeBoardroom, feeLocker, address(feeToken), 1_000, 1_000);
         positionManager.accrueFees(77, 1_000, 1_000);
         vm.expectPartialRevert(LiquidityLocker.UnexpectedTokenTransfer.selector);
         feeLocker.collectFees();
@@ -459,33 +396,20 @@ contract LiquidityLockerTest is Test {
     }
 
     function _fundManager(LiquidityLocker locker_, uint256 amount0, uint256 amount1) internal {
-        _fundManager(boardroom, locker_, quote, amount0, amount1);
+        _fundManager(boardroom, locker_, address(quote), amount0, amount1);
     }
 
     function _fundManager(
         Boardroom boardroom_,
         LiquidityLocker locker_,
-        LockerFeeToken quote_,
+        address quote_,
         uint256 amount0,
         uint256 amount1
     ) internal {
         uint256 shareAmount = locker_.currency0() == boardroom_.shareToken() ? amount0 : amount1;
-        uint256 quoteAmount = locker_.currency0() == address(quote_) ? amount0 : amount1;
+        uint256 quoteAmount = locker_.currency0() == quote_ ? amount0 : amount1;
         if (shareAmount != 0) boardroom_.mint(address(positionManager), shareAmount);
-        if (quoteAmount != 0) quote_.mint(address(positionManager), quoteAmount);
-    }
-
-    function _fundManager(
-        Boardroom boardroom_,
-        LiquidityLocker locker_,
-        LockerTestToken quote_,
-        uint256 amount0,
-        uint256 amount1
-    ) internal {
-        uint256 shareAmount = locker_.currency0() == boardroom_.shareToken() ? amount0 : amount1;
-        uint256 quoteAmount = locker_.currency0() == address(quote_) ? amount0 : amount1;
-        if (shareAmount != 0) boardroom_.mint(address(positionManager), shareAmount);
-        if (quoteAmount != 0) quote_.mint(address(positionManager), quoteAmount);
+        if (quoteAmount != 0) LockerTestToken(quote_).mint(address(positionManager), quoteAmount);
     }
 
     function _fundLocker(LiquidityLocker locker_, uint256 amount0, uint256 amount1) internal {

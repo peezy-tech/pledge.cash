@@ -3,21 +3,11 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
-import {ERC20} from "solady/tokens/ERC20.sol";
 import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
+import {SoladyTestERC20} from "../helpers/TestTokens.sol";
 
-contract ProtocolFeeRouterToken is ERC20 {
-    function name() public pure override returns (string memory) {
-        return "Protocol Fee Token";
-    }
-
-    function symbol() public pure override returns (string memory) {
-        return "PFT";
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
+contract ProtocolFeeRouterToken is SoladyTestERC20 {
+    constructor() SoladyTestERC20("Protocol Fee Token", "PFT") {}
 }
 
 contract ReentrantProtocolFeeRouterToken is ProtocolFeeRouterToken {

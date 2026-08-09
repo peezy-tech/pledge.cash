@@ -7,7 +7,7 @@ import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
-import {GrantERC20, MutableFailureGrantERC20} from "./TokenGrant.t.sol";
+import {MutableFailureTestERC20 as MutableFailureGrantERC20, TestERC20 as GrantERC20} from "../helpers/TestTokens.sol";
 
 contract TokenGrantLifecycleBoundaryTest is Test {
     BoardroomFactory internal boardroomFactory;

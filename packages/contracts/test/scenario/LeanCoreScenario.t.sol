@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {ERC20} from "solady/tokens/ERC20.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -16,36 +15,10 @@ import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 import {LiquidityLocker} from "../../src/uniswap/LiquidityLocker.sol";
 import {LiquidityLockerFactory} from "../../src/uniswap/LiquidityLockerFactory.sol";
 import {PositionManagerMock} from "../helpers/PositionManagerMock.sol";
-
-contract LeanScenarioToken is ERC20 {
-    string internal tokenName;
-    string internal tokenSymbol;
-
-    constructor(string memory name_, string memory symbol_) {
-        tokenName = name_;
-        tokenSymbol = symbol_;
-    }
-
-    function name() public view override returns (string memory) {
-        return tokenName;
-    }
-
-    function symbol() public view override returns (string memory) {
-        return tokenSymbol;
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-}
-
-contract LeanScenarioWrappedNative is LeanScenarioToken {
-    constructor() LeanScenarioToken("Wrapped Ether", "WETH") {}
-
-    function deposit() external payable {
-        _mint(msg.sender, msg.value);
-    }
-}
+import {
+    DepositOnlyTestWrappedNative as LeanScenarioWrappedNative,
+    SoladyTestERC20 as LeanScenarioToken
+} from "../helpers/TestTokens.sol";
 
 /// @notice Local proof of every retained asset and lifecycle boundary.
 contract LeanCoreScenarioTest is Test {

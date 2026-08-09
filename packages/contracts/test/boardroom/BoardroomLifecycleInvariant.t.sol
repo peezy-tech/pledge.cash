@@ -8,7 +8,7 @@ import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
-import {BoardroomTestWrappedNative} from "./Boardroom.t.sol";
+import {TestWrappedNative} from "../helpers/TestTokens.sol";
 
 contract BoardroomLifecycleHandler {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -60,14 +60,14 @@ contract BoardroomLifecycleHandler {
 }
 
 contract BoardroomLifecycleInvariantTest is StdInvariant, Test {
-    BoardroomTestWrappedNative internal wrappedNative;
+    TestWrappedNative internal wrappedNative;
     BoardroomFactory internal factory;
     Boardroom internal boardroom;
     BoardroomToken internal shares;
     BoardroomLifecycleHandler internal handler;
 
     function setUp() public {
-        wrappedNative = new BoardroomTestWrappedNative();
+        wrappedNative = new TestWrappedNative();
         factory = new BoardroomFactory(address(wrappedNative));
         address predicted = factory.predictBoardroomAddress(address(this), "Invariant", "INV", bytes32(uint256(1)));
         boardroom = Boardroom(payable(factory.createBoardroom(address(this), "Invariant", "INV", bytes32(uint256(1)))));
