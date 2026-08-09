@@ -60,7 +60,6 @@ describe("generated SDK exports", () => {
     ]));
     expect(functionNames(liquidityLockerFactoryAbi)).toEqual(expect.arrayContaining([
       "createLocker",
-      "predictLockerAddress",
     ]));
     expect(functionNames(liquidityLockerAbi)).toEqual(expect.arrayContaining([
       "collectFees",

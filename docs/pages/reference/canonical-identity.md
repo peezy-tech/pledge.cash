@@ -14,7 +14,7 @@ live deployment artifact and factory relationships.
 | Project token | Boardroom `shareToken`, factory `isShareToken`, token `boardroom` |
 | Token Grant | Factory `grantForTokenId`, token ID derived from grant address, live grant fields |
 | Grant right | Current ERC721 `ownerOf` plus grant `holder` |
-| Liquidity locker | Factory `isLocker`, `lockerOfBoardroom`, immutable Boardroom and token fields |
+| Liquidity locker | Factory `lockerOfBoardroom(locker.boardroom())`, immutable Boardroom and token fields |
 | v4 position | PositionManager `ownerOf(tokenId) == locker`, exact hookless PoolKey, position info and liquidity |
 | Swap path | Artifact's Universal Router, Permit2, Quoter, StateView, and exact PoolKey |
 

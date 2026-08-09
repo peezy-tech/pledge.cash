@@ -10,7 +10,8 @@ Canonical protocol identity is entirely onchain and chain-specific:
 - `BoardroomFactory.isBoardroom` proves a Boardroom;
 - its `shareToken` and the factory's `isShareToken` prove the project token;
 - `TokenGrantFactory.grantForTokenId` links a grant-right NFT to its grant;
-- `LiquidityLockerFactory.isLocker` and `lockerOfBoardroom` identify the active locker;
+- `LiquidityLockerFactory.lockerOfBoardroom` and the locker's immutable `boardroom`
+  identify the active locker;
 - the locker itself verifies the PositionManager owner, PoolKey, and position data.
 
 The optional Sentinel service provides peezy.tech authentication and wallet links. It

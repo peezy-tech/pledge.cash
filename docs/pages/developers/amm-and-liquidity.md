@@ -11,14 +11,14 @@ specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/liquidit
 
 Create a locker by targeting `LiquidityLockerFactory.createLocker` through
 `Boardroom.execute`. The callback atomically registers the locker as an escrow and adds
-the quote asset to the append-only redemption registry. Verify `isLocker`, `lockerOfBoardroom`, and all
-immutable locker fields.
+the quote asset to the append-only redemption registry. Verify
+`lockerOfBoardroom(locker.boardroom()) == locker` and all immutable locker fields.
 
-For a direct CCA mint, set `positionRecipient` to the predicted locker and call
-`registerPosition` through the Boardroom after mint. For an existing NFT, first call
-`preparePositionTransfer`, then use `safeTransferFrom`. Registration rejects the wrong
-PositionManager, owner, currencies, fee, tick spacing, hook, subscriber flag, tick order,
-or zero liquidity.
+For a direct CCA mint, create the locker first, set `positionRecipient` to its address,
+and call `registerPosition` through the Boardroom after mint. For an existing NFT, first
+call `preparePositionTransfer`, then use `safeTransferFrom`. Registration rejects the
+wrong PositionManager, owner, currencies, fee, tick spacing, hook, subscriber flag, tick
+order, or zero liquidity.
 
 Anyone may call `collectFees` while Active. The locker uses PositionManager's
 decrease-by-zero action and exact balance deltas. Exit is Boardroom-only during

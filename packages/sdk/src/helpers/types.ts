@@ -179,14 +179,6 @@ export type LiquidityLockerState = {
   positionInfo?: bigint;
 };
 
-export type LiquidityLockerFactoryState = {
-  address: Address;
-  boardroomFactory: Address;
-  positionManager: Address;
-  protocolFeeRouter: Address;
-  lockerCount: bigint;
-};
-
 export type GrantDiscoveryRange = DiscoveryRange & {
   factory: Address;
   knownGrants?: readonly DiscoveredGrant[];

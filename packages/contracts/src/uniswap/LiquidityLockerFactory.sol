@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {IBoardroom} from "../boardroom/IBoardroom.sol";
 import {IPositionManager} from "./IPositionManager.sol";
 import {LiquidityLocker} from "./LiquidityLocker.sol";
@@ -13,13 +12,11 @@ interface ILiquidityLockerBoardroomFactory {
 }
 
 /// @notice Deterministic registry for canonical one-position Boardroom lockers.
-contract LiquidityLockerFactory is ReentrancyGuard {
+contract LiquidityLockerFactory {
     address public immutable boardroomFactory;
     IPositionManager public immutable positionManager;
     address public immutable protocolFeeRouter;
 
-    address[] public allLockers;
-    mapping(address locker => bool canonical) public isLocker;
     mapping(address boardroom => address locker) public lockerOfBoardroom;
 
     error InvalidAddress(address account);
@@ -54,7 +51,6 @@ contract LiquidityLockerFactory is ReentrancyGuard {
     /// @dev Must be reached as the active target of Boardroom.execute.
     function createLocker(address quoteAsset, uint24 poolFee, int24 tickSpacing, bytes32 salt)
         external
-        nonReentrant
         returns (address locker)
     {
         address boardroom = msg.sender;
@@ -76,37 +72,11 @@ contract LiquidityLockerFactory is ReentrancyGuard {
         );
 
         lockerOfBoardroom[boardroom] = locker;
-        isLocker[locker] = true;
-        allLockers.push(locker);
         // Boardroom shares returned by the position are treasury shares and burn at
         // snapshot; only the external quote asset belongs in the redemption registry.
         IBoardroom(boardroom).reserveRedeemableAsset(quoteAsset);
         IBoardroom(boardroom).registerEscrow(locker);
         emit LiquidityLockerCreated(locker, boardroom, quoteAsset, poolFee, tickSpacing, salt);
-    }
-
-    function predictLockerAddress(
-        address boardroom,
-        address quoteAsset,
-        uint24 poolFee,
-        int24 tickSpacing,
-        bytes32 salt
-    ) external view returns (address predicted) {
-        address shareToken = IBoardroom(boardroom).shareToken();
-        bytes32 deploymentSalt = _deploymentSalt(boardroom, quoteAsset, poolFee, tickSpacing, salt);
-        bytes32 initCodeHash = keccak256(
-            abi.encodePacked(
-                type(LiquidityLocker).creationCode,
-                abi.encode(boardroom, positionManager, protocolFeeRouter, shareToken, quoteAsset, poolFee, tickSpacing)
-            )
-        );
-        predicted = address(
-            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), deploymentSalt, initCodeHash))))
-        );
-    }
-
-    function allLockersLength() external view returns (uint256) {
-        return allLockers.length;
     }
 
     function _deploymentSalt(address boardroom, address quoteAsset, uint24 poolFee, int24 tickSpacing, bytes32 salt)

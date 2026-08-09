@@ -15,7 +15,7 @@ finished position NFT to the locker.
 
 A locker is canonical only when all of these relationships hold:
 
-- `LiquidityLockerFactory.isLocker(locker)` is true;
+- `LiquidityLockerFactory.lockerOfBoardroom(locker.boardroom())` is the locker;
 - `locker.boardroom()` is a Boardroom recognized by `BoardroomFactory`;
 - `locker.shareToken()` is that Boardroom's share token;
 - `locker.positionManager()` is the profile's v4 `PositionManager`;
@@ -24,7 +24,8 @@ A locker is canonical only when all of these relationships hold:
 - the pool is hookless, the position has nonzero liquidity, and it has no subscriber.
 
 The factory permits one open locker escrow per Boardroom. A replacement can be created
-only after the previous escrow is closed and pruned.
+only after the previous escrow is closed and pruned. Creation events provide the
+append-only discovery history; the mapping identifies the current canonical locker.
 
 ## Position receipt
 

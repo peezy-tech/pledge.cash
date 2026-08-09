@@ -20,7 +20,6 @@ import type {
   BoardroomStatus,
   GrantSettlementQuote,
   GrantState,
-  LiquidityLockerFactoryState,
   LiquidityLockerState,
   PledgeCashBlockReadClient,
   PledgeCashReadClient,
@@ -325,44 +324,6 @@ export async function predictBoardroomAddress(
     abi: boardroomFactoryAbi,
     functionName: "predictBoardroomAddress",
     args: [input.owner, input.name, input.symbol, input.salt],
-  }) as Address;
-}
-
-export async function readLiquidityLockerFactoryState(
-  client: PledgeCashReadClient,
-  factory: Address,
-): Promise<LiquidityLockerFactoryState> {
-  const [boardroomFactory, positionManager, protocolFeeRouter, lockerCount] = await Promise.all([
-    client.readContract({ address: factory, abi: liquidityLockerFactoryAbi, functionName: "boardroomFactory" }),
-    client.readContract({ address: factory, abi: liquidityLockerFactoryAbi, functionName: "positionManager" }),
-    client.readContract({ address: factory, abi: liquidityLockerFactoryAbi, functionName: "protocolFeeRouter" }),
-    client.readContract({ address: factory, abi: liquidityLockerFactoryAbi, functionName: "allLockersLength" }),
-  ]);
-  return {
-    address: factory,
-    boardroomFactory: boardroomFactory as Address,
-    positionManager: positionManager as Address,
-    protocolFeeRouter: protocolFeeRouter as Address,
-    lockerCount: lockerCount as bigint,
-  };
-}
-
-export async function predictLiquidityLockerAddress(
-  client: PledgeCashReadClient,
-  input: {
-    factory: Address;
-    boardroom: Address;
-    quoteAsset: Address;
-    poolFee: number;
-    tickSpacing: number;
-    salt: `0x${string}`;
-  },
-): Promise<Address> {
-  return await client.readContract({
-    address: input.factory,
-    abi: liquidityLockerFactoryAbi,
-    functionName: "predictLockerAddress",
-    args: [input.boardroom, input.quoteAsset, input.poolFee, input.tickSpacing, input.salt],
   }) as Address;
 }
 

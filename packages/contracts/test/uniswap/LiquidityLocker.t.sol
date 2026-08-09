@@ -113,14 +113,8 @@ contract LiquidityLockerTest is Test {
         locker = _createLocker(boardroom, address(quote), LOCKER_SALT);
     }
 
-    function testFactoryCreatesDeterministicLockerAndRegistersEscrowAtomically() public view {
-        assertEq(
-            address(locker),
-            lockerFactory.predictLockerAddress(address(boardroom), address(quote), 3_000, 60, LOCKER_SALT)
-        );
-        assertTrue(lockerFactory.isLocker(address(locker)));
+    function testFactoryRegistersCanonicalLockerAndEscrowAtomically() public view {
         assertEq(lockerFactory.lockerOfBoardroom(address(boardroom)), address(locker));
-        assertEq(lockerFactory.allLockersLength(), 1);
         assertEq(locker.boardroom(), address(boardroom));
         assertEq(locker.shareToken(), boardroom.shareToken());
         assertEq(locker.quoteAsset(), address(quote));
