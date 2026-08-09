@@ -5,26 +5,15 @@ import {
   tokenGrantFactoryAbi,
 } from "../generated";
 import { pledgeCashErrorMessage } from "./errors";
-import {
-  readBoardroomState,
-  readGrantState,
-  readLiquidityLockerState,
-} from "./readers";
 import type {
-  BoardroomState,
   DiscoveredBoardroom,
   DiscoveredGrant,
   DiscoveredLiquidityLocker,
   DiscoveryError,
   DiscoveryRange,
   DiscoveryResult,
-  EnrichedDiscovery,
   GrantDiscoveryRange,
-  GrantState,
-  LiquidityLockerState,
-  PledgeCashBlockReadClient,
   PledgeCashLogClient,
-  PledgeCashReadClient,
 } from "./types";
 
 type RawEventLog = {
@@ -47,15 +36,6 @@ const liquidityLockerCreatedEvent = getAbiItem({
   abi: liquidityLockerFactoryAbi,
   name: "LiquidityLockerCreated",
 });
-
-export async function queryGrantHistory(
-  client: PledgeCashLogClient,
-  range: GrantDiscoveryRange,
-): Promise<DiscoveredGrant[]> {
-  const result = await discoverGrantHistory(client, range);
-  if (!result.complete) throw new Error(discoveryErrorsMessage(result.errors));
-  return result.items;
-}
 
 export async function discoverGrantHistory(
   client: PledgeCashLogClient,
@@ -214,72 +194,6 @@ export async function discoverLiquidityLockers(
     [...lockers.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
     [result],
   );
-}
-
-export async function enrichDiscoveredBoardrooms(
-  client: PledgeCashBlockReadClient,
-  boardrooms: readonly DiscoveredBoardroom[],
-): Promise<EnrichedDiscovery<DiscoveredBoardroom, BoardroomState>[]> {
-  return await Promise.all(
-    boardrooms.map(async (boardroom) => {
-      try {
-        return { ...boardroom, state: await readBoardroomState(client, boardroom.boardroom), stale: false };
-      } catch (error) {
-        return { ...boardroom, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredGrants(
-  client: PledgeCashReadClient,
-  grants: readonly DiscoveredGrant[],
-): Promise<EnrichedDiscovery<DiscoveredGrant, GrantState>[]> {
-  return await Promise.all(
-    grants.map(async (grant) => {
-      try {
-        return { ...grant, state: await readGrantState(client, grant.grantAddress), stale: false };
-      } catch (error) {
-        return { ...grant, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredLiquidityLockers(
-  client: PledgeCashReadClient,
-  lockers: readonly DiscoveredLiquidityLocker[],
-): Promise<EnrichedDiscovery<DiscoveredLiquidityLocker, LiquidityLockerState>[]> {
-  return await Promise.all(
-    lockers.map(async (locker) => {
-      try {
-        return { ...locker, state: await readLiquidityLockerState(client, locker.locker), stale: false };
-      } catch (error) {
-        return { ...locker, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function queryGrantsIssuedByAddress(
-  client: PledgeCashLogClient,
-  input: GrantDiscoveryRange & { issuer: Address; includeClosed?: boolean },
-): Promise<DiscoveredGrant[]> {
-  const grants = await queryGrantHistory(client, input);
-  return grants.filter(
-    (grant) => sameAddress(grant.issuer, input.issuer) && (input.includeClosed || !grant.closed),
-  );
-}
-
-export async function queryGrantsHeldByAddress(
-  client: PledgeCashLogClient,
-  input: GrantDiscoveryRange & { holder: Address; includeClosed?: boolean },
-): Promise<DiscoveredGrant[]> {
-  const grants = await queryGrantHistory(client, input);
-  return grants.filter((grant) => {
-    if (sameAddress(grant.currentHolder, input.holder) && (input.includeClosed || !grant.closed)) return true;
-    return Boolean(input.includeClosed && grant.closed && grant.lastHolder && sameAddress(grant.lastHolder, input.holder));
-  });
 }
 
 type LogDiscoveryResult = DiscoveryResult<RawEventLog> & {
@@ -454,11 +368,6 @@ function discoveryError(
     toBlock,
     message: `RPC rejected logs for blocks ${fromBlock.toString()}-${toBlock?.toString() ?? "latest"}. Try a smaller chunk size or narrower block range. ${pledgeCashErrorMessage(error)}`,
   };
-}
-
-function discoveryErrorsMessage(errors: readonly DiscoveryError[]): string {
-  if (errors.length === 0) return "Discovery failed.";
-  return errors.map((error) => error.message).join(" ");
 }
 
 function minBigInt(left: bigint, right: bigint): bigint {

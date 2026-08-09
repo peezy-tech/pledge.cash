@@ -71,13 +71,6 @@ export type TokenGrantFactoryState = {
   creationFee: bigint;
 };
 
-export type BoardroomFactoryState = {
-  address: Address;
-  boardroomImplementation: Address;
-  wrappedNative: Address;
-  boardroomCount: bigint;
-};
-
 export type GrantState = {
   address: Address;
   factory: Address;
@@ -118,9 +111,6 @@ export type GrantSettlementQuote = {
 };
 
 export type BoardroomStatus = 0 | 1 | 2 | 3;
-export type BoardroomEscrowState = 0 | 1 | 2;
-export type BoardroomSnapshotStatus = 0 | 1 | 2;
-
 export type BoardroomState = {
   address: Address;
   blockNumber: bigint;
@@ -144,19 +134,6 @@ export type BoardroomState = {
   openEscrowCount: bigint;
   liquidityMutationAllowed: boolean;
   lockedLiquidityExitAllowed: boolean;
-};
-
-export type BoardroomEscrowRecord = {
-  address: Address;
-  state: BoardroomEscrowState;
-};
-
-export type BoardroomRedemptionAssetState = {
-  asset: Address;
-  registered: boolean;
-  snapshotStatus: BoardroomSnapshotStatus;
-  snapshotBalance: bigint;
-  paid: bigint;
 };
 
 export type LiquidityLockerState = {
@@ -244,12 +221,6 @@ export type DiscoveryResult<T> = {
   lastScannedBlock?: bigint;
   complete: boolean;
   errors: DiscoveryError[];
-};
-
-export type EnrichedDiscovery<T, State> = T & {
-  state?: State;
-  stale: boolean;
-  error?: string;
 };
 
 export type DecodedPledgeCashError = {

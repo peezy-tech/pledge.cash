@@ -11,11 +11,6 @@ import {
   tokenGrantFactoryAbi,
 } from "../generated";
 import type {
-  BoardroomFactoryState,
-  BoardroomEscrowRecord,
-  BoardroomEscrowState,
-  BoardroomRedemptionAssetState,
-  BoardroomSnapshotStatus,
   BoardroomState,
   BoardroomStatus,
   GrantSettlementQuote,
@@ -47,23 +42,6 @@ export async function readFactoryState(
     tokenGrantLogic: tokenGrantLogic as Address,
     feeRecipient: feeRecipient as Address,
     creationFee: creationFee as bigint,
-  };
-}
-
-export async function readBoardroomFactoryState(
-  client: PledgeCashReadClient,
-  factory: Address,
-): Promise<BoardroomFactoryState> {
-  const [boardroomImplementation, wrappedNative, boardroomCount] = await Promise.all([
-    client.readContract({ address: factory, abi: boardroomFactoryAbi, functionName: "boardroomImplementation" }),
-    client.readContract({ address: factory, abi: boardroomFactoryAbi, functionName: "wrappedNative" }),
-    client.readContract({ address: factory, abi: boardroomFactoryAbi, functionName: "allBoardroomsLength" }),
-  ]);
-  return {
-    address: factory,
-    boardroomImplementation: boardroomImplementation as Address,
-    wrappedNative: wrappedNative as Address,
-    boardroomCount: boardroomCount as bigint,
   };
 }
 
@@ -267,42 +245,6 @@ export async function readBoardroomState(
   };
 }
 
-export async function readBoardroomEscrowState(
-  client: PledgeCashReadClient,
-  boardroom: Address,
-  escrow: Address,
-): Promise<BoardroomEscrowRecord> {
-  const state = await client.readContract({
-    address: boardroom,
-    abi: boardroomAbi,
-    functionName: "escrowState",
-    args: [escrow],
-  });
-  return {
-    address: escrow,
-    state: Number(state) as BoardroomEscrowState,
-  };
-}
-
-export async function readBoardroomRedemptionAssetState(
-  client: PledgeCashReadClient,
-  boardroom: Address,
-  asset: Address,
-): Promise<BoardroomRedemptionAssetState> {
-  const [registered, snapshotStatus, state] = await Promise.all([
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "isRedeemableAsset", args: [asset] }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redeemableAssetSnapshotStatus", args: [asset] }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionAssetState", args: [asset] }),
-  ]);
-  return {
-    asset,
-    registered,
-    snapshotStatus: Number(snapshotStatus) as BoardroomSnapshotStatus,
-    snapshotBalance: state[0],
-    paid: state[1],
-  };
-}
-
 export async function predictGrantAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; issuer: Address; salt: `0x${string}` },
@@ -426,22 +368,4 @@ export function liquidityLockerPoolKey(
     tickSpacing: state.tickSpacing,
     hooks: ZERO_ADDRESS,
   };
-}
-
-export async function readLiquidityLockerPoolKey(
-  client: PledgeCashReadClient,
-  locker: Address,
-): Promise<UniswapV4PoolKey> {
-  const [currency0, currency1, poolFee, tickSpacing] = await Promise.all([
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "currency0" }),
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "currency1" }),
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "poolFee" }),
-    client.readContract({ address: locker, abi: liquidityLockerAbi, functionName: "tickSpacing" }),
-  ]);
-  return liquidityLockerPoolKey({
-    currency0: currency0 as Address,
-    currency1: currency1 as Address,
-    poolFee: Number(poolFee),
-    tickSpacing: Number(tickSpacing),
-  });
 }
