@@ -100,6 +100,37 @@ describe("frontend foundation", () => {
     expect(html).toContain("Wind down and redeem");
   });
 
+  test("keeps snapshot paging enabled while the frozen registry still has unprocessed assets", () => {
+    const state = {
+      ...boardroomState(),
+      status: 2 as const,
+      snapshotAssetCount: 2n,
+      snapshotCursor: 1n,
+      snapshotFrozen: true,
+      redemptionSupplyFrozen: true,
+    };
+    const html = renderToString(
+      <BoardroomWorkspace
+        account={state.owner}
+        boardroom={state}
+        canManage
+        canWrite
+        chainId={31337}
+        form={workspaceForm()}
+        locker={lockerState()}
+        mode="studio"
+        pendingAction={undefined}
+        setForm={() => undefined}
+        studioSection="close"
+        onAction={async () => undefined}
+      />,
+    );
+    const snapshotButton = html.match(/<button([^>]*)>.*?Snapshot assets.*?<\/button>/s);
+
+    expect(snapshotButton).not.toBeNull();
+    expect(snapshotButton?.[1]).not.toContain('disabled=""');
+  });
+
   test("only intercepts unmodified primary-button anchor navigation", () => {
     const plainClick = { altKey: false, button: 0, ctrlKey: false, metaKey: false, shiftKey: false };
     expect(shouldHandleClientNavigation(plainClick)).toBe(true);
@@ -200,7 +231,6 @@ function boardroomState(): BoardroomState {
     shareToken: "0x1000000000000000000000000000000000000004",
     redemptionExcessRecipient: "0x1000000000000000000000000000000000000005",
     status: 0,
-    windDownDelay: 100n,
     windDownStartedAt: 0n,
     totalShareSupply: 1_000n,
     treasuryShareBalance: 10n,
@@ -211,8 +241,6 @@ function boardroomState(): BoardroomState {
     redemptionSupply: 0n,
     redemptionSupplyFrozen: false,
     openEscrowCount: 1n,
-    liquidityMutationAllowed: true,
-    lockedLiquidityExitAllowed: false,
   };
 }
 

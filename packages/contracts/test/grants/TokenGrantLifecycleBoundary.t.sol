@@ -103,7 +103,7 @@ contract TokenGrantLifecycleBoundaryTest is Test {
             _createBoardroomGrant(address(token), address(0), 0, expiry, cliff, vestingEnd, keccak256("snapshot-gate"));
         boardroom.mint(holder, 1 ether);
         boardroom.startWindDown();
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
 
         vm.expectRevert(Boardroom.SnapshotNotReady.selector);
         boardroom.beginSnapshot();

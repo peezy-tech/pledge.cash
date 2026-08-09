@@ -337,7 +337,7 @@ contract BoardroomTest is Test {
 
         boardroom.mint(alice, 1 ether);
         boardroom.startWindDown();
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         vm.expectRevert(Boardroom.SnapshotNotReady.selector);
         boardroom.beginSnapshot();
 
@@ -424,10 +424,14 @@ contract BoardroomTest is Test {
         boardroom.mint(bob, 1 ether);
         boardroom.mint(address(boardroom), 1 ether);
         boardroom.startWindDown();
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         boardroom.beginSnapshot();
 
         assertEq(shares.balanceOf(address(boardroom)), 0);
+        (uint256 frozenAssets, uint256 cursor, bool assetsFrozen) = boardroom.assetSnapshotProgress();
+        assertEq(frozenAssets, boardroom.redeemableAssetCount());
+        assertEq(cursor, 0);
+        assertTrue(assetsFrozen);
         (uint256 frozenSupply, bool frozen) = boardroom.redemptionSupplyState();
         assertEq(frozenSupply, 3 ether);
         assertTrue(frozen);
@@ -459,7 +463,7 @@ contract BoardroomTest is Test {
         mutableAsset.mint(address(boardroom), 10 ether);
         boardroom.mint(alice, 1 ether);
         boardroom.startWindDown();
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         boardroom.beginSnapshot();
         mutableAsset.setBalanceReadsFail(true);
         boardroom.snapshotAssets(32);
@@ -475,7 +479,7 @@ contract BoardroomTest is Test {
         vm.deal(address(boardroom), 2 ether);
         boardroom.startWindDown();
         assertEq(wrappedNative.balanceOf(address(boardroom)), 2 ether);
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         boardroom.beginSnapshot();
         boardroom.snapshotAssets(32);
         boardroom.openRedemptions();
@@ -491,8 +495,7 @@ contract BoardroomTest is Test {
     function testLifecycleCannotMoveBackward() public {
         boardroom.mint(alice, 1 ether);
         boardroom.startWindDown();
-        assertTrue(boardroom.liquidityMutationAllowed());
-        assertTrue(boardroom.lockedLiquidityExitAllowed());
+        assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.WindingDown));
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.InvalidStatus.selector, IBoardroom.Status.Active, IBoardroom.Status.WindingDown
@@ -506,12 +509,11 @@ contract BoardroomTest is Test {
         );
         boardroom.execute(IBoardroom.Call(address(callbacks), 0, ""));
 
-        vm.warp(block.timestamp + boardroom.windDownDelay());
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
         boardroom.beginSnapshot();
         boardroom.snapshotAssets(32);
         boardroom.openRedemptions();
-        assertFalse(boardroom.liquidityMutationAllowed());
-        assertFalse(boardroom.lockedLiquidityExitAllowed());
+        assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.RedemptionsOpen));
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.InvalidStatus.selector, IBoardroom.Status.WindingDown, IBoardroom.Status.RedemptionsOpen

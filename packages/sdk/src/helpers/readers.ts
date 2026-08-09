@@ -187,14 +187,11 @@ export async function readBoardroomState(
     shareToken,
     redemptionExcessRecipient,
     status,
-    windDownDelay,
     windDownStartedAt,
     redeemableAssetCount,
     snapshotProgress,
     redemptionSupplyState,
     openEscrowCount,
-    liquidityMutationAllowed,
-    lockedLiquidityExitAllowed,
   ] = await Promise.all([
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "factory" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
@@ -202,14 +199,11 @@ export async function readBoardroomState(
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionExcessRecipient" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownDelay" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownStartedAt" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redeemableAssetCount" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "assetSnapshotProgress" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionSupplyState" }),
     client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "openEscrowCount" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityMutationAllowed" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "lockedLiquidityExitAllowed" }),
   ]);
   const [totalShareSupply, treasuryShareBalance] = await Promise.all([
     client.readContract({ address: shareToken as Address, abi: boardroomTokenAbi, functionName: "totalSupply" }),
@@ -226,7 +220,6 @@ export async function readBoardroomState(
     shareToken: shareToken as Address,
     redemptionExcessRecipient: redemptionExcessRecipient as Address,
     status: Number(status) as BoardroomStatus,
-    windDownDelay: windDownDelay as bigint,
     windDownStartedAt: windDownStartedAt as bigint,
     totalShareSupply: totalShareSupply as bigint,
     treasuryShareBalance: treasuryShareBalance as bigint,
@@ -237,8 +230,6 @@ export async function readBoardroomState(
     redemptionSupply: redemption[0],
     redemptionSupplyFrozen: redemption[1],
     openEscrowCount: openEscrowCount as bigint,
-    liquidityMutationAllowed: liquidityMutationAllowed as boolean,
-    lockedLiquidityExitAllowed: lockedLiquidityExitAllowed as boolean,
   };
 }
 

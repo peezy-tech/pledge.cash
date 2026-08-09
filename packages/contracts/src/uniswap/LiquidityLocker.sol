@@ -124,7 +124,8 @@ contract LiquidityLocker is ReentrancyGuard {
     function cancel() external onlyBoardroom nonReentrant {
         if (isClosed) revert LockerAlreadyClosed();
         if (positionRegistered) revert PositionAlreadyRegistered(tokenId);
-        if (!IBoardroom(boardroom).liquidityMutationAllowed() && !IBoardroom(boardroom).lockedLiquidityExitAllowed()) {
+        IBoardroom.Status boardroomStatus = IBoardroom(boardroom).status();
+        if (boardroomStatus != IBoardroom.Status.Active && boardroomStatus != IBoardroom.Status.WindingDown) {
             revert BoardroomExitForbidden();
         }
         isClosed = true;
@@ -138,7 +139,9 @@ contract LiquidityLocker is ReentrancyGuard {
         nonReentrant
         returns (uint256 amount0, uint256 amount1)
     {
-        if (!IBoardroom(boardroom).lockedLiquidityExitAllowed()) revert BoardroomExitForbidden();
+        if (IBoardroom(boardroom).status() != IBoardroom.Status.WindingDown) {
+            revert BoardroomExitForbidden();
+        }
         if (deadline < block.timestamp) revert DeadlineExpired(deadline);
         _requirePosition();
 
@@ -246,14 +249,14 @@ contract LiquidityLocker is ReentrancyGuard {
     }
 
     function _requireMutationAllowed() internal view {
-        if (!IBoardroom(boardroom).liquidityMutationAllowed()) revert BoardroomMutationForbidden();
+        IBoardroom.Status boardroomStatus = IBoardroom(boardroom).status();
+        if (boardroomStatus != IBoardroom.Status.Active && boardroomStatus != IBoardroom.Status.WindingDown) {
+            revert BoardroomMutationForbidden();
+        }
     }
 
     function _requireRegistrationAllowed() internal view {
-        if (
-            IBoardroom(boardroom).status() != IBoardroom.Status.Active
-                || !IBoardroom(boardroom).liquidityMutationAllowed()
-        ) revert BoardroomMutationForbidden();
+        if (IBoardroom(boardroom).status() != IBoardroom.Status.Active) revert BoardroomMutationForbidden();
     }
 
     function _ticks(uint256 info) internal pure returns (int24 tickLower, int24 tickUpper) {

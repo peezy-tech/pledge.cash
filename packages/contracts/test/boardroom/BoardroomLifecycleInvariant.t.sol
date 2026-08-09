@@ -36,7 +36,7 @@ contract BoardroomLifecycleHandler {
 
     function beginSnapshot() external {
         if (boardroom.status() == IBoardroom.Status.WindingDown) {
-            vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
+            vm.warp(boardroom.windDownStartedAt() + boardroom.MIN_WIND_DOWN_DELAY());
         }
         try boardroom.beginSnapshot() {} catch {}
         _record();

@@ -54,10 +54,10 @@ The state machine is irreversible:
 
 1. `Active`: the owner may operate the treasury, issue shares, and create escrows.
 2. `WindingDown`: ordinary execution and minting stop. Native balance is wrapped, and
-   escrows must close. The minimum delay is one day.
+   escrows must close. The fixed delay is one day.
 3. `Snapshotting`: after the delay and after every escrow is closed, the Boardroom
-   burns any shares it holds, freezes total supply, and processes the asset registry in
-   pages of at most 32.
+   burns any shares it holds. The status transition fixes total supply and the asset
+   registry, which is then processed in pages of at most 32.
 4. `RedemptionsOpen`: after every asset is processed, holders burn shares into
    redemption credits and claim each included asset independently.
 

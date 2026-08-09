@@ -46,8 +46,6 @@ interface IBoardroom {
 
     function status() external view returns (Status);
 
-    function windDownDelay() external view returns (uint256);
-
     function windDownStartedAt() external view returns (uint256);
 
     function initialize(address owner, string calldata name, string calldata symbol) external;
@@ -111,8 +109,4 @@ interface IBoardroom {
     function assetSnapshotProgress() external view returns (uint256 frozenCount, uint256 cursor, bool frozen);
 
     function redemptionSupplyState() external view returns (uint256 supply, bool frozen);
-
-    function lockedLiquidityExitAllowed() external view returns (bool);
-
-    function liquidityMutationAllowed() external view returns (bool);
 }

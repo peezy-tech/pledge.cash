@@ -30,24 +30,19 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     address public override shareToken;
     address public override redemptionExcessRecipient;
     Status public override status;
-    uint256 public override windDownDelay;
     uint256 public override windDownStartedAt;
 
-    bool internal executionActive;
     address internal executionTarget;
 
     address[] internal assetRegistry;
     mapping(address asset => bool registered) public override isRedeemableAsset;
     mapping(address asset => SnapshotStatus snapshotStatus) internal assetSnapshotStatus;
-    uint256 internal frozenAssetCount;
     uint256 internal assetSnapshotCursor;
-    bool internal assetRegistryFrozen;
 
     uint256 public override openEscrowCount;
     mapping(address escrow => EscrowState state) public override escrowState;
 
     uint256 internal redemptionSupply;
-    bool internal redemptionSupplyFrozen;
     mapping(address holder => uint256 shares) public override redemptionCredits;
     mapping(address asset => uint256 shares) internal allocatedShares;
     mapping(address holder => mapping(address asset => uint256 shares)) public override allocatedRedemptionShares;
@@ -76,7 +71,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     error EscrowNotOpen(address escrow);
     error EscrowStillOpen(address escrow);
     error SnapshotNotReady();
-    error SnapshotAlreadyFrozen();
     error SnapshotIncomplete(uint256 cursor, uint256 count);
     error InvalidSnapshotPage(uint256 requested, uint256 maximum);
     error InvalidRedemptionInput();
@@ -140,7 +134,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         BoardroomToken token = new BoardroomToken(address(this), name_, symbol_);
         shareToken = address(token);
         redemptionExcessRecipient = owner_;
-        windDownDelay = MIN_WIND_DOWN_DELAY;
         _registerAsset(wrappedNative);
 
         emit BoardroomInitialized(owner_, address(token), wrappedNative, name_, symbol_);
@@ -191,7 +184,7 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         status = Status.WindingDown;
         windDownStartedAt = block.timestamp;
         _wrapNativeBalance();
-        emit BoardroomWindDownStarted(msg.sender, windDownStartedAt, windDownDelay);
+        emit BoardroomWindDownStarted(msg.sender, windDownStartedAt, MIN_WIND_DOWN_DELAY);
     }
 
     function execute(Call calldata call_)
@@ -300,20 +293,16 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
 
     function beginSnapshot() external override nonReentrant {
         _requireStatus(Status.WindingDown);
-        if (block.timestamp < windDownStartedAt + windDownDelay || openEscrowCount != 0) {
+        if (block.timestamp < windDownStartedAt + MIN_WIND_DOWN_DELAY || openEscrowCount != 0) {
             revert SnapshotNotReady();
         }
-        if (assetRegistryFrozen) revert SnapshotAlreadyFrozen();
 
         status = Status.Snapshotting;
         _wrapNativeBalance();
         _burnTreasuryShares();
         redemptionSupply = ERC20(shareToken).totalSupply();
         if (redemptionSupply == 0) revert SnapshotNotReady();
-        redemptionSupplyFrozen = true;
-        assetRegistryFrozen = true;
-        frozenAssetCount = assetRegistry.length;
-        emit BoardroomSnapshottingStarted(frozenAssetCount, redemptionSupply);
+        emit BoardroomSnapshottingStarted(assetRegistry.length, redemptionSupply);
     }
 
     function snapshotAssets(uint256 maximum) external override returns (uint256 processed) {
@@ -323,7 +312,8 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         }
         uint256 cursor = assetSnapshotCursor;
         uint256 end = cursor + maximum;
-        if (end > frozenAssetCount) end = frozenAssetCount;
+        uint256 assetCount = assetRegistry.length;
+        if (end > assetCount) end = assetCount;
         for (uint256 i = cursor; i < end; ++i) {
             address asset = assetRegistry[i];
             (bool readable, uint256 balance) = _tryBoundedBalanceOf(asset, address(this));
@@ -343,8 +333,9 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
 
     function openRedemptions() external override {
         _requireStatus(Status.Snapshotting);
-        if (assetSnapshotCursor != frozenAssetCount) {
-            revert SnapshotIncomplete(assetSnapshotCursor, frozenAssetCount);
+        uint256 assetCount = assetRegistry.length;
+        if (assetSnapshotCursor != assetCount) {
+            revert SnapshotIncomplete(assetSnapshotCursor, assetCount);
         }
         status = Status.RedemptionsOpen;
         emit BoardroomRedemptionsOpened(msg.sender);
@@ -419,19 +410,12 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     }
 
     function assetSnapshotProgress() external view override returns (uint256 frozenCount, uint256 cursor, bool frozen) {
-        return (frozenAssetCount, assetSnapshotCursor, assetRegistryFrozen);
+        frozen = uint8(status) >= uint8(Status.Snapshotting);
+        return (frozen ? assetRegistry.length : 0, assetSnapshotCursor, frozen);
     }
 
     function redemptionSupplyState() external view override returns (uint256 supply, bool frozen) {
-        return (redemptionSupply, redemptionSupplyFrozen);
-    }
-
-    function lockedLiquidityExitAllowed() external view override returns (bool) {
-        return status == Status.WindingDown;
-    }
-
-    function liquidityMutationAllowed() external view override returns (bool) {
-        return status == Status.Active || status == Status.WindingDown;
+        return (redemptionSupply, uint8(status) >= uint8(Status.Snapshotting));
     }
 
     function _executeCall(Call calldata call_, address authority) internal returns (bytes memory result) {
@@ -439,11 +423,9 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
         if (target == address(0) || target == address(this) || target == shareToken) {
             revert InvalidExecutionTarget(target);
         }
-        executionActive = true;
         executionTarget = target;
         (bool success, bytes memory output) = target.call{value: call_.value}(call_.data);
         executionTarget = address(0);
-        executionActive = false;
         if (!success) _revertCall(target, output);
         emit BoardroomCallExecuted(target, _selector(call_.data), authority, call_.value, keccak256(call_.data));
         return output;
@@ -451,7 +433,6 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
 
     function _registerAsset(address asset) internal {
         _validateAsset(asset);
-        if (assetRegistryFrozen) revert SnapshotAlreadyFrozen();
         if (!isRedeemableAsset[asset]) {
             assetRegistry.push(asset);
             isRedeemableAsset[asset] = true;
@@ -530,7 +511,7 @@ contract Boardroom is IBoardroom, Ownable, ReentrancyGuard {
     }
 
     function _requireExecutionTarget() internal view {
-        if (!executionActive || msg.sender != executionTarget) revert InvalidExecutionContext(msg.sender);
+        if (msg.sender != executionTarget) revert InvalidExecutionContext(msg.sender);
     }
 
     function _requireStatus(Status expected) internal view {

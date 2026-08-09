@@ -367,7 +367,7 @@ function LiquidityPanel({
           </div>
           <ActionRow>
             <StudioAction action="register-position" disabled={!canManage || boardroom.status !== 0 || locker.positionRegistered} label="Register direct mint" pendingAction={pendingAction} onAction={onAction} />
-            <StudioAction action="collect-fees" disabled={!canWrite || !boardroom.liquidityMutationAllowed || !locker.positionRegistered || locker.closed} label="Collect fees" pendingAction={pendingAction} onAction={onAction} />
+            <StudioAction action="collect-fees" disabled={!canWrite || boardroom.status > 1 || !locker.positionRegistered || locker.closed} label="Collect fees" pendingAction={pendingAction} onAction={onAction} />
             <StudioAction action="cancel-locker" disabled={!canManage || locker.closed} label="Cancel empty locker" pendingAction={pendingAction} onAction={onAction} />
           </ActionRow>
         </Panel>
@@ -416,9 +416,9 @@ function ClosePanel({
           <StudioAction action="start-wind-down" disabled={!canManage || boardroom.status !== 0} label="Start wind-down" pendingAction={pendingAction} onAction={onAction}><ArchiveRestore className="h-4 w-4" /></StudioAction>
           <StudioAction action="exit-locker" disabled={!canManage || boardroom.status !== 1 || !locker || locker.closed} label="Exit liquidity" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="begin-snapshot" disabled={!canWrite || boardroom.status !== 1 || boardroom.openEscrowCount !== 0n} label="Begin snapshot" pendingAction={pendingAction} onAction={onAction} />
-          <StudioAction action="snapshot-assets" disabled={!canWrite || boardroom.status !== 2 || boardroom.snapshotFrozen} label="Snapshot assets" pendingAction={pendingAction} onAction={onAction} />
+          <StudioAction action="snapshot-assets" disabled={!canWrite || boardroom.status !== 2 || boardroom.snapshotCursor >= boardroom.snapshotAssetCount} label="Snapshot assets" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="wrap-native" disabled={!canWrite || boardroom.status !== 2} label="Wrap native" pendingAction={pendingAction} onAction={onAction} />
-          <StudioAction action="open-redemptions" disabled={!canWrite || boardroom.status !== 2 || !boardroom.snapshotFrozen || boardroom.snapshotCursor !== boardroom.snapshotAssetCount} label="Open redemptions" pendingAction={pendingAction} onAction={onAction} />
+          <StudioAction action="open-redemptions" disabled={!canWrite || boardroom.status !== 2 || boardroom.snapshotCursor !== boardroom.snapshotAssetCount} label="Open redemptions" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="redeem" disabled={!canWrite || boardroom.status !== 3} label="Redeem shares" pendingAction={pendingAction} onAction={onAction} />
           <StudioAction action="claim-asset" disabled={!canWrite || boardroom.status !== 3} label="Claim asset" pendingAction={pendingAction} onAction={onAction} />
         </ActionRow>

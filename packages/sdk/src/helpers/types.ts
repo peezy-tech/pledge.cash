@@ -120,7 +120,6 @@ export type BoardroomState = {
   shareToken: Address;
   redemptionExcessRecipient: Address;
   status: BoardroomStatus;
-  windDownDelay: bigint;
   windDownStartedAt: bigint;
   totalShareSupply: bigint;
   treasuryShareBalance: bigint;
@@ -131,8 +130,6 @@ export type BoardroomState = {
   redemptionSupply: bigint;
   redemptionSupplyFrozen: boolean;
   openEscrowCount: bigint;
-  liquidityMutationAllowed: boolean;
-  lockedLiquidityExitAllowed: boolean;
 };
 
 export type LiquidityLockerState = {
