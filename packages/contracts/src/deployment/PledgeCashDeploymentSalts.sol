@@ -1,27 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {AssetPolicy} from "../policy/AssetPolicy.sol";
-import {BoardroomGovernanceLogic} from "../boardroom/BoardroomGovernanceLogic.sol";
-import {BoardroomMarketLogic} from "../boardroom/BoardroomMarketLogic.sol";
-import {BoardroomPolicyRegistry} from "../boardroom/BoardroomPolicyRegistry.sol";
-import {BoardroomRedemptionPayout} from "../boardroom/BoardroomRedemptionPayout.sol";
-import {BoardroomController} from "../boardroom/BoardroomController.sol";
-import {BoardroomControllerFactory} from "../boardroom/BoardroomControllerFactory.sol";
+import {Boardroom} from "../boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../boardroom/BoardroomFactory.sol";
-import {BoardroomAuthorityFacet} from "../boardroom/diamond/BoardroomAuthorityFacet.sol";
-import {BoardroomExecutionFacet} from "../boardroom/diamond/BoardroomExecutionFacet.sol";
-import {BoardroomKernel} from "../boardroom/diamond/BoardroomKernel.sol";
-import {BoardroomMarketFacet} from "../boardroom/diamond/BoardroomMarketFacet.sol";
-import {BoardroomRedemptionFacet} from "../boardroom/diamond/BoardroomRedemptionFacet.sol";
-import {BoardroomViewFacet} from "../boardroom/diamond/BoardroomViewFacet.sol";
-import {ProtocolFacetRegistry} from "../boardroom/diamond/ProtocolFacetRegistry.sol";
-import {BondMarketFactory} from "../bonds/BondMarketFactory.sol";
-import {DistributionFactory} from "../distribution/DistributionFactory.sol";
+import {BoardroomToken} from "../boardroom/BoardroomToken.sol";
 import {ProtocolFeeRouter} from "../fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
-import {BoardroomRewardsFactory} from "../rewards/BoardroomRewardsFactory.sol";
-import {PledgeV4LiquidityFactory} from "../uniswap/PledgeV4LiquidityFactory.sol";
+import {LiquidityLocker} from "../uniswap/LiquidityLocker.sol";
+import {LiquidityLockerFactory} from "../uniswap/LiquidityLockerFactory.sol";
 import {PledgeCashDeterministicDeployer} from "./PledgeCashDeterministicDeployer.sol";
 
 /// @notice Bytecode-bound salts for the sole canonical pledge.cash protocol release.
@@ -42,56 +28,8 @@ library PledgeCashDeploymentSalts {
             );
     }
 
-    function protocolFacetRegistry() internal pure returns (bytes32) {
-        return _releaseSalt("ProtocolFacetRegistry", keccak256(type(ProtocolFacetRegistry).creationCode));
-    }
-
-    function boardroomKernel() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomKernel", keccak256(type(BoardroomKernel).creationCode));
-    }
-
-    function boardroomPolicyRegistry() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomPolicyRegistry", keccak256(type(BoardroomPolicyRegistry).creationCode));
-    }
-
-    function assetPolicy() internal pure returns (bytes32) {
-        return _releaseSalt("AssetPolicy", keccak256(type(AssetPolicy).creationCode));
-    }
-
-    function boardroomGovernanceLogic() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomGovernanceLogic", keccak256(type(BoardroomGovernanceLogic).creationCode));
-    }
-
-    function boardroomRedemptionPayout() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomRedemptionPayout", keccak256(type(BoardroomRedemptionPayout).creationCode));
-    }
-
-    function boardroomMarketLogic() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomMarketLogic", keccak256(type(BoardroomMarketLogic).creationCode));
-    }
-
     function boardroomFactory() internal pure returns (bytes32) {
         return _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode));
-    }
-
-    function boardroomAuthorityFacet() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomAuthorityFacet", keccak256(type(BoardroomAuthorityFacet).creationCode));
-    }
-
-    function boardroomExecutionFacet() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomExecutionFacet", keccak256(type(BoardroomExecutionFacet).creationCode));
-    }
-
-    function boardroomMarketFacet() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomMarketFacet", keccak256(type(BoardroomMarketFacet).creationCode));
-    }
-
-    function boardroomRedemptionFacet() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomRedemptionFacet", keccak256(type(BoardroomRedemptionFacet).creationCode));
-    }
-
-    function boardroomViewFacet() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomViewFacet", keccak256(type(BoardroomViewFacet).creationCode));
     }
 
     function protocolFeeRouter() internal pure returns (bytes32) {
@@ -102,38 +40,16 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("TokenGrantFactory", keccak256(type(TokenGrantFactory).creationCode));
     }
 
-    function pledgeV4LiquidityFactory() internal pure returns (bytes32) {
-        return _releaseSalt("PledgeV4LiquidityFactory", keccak256(type(PledgeV4LiquidityFactory).creationCode));
-    }
-
-    function distributionFactory() internal pure returns (bytes32) {
-        return _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode));
-    }
-
-    function boardroomRewardsFactory() internal pure returns (bytes32) {
-        return _releaseSalt("BoardroomRewardsFactory", keccak256(type(BoardroomRewardsFactory).creationCode));
-    }
-
-    function bondMarketFactory() internal pure returns (bytes32) {
-        return _releaseSalt("BondMarketFactory", keccak256(type(BondMarketFactory).creationCode));
+    function liquidityLockerFactory() internal pure returns (bytes32) {
+        return _releaseSalt("LiquidityLockerFactory", keccak256(type(LiquidityLockerFactory).creationCode));
     }
 
     function boardroomArchitectureCodeHash() internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
-                keccak256(type(ProtocolFacetRegistry).creationCode),
-                keccak256(type(BoardroomKernel).creationCode),
+                keccak256(type(Boardroom).creationCode),
                 keccak256(type(BoardroomFactory).creationCode),
-                keccak256(type(BoardroomControllerFactory).creationCode),
-                keccak256(type(BoardroomController).creationCode),
-                keccak256(type(BoardroomGovernanceLogic).creationCode),
-                keccak256(type(BoardroomMarketLogic).creationCode),
-                keccak256(type(BoardroomRedemptionPayout).creationCode),
-                keccak256(type(BoardroomAuthorityFacet).creationCode),
-                keccak256(type(BoardroomExecutionFacet).creationCode),
-                keccak256(type(BoardroomMarketFacet).creationCode),
-                keccak256(type(BoardroomRedemptionFacet).creationCode),
-                keccak256(type(BoardroomViewFacet).creationCode)
+                keccak256(type(BoardroomToken).creationCode)
             )
         );
     }
@@ -141,14 +57,10 @@ library PledgeCashDeploymentSalts {
     function moduleArchitectureCodeHash() internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
-                keccak256(type(BoardroomPolicyRegistry).creationCode),
-                keccak256(type(AssetPolicy).creationCode),
                 keccak256(type(ProtocolFeeRouter).creationCode),
                 keccak256(type(TokenGrantFactory).creationCode),
-                keccak256(type(PledgeV4LiquidityFactory).creationCode),
-                keccak256(type(DistributionFactory).creationCode),
-                keccak256(type(BoardroomRewardsFactory).creationCode),
-                keccak256(type(BondMarketFactory).creationCode)
+                keccak256(type(LiquidityLockerFactory).creationCode),
+                keccak256(type(LiquidityLocker).creationCode)
             )
         );
     }

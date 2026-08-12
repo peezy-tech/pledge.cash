@@ -14,6 +14,7 @@ interface ITokenGrantERC20Metadata {
 interface ITokenGrantFactory {
     function closeGrant(uint256 tokenId) external;
     function isCanonicalBoardroom(address account) external view returns (bool);
+    function ownerOf(uint256 tokenId) external view returns (address);
 }
 
 contract TokenGrant is Initializable {
@@ -23,18 +24,14 @@ contract TokenGrant is Initializable {
     // Identity.
     address public factory;
     address public issuer;
-    address public holder;
-    uint256 public tokenId;
 
     // Assets.
     address public token;
     address public paymentToken;
     uint8 public tokenDecimals;
-    uint8 public paymentTokenDecimals;
 
     // Economics.
     uint256 public grantSize;
-    uint256 public claimable;
     uint256 public price;
     uint256 public settledAmount;
 
@@ -42,8 +39,7 @@ contract TokenGrant is Initializable {
     uint256 public expiry;
     uint256 public vestingCliff;
     uint256 public vestingEnd;
-    bool public vestingIsHalted;
-    uint256 public vestingHaltTimestamp;
+    uint256 internal _vestingHaltTimestampPlusOne;
 
     // Grant-right policy.
     bool public transferable;
@@ -76,8 +72,6 @@ contract TokenGrant is Initializable {
     error NonTransferableGrant(uint256 tokenId);
     error GrantTransferLocked(uint256 tokenId);
     error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
-    error OnlyFactory();
-    error HolderSyncMismatch(address expected, address actual);
     error QuarantineNotAllowed(address issuer);
 
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
@@ -110,12 +104,9 @@ contract TokenGrant is Initializable {
 
         factory = msg.sender;
         issuer = _issuer;
-        holder = _holder;
         token = _token;
         paymentToken = _paymentToken;
-        tokenId = uint256(uint160(address(this)));
         grantSize = _amount;
-        claimable = _amount;
         price = _price;
         expiry = _expiry;
         vestingCliff = _vestingCliff;
@@ -128,14 +119,32 @@ contract TokenGrant is Initializable {
                                 VIEWS
     //////////////////////////////////////////////////////////////*/
 
+    function holder() public view returns (address) {
+        if (isClosed) return address(0);
+        return ITokenGrantFactory(factory).ownerOf(tokenId());
+    }
+
+    function tokenId() public view returns (uint256) {
+        return uint256(uint160(address(this)));
+    }
+
+    function claimable() public view returns (uint256) {
+        if (!vestingIsHalted()) return grantSize;
+        return _vestedAt(vestingHaltTimestamp());
+    }
+
+    function vestingIsHalted() public view returns (bool) {
+        return _vestingHaltTimestampPlusOne != 0;
+    }
+
+    function vestingHaltTimestamp() public view returns (uint256) {
+        uint256 encodedTimestamp = _vestingHaltTimestampPlusOne;
+        return encodedTimestamp == 0 ? 0 : encodedTimestamp - 1;
+    }
+
     function getCurrentlyVestedSnapshot(uint256 _currentTime) public view returns (uint256) {
         uint256 effectiveTime = _effectiveVestingTime(_currentTime);
-        if (effectiveTime < vestingCliff) return 0;
-        if (_isFullyVestedAt(effectiveTime)) {
-            return claimable;
-        }
-
-        return _linearVestedAmount(effectiveTime);
+        return _vestedAt(effectiveTime);
     }
 
     function getSettlementCost(uint256 _amountToSettle) public view returns (uint256) {
@@ -151,7 +160,7 @@ contract TokenGrant is Initializable {
     }
 
     function getUnsettledAmount() public view returns (uint256) {
-        return claimable - settledAmount;
+        return claimable() - settledAmount;
     }
 
     function isExpired(uint256 _currentTime) public view returns (bool) {
@@ -159,7 +168,7 @@ contract TokenGrant is Initializable {
     }
 
     function isHalted() public view returns (bool) {
-        return vestingIsHalted;
+        return vestingIsHalted();
     }
 
     function requireCanTransferGrantRight(uint256 _currentTime) external view {
@@ -172,24 +181,12 @@ contract TokenGrant is Initializable {
     }
 
     /*//////////////////////////////////////////////////////////////
-                            FACTORY HOOKS
-    //////////////////////////////////////////////////////////////*/
-
-    function onGrantRightTransferred(address from, address to) external onlyFactory {
-        _requireOpen();
-        if (from != holder) revert HolderSyncMismatch(holder, from);
-        if (to == address(0)) revert InvalidAddress();
-
-        holder = to;
-    }
-
-    /*//////////////////////////////////////////////////////////////
                               LIFECYCLE
     //////////////////////////////////////////////////////////////*/
 
     function settle(uint256 _amountToSettle) external {
         _requireOpen();
-        address currentHolder = holder;
+        address currentHolder = holder();
         _requireSettlementAllowed(currentHolder, _amountToSettle);
 
         settledAmount += _amountToSettle;
@@ -201,7 +198,7 @@ contract TokenGrant is Initializable {
         }
         _checkedTransfer(token, currentHolder, _amountToSettle);
 
-        if (settledAmount >= claimable) {
+        if (settledAmount >= claimable()) {
             _closeAndBurnGrantRight();
             emit GrantSettled(currentHolder, issuer, _amountToSettle, totalCost);
             return;
@@ -213,21 +210,19 @@ contract TokenGrant is Initializable {
 
     function stopVestingAndWithdrawUnvested() external onlyIssuer {
         _requireOpen();
-        if (vestingIsHalted) revert VestingAlreadyHalted();
+        if (vestingIsHalted()) revert VestingAlreadyHalted();
 
         uint256 haltTimestamp = block.timestamp;
         uint256 vestedAtHalt = getCurrentlyVestedSnapshot(haltTimestamp);
         uint256 unvestedToWithdraw = grantSize - vestedAtHalt;
 
-        vestingIsHalted = true;
-        vestingHaltTimestamp = haltTimestamp;
-        claimable = vestedAtHalt;
+        _vestingHaltTimestampPlusOne = haltTimestamp + 1;
 
         transferLocked = true;
         if (unvestedToWithdraw > 0) {
             _checkedTransfer(token, issuer, unvestedToWithdraw);
         }
-        if (settledAmount >= claimable) {
+        if (settledAmount >= vestedAtHalt) {
             _closeAndBurnGrantRight();
             emit VestingHalted(issuer, vestedAtHalt, unvestedToWithdraw);
             return;
@@ -257,7 +252,7 @@ contract TokenGrant is Initializable {
         if (block.timestamp <= expiry) revert NotYetExpired();
         if (!ITokenGrantFactory(factory).isCanonicalBoardroom(issuer)) revert QuarantineNotAllowed(issuer);
 
-        uint256 unsettledPromise = claimable - settledAmount;
+        uint256 unsettledPromise = claimable() - settledAmount;
         (bool recoveredExactly, uint256 recoveredAmount) = _tryRecoverExpiredTokens(unsettledPromise);
         if (recoveredExactly) {
             _closeAndBurnGrantRight();
@@ -265,7 +260,7 @@ contract TokenGrant is Initializable {
             return;
         }
 
-        address lastHolder = holder;
+        address lastHolder = holder();
         uint256 strandedAmount = unsettledPromise > recoveredAmount ? unsettledPromise - recoveredAmount : 0;
         isQuarantined = true;
         quarantinedAmount = strandedAmount;
@@ -299,11 +294,6 @@ contract TokenGrant is Initializable {
             && recoveredAmount == grantBalanceBefore;
     }
 
-    modifier onlyFactory() {
-        if (msg.sender != factory) revert OnlyFactory();
-        _;
-    }
-
     modifier onlyIssuer() {
         if (msg.sender != issuer) revert OnlyIssuer();
         _;
@@ -329,7 +319,7 @@ contract TokenGrant is Initializable {
         if (vestingCliff_ > vestingEnd_) revert InvalidVestingSchedule();
     }
 
-    function _configurePaymentTerms(address token_, address paymentToken_, uint256 price_) internal {
+    function _configurePaymentTerms(address token_, address paymentToken_, uint256 price_) internal pure {
         if (price_ == 0) {
             if (paymentToken_ != address(0)) revert InvalidPaymentToken();
             return;
@@ -337,13 +327,13 @@ contract TokenGrant is Initializable {
 
         if (paymentToken_ == address(0)) revert InvalidPaymentToken();
         if (paymentToken_ == token_) revert InvalidTokenPair();
-        paymentTokenDecimals = _readTokenDecimals(paymentToken_);
     }
 
     function _effectiveVestingTime(uint256 currentTime) internal view returns (uint256) {
-        if (!vestingIsHalted) return currentTime;
-        if (vestingHaltTimestamp >= currentTime) return currentTime;
-        return vestingHaltTimestamp;
+        if (!vestingIsHalted()) return currentTime;
+        uint256 haltTimestamp = vestingHaltTimestamp();
+        if (haltTimestamp >= currentTime) return currentTime;
+        return haltTimestamp;
     }
 
     function _isFullyVestedAt(uint256 currentTime) internal view returns (bool) {
@@ -354,11 +344,18 @@ contract TokenGrant is Initializable {
         return FixedPointMathLib.fullMulDiv(grantSize, currentTime - vestingCliff, vestingEnd - vestingCliff);
     }
 
+    function _vestedAt(uint256 currentTime) internal view returns (uint256) {
+        if (currentTime < vestingCliff) return 0;
+        if (_isFullyVestedAt(currentTime)) return grantSize;
+        return _linearVestedAmount(currentTime);
+    }
+
     function _requireTransferableGrantRight(uint256 currentTime) internal view {
-        if (!transferable) revert NonTransferableGrant(tokenId);
-        if (transferLocked) revert GrantTransferLocked(tokenId);
+        uint256 grantTokenId = tokenId();
+        if (!transferable) revert NonTransferableGrant(grantTokenId);
+        if (transferLocked) revert GrantTransferLocked(grantTokenId);
         if (currentTime < transferUnlockTime) {
-            revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
+            revert GrantTransferNotUnlocked(grantTokenId, transferUnlockTime);
         }
         if (isExpired(currentTime)) revert GrantExpired();
     }
@@ -369,8 +366,9 @@ contract TokenGrant is Initializable {
         if (amountToSettle == 0) revert ZeroAmount();
 
         uint256 requestedTotal = settledAmount + amountToSettle;
-        if (requestedTotal > claimable) {
-            revert AmountExceedsTotal({requested: requestedTotal, available: claimable});
+        uint256 claimableAmount = claimable();
+        if (requestedTotal > claimableAmount) {
+            revert AmountExceedsTotal({requested: requestedTotal, available: claimableAmount});
         }
 
         uint256 vested = getCurrentlyVestedSnapshot(block.timestamp);
@@ -382,9 +380,8 @@ contract TokenGrant is Initializable {
 
     function _closeAndBurnGrantRight() internal {
         isClosed = true;
-        holder = address(0);
         transferLocked = false;
-        ITokenGrantFactory(factory).closeGrant(tokenId);
+        ITokenGrantFactory(factory).closeGrant(tokenId());
     }
 
     function _readTokenDecimals(address token_) internal view returns (uint8) {

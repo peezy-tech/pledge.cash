@@ -1,52 +1,30 @@
 import { encodeAbiParameters, encodeFunctionData, parseAbi, parseAbiParameters, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
-  boardroomControllerAbi,
   boardroomFactoryAbi,
-  boardroomRewardsAbi,
-  boardroomRewardsFactoryAbi,
-  boardroomTokenAbi,
-  bondMarketAbi,
-  bondMarketFactoryAbi,
-  distributionFactoryAbi,
-  dutchAuctionSaleAbi,
   erc20Abi,
-  fixedPriceSaleAbi,
-  pledgeV4LiquidityFactoryAbi,
-  pledgeV4LiquidityVaultAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
+  liquidityLockerAbi,
+  liquidityLockerFactoryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import type {
   BoardroomCall,
-  BoardroomLaunchConfig,
-  BoardroomFixedPriceSaleTerms,
-  BoardroomDutchAuctionTerms,
-  BoardroomProtocolLiquidityTerms,
-  BoardroomProtocolLiquidityAddTerms,
-  BoardroomMerkleAirdropTerms,
-  BoardroomMigratingBondingCurveTerms,
-  BoardroomShareGrantTerms,
-  BondMarketTerms,
-  FixedPriceSaleTerms,
-  DutchAuctionTerms,
   GrantCreationArgs,
   GrantCreationTerms,
-  ProtocolLiquidityTerms,
-  ProtocolLiquidityAddTerms,
-  MerkleAirdropGrantClaimTerms,
-  MerkleAirdropTerms,
-  MigratingBondingCurveTerms,
+  LiquidityLockerCreationTerms,
   UniswapV4PoolKey,
 } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
 const MAX_UINT128 = (1n << 128n) - 1n;
+const MAX_UINT160 = (1n << 160n) - 1n;
 const UNIVERSAL_ROUTER_V4_SWAP = "0x10" as const satisfies Hex;
 const V4_EXACT_INPUT_SINGLE_ACTIONS = "0x060c0e" as const satisfies Hex;
-export const uniswapUniversalRouterAbi = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
+
+export const uniswapUniversalRouterAbi = parseAbi([
+  "function execute(bytes commands, bytes[] inputs, uint256 deadline) payable",
+]);
 export const permit2Abi = parseAbi([
   "function approve(address token, address spender, uint160 amount, uint48 expiration)",
 ]);
@@ -59,124 +37,14 @@ const currencyRecipientAndAmountParameters = parseAbiParameters(
 );
 const v4SwapCommandParameters = parseAbiParameters("bytes actions, bytes[] params");
 
-export function deriveUniswapV4SqrtPriceX96(input: {
-  tokenA: Address;
-  tokenB: Address;
-  amountA: bigint;
-  amountB: bigint;
-}): bigint {
-  if (input.tokenA.toLowerCase() === input.tokenB.toLowerCase()) {
-    throw new Error("Uniswap v4 currencies must be distinct.");
-  }
-  if (input.amountA <= 0n || input.amountB <= 0n) {
-    throw new Error("Uniswap v4 price amounts must be positive.");
-  }
-  const tokenAIsCurrency0 = input.tokenA.toLowerCase() < input.tokenB.toLowerCase();
-  const amount0 = tokenAIsCurrency0 ? input.amountA : input.amountB;
-  const amount1 = tokenAIsCurrency0 ? input.amountB : input.amountA;
-  const sqrtPriceX96 = integerSqrt((amount1 << 192n) / amount0);
-  if (sqrtPriceX96 < 4_295_128_739n || sqrtPriceX96 >= 1_461_446_703_485_210_103_287_273_052_203_988_822_378_723_970_342n) {
-    throw new Error("Derived Uniswap v4 price is outside TickMath bounds.");
-  }
-  return sqrtPriceX96;
-}
-
-function integerSqrt(value: bigint): bigint {
-  if (value < 0n) throw new Error("Cannot take the square root of a negative bigint.");
-  if (value < 2n) return value;
-  let left = 1n;
-  let right = 1n << BigInt((value.toString(2).length + 1) >> 1);
-  while (left + 1n < right) {
-    const middle = (left + right) >> 1n;
-    if (middle * middle <= value) left = middle;
-    else right = middle;
-  }
-  return left;
-}
-
-function requireFacetSetHash(value: Hex): Hex {
-  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
-    throw new Error("expectedFacetSetHash must be a 32-byte hex value.");
-  }
+function requireBytes32(value: Hex, name: string): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(`${name} must be a 32-byte hex value.`);
   return value;
 }
 
-export type BoardroomMutationFunctionName = Extract<
-  (typeof boardroomAbi)[number],
-  { type: "function"; stateMutability: "nonpayable" | "payable" }
->["name"];
-
-const boardroomMutationFunctionNames = new Set<string>(
-  boardroomAbi
-    .filter(
-      (item) =>
-        item.type === "function"
-        && (item.stateMutability === "nonpayable" || item.stateMutability === "payable"),
-    )
-    .map((item) => item.name),
-);
-
-export function buildBoardroomMutationTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  functionName: BoardroomMutationFunctionName;
-  args?: readonly unknown[];
-  value?: bigint;
-}) {
-  if (!boardroomMutationFunctionNames.has(input.functionName)) {
-    throw new Error(`${input.functionName} is not a mutating Boardroom route.`);
-  }
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: input.functionName,
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      ...(input.args ?? []),
-    ] as const,
-    ...(input.value === undefined ? {} : { value: input.value }),
-  } as const;
-}
-
-export function buildBoardroomCreateTransaction(input: {
-  factory: Address;
-  expectedFacetSetHash: Hex;
-  owner: Address;
-  name: string;
-  symbol: string;
-  salt: Hex;
-}) {
-  return {
-    address: input.factory,
-    abi: boardroomFactoryAbi,
-    functionName: "createBoardroom",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.owner,
-      input.name,
-      input.symbol,
-      requireFacetSetHash(input.salt),
-    ] as const,
-  } as const;
-}
-
-export function buildBoardroomMigrateTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "migrateBoardroom",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  } as const;
-}
-
-function requireAssetPolicy(assetPolicy: Address | undefined): Address {
-  if (!assetPolicy) {
-    throw new Error("assetPolicy is required for Boardroom approval calls.");
-  }
-  return assetPolicy;
+function requireUint128(value: bigint, name: string): bigint {
+  if (value < 0n || value > MAX_UINT128) throw new Error(`${name} must fit uint128.`);
+  return value;
 }
 
 export function grantCreationArgs(terms: GrantCreationTerms): GrantCreationArgs {
@@ -191,26 +59,206 @@ export function grantCreationArgs(terms: GrantCreationTerms): GrantCreationArgs 
     terms.vestingEnd,
     terms.transferable,
     terms.transferUnlockTime,
-    terms.salt,
+    requireBytes32(terms.salt, "Grant salt"),
   ] as const;
 }
 
 export function buildErc20Approval(input: { token: Address; spender: Address; amount: bigint }) {
+  if (input.amount < 0n) throw new Error("ERC20 approval amount cannot be negative.");
   return {
     address: input.token,
     abi: erc20Abi,
-    functionName: "approve",
+    functionName: "approve" as const,
     args: [input.spender, input.amount] as const,
   };
 }
 
-export function buildGrantSettlementTransaction(input: { grant: Address; amount: bigint }) {
+export function buildBoardroomCreateTransaction(input: {
+  factory: Address;
+  owner: Address;
+  name: string;
+  symbol: string;
+  salt: Hex;
+}) {
   return {
-    address: input.grant,
-    abi: tokenGrantAbi,
-    functionName: "settle",
-    args: [input.amount] as const,
+    address: input.factory,
+    abi: boardroomFactoryAbi,
+    functionName: "createBoardroom" as const,
+    args: [input.owner, input.name, input.symbol, requireBytes32(input.salt, "Boardroom salt")] as const,
   };
+}
+
+export function buildBoardroomMintTransaction(input: { boardroom: Address; to: Address; amount: bigint }) {
+  if (input.amount <= 0n) throw new Error("Boardroom mint amount must be positive.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "mint" as const,
+    args: [input.to, input.amount] as const,
+  };
+}
+
+export function buildBoardroomSetRedemptionExcessRecipientTransaction(input: {
+  boardroom: Address;
+  recipient: Address;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "setRedemptionExcessRecipient" as const,
+    args: [input.recipient] as const,
+  };
+}
+
+export function buildBoardroomTransferOwnershipTransaction(input: {
+  boardroom: Address;
+  newOwner: Address;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "transferOwnership" as const,
+    args: [input.newOwner] as const,
+  };
+}
+
+export function buildBoardroomStartWindDownTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "startWindDown" as const };
+}
+
+export function buildBoardroomBeginSnapshotTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "beginSnapshot" as const };
+}
+
+export function buildBoardroomSnapshotAssetsTransaction(input: { boardroom: Address; maximum: bigint }) {
+  if (input.maximum <= 0n || input.maximum > 32n) {
+    throw new Error("Boardroom snapshot pages must contain between 1 and 32 assets.");
+  }
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "snapshotAssets" as const,
+    args: [input.maximum] as const,
+  };
+}
+
+export function buildBoardroomPruneEscrowTransaction(input: { boardroom: Address; escrow: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "pruneEscrow" as const,
+    args: [input.escrow] as const,
+  };
+}
+
+export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "wrapNativeBalance" as const };
+}
+
+export function buildBoardroomOpenRedemptionsTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "openRedemptions" as const };
+}
+
+export function buildBoardroomRegisterRedeemableAssetTransaction(input: { boardroom: Address; asset: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "registerRedeemableAsset" as const,
+    args: [input.asset] as const,
+  };
+}
+
+export function buildBoardroomRedeemTransaction(input: { boardroom: Address; shares: bigint }) {
+  if (input.shares <= 0n) throw new Error("Redemption share amount must be positive.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "redeem" as const,
+    args: [input.shares] as const,
+  };
+}
+
+export function buildBoardroomClaimRedemptionAssetTransaction(input: {
+  boardroom: Address;
+  asset: Address;
+  recipient: Address;
+  minAmountOut: bigint;
+}) {
+  if (input.minAmountOut < 0n) throw new Error("Minimum redemption amount cannot be negative.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "claimRedemptionAsset" as const,
+    args: [input.asset, input.recipient, input.minAmountOut] as const,
+  };
+}
+
+export function buildBoardroomSweepRedemptionExcessTransaction(input: { boardroom: Address; asset: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "sweepRedemptionExcess" as const,
+    args: [input.asset] as const,
+  };
+}
+
+export function buildBoardroomCall(input: { target: Address; data: Hex; value?: bigint }): BoardroomCall {
+  if (input.value !== undefined && input.value < 0n) throw new Error("Boardroom call value cannot be negative.");
+  return { target: input.target, value: input.value ?? 0n, data: input.data };
+}
+
+export function buildBoardroomExecuteTransaction(input: {
+  boardroom: Address;
+  call: BoardroomCall;
+  value?: bigint;
+}) {
+  const value = input.value ?? input.call.value;
+  if (value !== input.call.value) throw new Error("Boardroom execute value must equal the call value.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "execute" as const,
+    args: [input.call] as const,
+    value,
+  };
+}
+
+export function buildBoardroomExecuteBatchTransaction(input: {
+  boardroom: Address;
+  calls: readonly BoardroomCall[];
+  value?: bigint;
+}) {
+  if (input.calls.length === 0 || input.calls.length > 16) {
+    throw new Error("Boardroom execution batches must contain between 1 and 16 calls.");
+  }
+  const requiredValue = input.calls.reduce((total, call) => total + call.value, 0n);
+  const value = input.value ?? requiredValue;
+  if (value !== requiredValue) throw new Error("Boardroom batch value must equal the sum of call values.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "executeBatch" as const,
+    args: [input.calls] as const,
+    value,
+  };
+}
+
+export function buildBoardroomExecuteEscrowTransaction(input: {
+  boardroom: Address;
+  escrow: Address;
+  data: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "executeEscrow" as const,
+    args: [input.escrow, input.data] as const,
+  };
+}
+
+export function buildGrantSettlementTransaction(input: { grant: Address; amount: bigint }) {
+  if (input.amount <= 0n) throw new Error("Grant settlement amount must be positive.");
+  return { address: input.grant, abi: tokenGrantAbi, functionName: "settle" as const, args: [input.amount] as const };
 }
 
 export function buildGrantRightTransferTransaction(input: {
@@ -222,7 +270,7 @@ export function buildGrantRightTransferTransaction(input: {
   return {
     address: input.factory,
     abi: tokenGrantFactoryAbi,
-    functionName: "safeTransferFrom",
+    functionName: "safeTransferFrom" as const,
     args: [input.from, input.to, input.tokenId] as const,
   };
 }
@@ -235,783 +283,174 @@ export function buildDirectGrantCreationTransaction(input: {
   return {
     address: input.factory,
     abi: tokenGrantFactoryAbi,
-    functionName: "createGrant",
+    functionName: "createGrant" as const,
     args: grantCreationArgs(input.terms),
     value: input.creationFee ?? 0n,
   };
 }
 
-export function buildBoardroomMintTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  to: Address;
-  amount: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "mint",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.to, input.amount] as const,
-  };
-}
-
-export function buildBoardroomLaunchTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  config: BoardroomLaunchConfig;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "launch",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.config] as const,
-  };
-}
-
-export function buildBoardroomBeginSnapshotTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "beginSnapshot",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomSnapshotAssetsTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  maximum: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "snapshotAssets",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.maximum] as const,
-  };
-}
-
-export function buildBoardroomStartWindDownTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "startWindDown",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomPruneObligationTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  obligation: Address;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "pruneObligation",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.obligation] as const,
-  };
-}
-
-export function buildBoardroomPruneObligationsTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  obligations: readonly Address[];
-}) {
-  if (input.obligations.length === 0 || input.obligations.length > 32) {
-    throw new Error("Obligation prune batches must contain between 1 and 32 addresses.");
-  }
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "pruneObligations",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.obligations] as const,
-  };
-}
-
-export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "wrapNativeBalance",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomBurnTreasurySharesTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "burnTreasuryShares",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomOpenRedemptionsTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "openRedemptions",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomRegisterRedeemableAssetTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  asset: Address;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "registerRedeemableAsset",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.asset] as const,
-  };
-}
-
-export function buildBoardroomRedeemTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  shares: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "redeem",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.shares] as const,
-  };
-}
-
-export function buildBoardroomClaimRedemptionAssetTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  asset: Address;
-  recipient: Address;
-  minAmountOut: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "claimRedemptionAsset",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.asset,
-      input.recipient,
-      input.minAmountOut,
-    ] as const,
-  };
-}
-
-export function buildBoardroomRewardsStakeTransaction(input: { rewards: Address; amount: bigint }) {
-  return {
-    address: input.rewards,
-    abi: boardroomRewardsAbi,
-    functionName: "stake",
-    args: [input.amount] as const,
-  };
-}
-
-export function buildBoardroomRewardsUnstakeRequestTransaction(input: { rewards: Address; amount: bigint }) {
-  return {
-    address: input.rewards,
-    abi: boardroomRewardsAbi,
-    functionName: "requestUnstake",
-    args: [input.amount] as const,
-  };
-}
-
-export function buildBoardroomRewardsCompleteUnstakeTransaction(input: {
-  rewards: Address;
-  account: Address;
-  slot: bigint;
-}) {
-  return {
-    address: input.rewards,
-    abi: boardroomRewardsAbi,
-    functionName: "completeUnstake",
-    args: [input.account, input.slot] as const,
-  };
-}
-
-export function buildBoardroomRewardsClaimTransaction(input: {
-  rewards: Address;
-  asset: Address;
-  recipient: Address;
-}) {
-  return {
-    address: input.rewards,
-    abi: boardroomRewardsAbi,
-    functionName: "claim",
-    args: [input.asset, input.recipient] as const,
-  };
-}
-
-export function buildBoardroomRewardsTerminalizeTransaction(input: { rewards: Address }) {
-  return {
-    address: input.rewards,
-    abi: boardroomRewardsAbi,
-    functionName: "terminalize",
-  };
-}
-
-export function buildBoardroomCall(input: {
-  policy: Address;
-  target: Address;
-  data: Hex;
-  value?: bigint;
-}): BoardroomCall {
-  return {
-    policy: input.policy,
-    target: input.target,
-    value: input.value ?? 0n,
-    data: input.data,
-  };
-}
-
-export function buildBoardroomRewardsCreationCall(input: {
+export function buildBoardroomGrantApprovalCall(input: {
+  token: Address;
   factory: Address;
-  cooldown: bigint;
-  salt: Hex;
+  amount: bigint;
 }): BoardroomCall {
+  if (input.amount <= 0n) throw new Error("Grant approval amount must be positive.");
   return buildBoardroomCall({
-    policy: input.factory,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: boardroomRewardsFactoryAbi,
-      functionName: "createRewards",
-      args: [input.cooldown, input.salt],
-    }),
-  });
-}
-
-export function buildBoardroomRewardsCreationTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  cooldown: bigint;
-  salt: Hex;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomRewardsCreationCall(input),
-  });
-}
-
-export function buildBoardroomRewardFundingCall(input: {
-  factory: Address;
-  rewards: Address;
-  asset: Address;
-  amount: bigint;
-  duration: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.factory,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: boardroomRewardsFactoryAbi,
-      functionName: "fundReward",
-      args: [input.rewards, input.asset, input.amount, input.duration],
-    }),
-  });
-}
-
-export function buildBoardroomRewardFundingBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  assetPolicy: Address;
-  rewards: Address;
-  asset: Address;
-  amount: bigint;
-  duration: bigint;
-}) {
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls: buildBoardroomRewardFundingCalls(input),
-  });
-}
-
-export function buildBoardroomRewardFundingCalls(input: {
-  factory: Address;
-  assetPolicy: Address;
-  rewards: Address;
-  asset: Address;
-  amount: bigint;
-  duration: bigint;
-}): readonly [BoardroomCall, BoardroomCall] {
-  const approvalCall = buildBoardroomCall({
-    policy: requireAssetPolicy(input.assetPolicy),
-    target: input.asset,
+    target: input.token,
     data: encodeFunctionData({
       abi: erc20Abi,
       functionName: "approve",
       args: [input.factory, input.amount],
     }),
   });
-  return [approvalCall, buildBoardroomRewardFundingCall(input)] as const;
 }
 
-export function buildBoardroomSelfCall(input: { boardroom: Address; data: Hex; value?: bigint }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: ZERO_ADDRESS,
-    target: input.boardroom,
-    data: input.data,
-    ...(input.value === undefined ? {} : { value: input.value }),
-  });
-}
-
-export function buildBoardroomExecuteTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  call: BoardroomCall;
-  value?: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "execute",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.call] as const,
-    value: input.value ?? input.call.value,
-  };
-}
-
-export function buildBoardroomExecuteBatchTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  calls: readonly BoardroomCall[];
-  value?: bigint;
-}) {
-  if (input.calls.length === 0 || input.calls.length > 16) {
-    throw new Error("Boardroom execution batches must contain between 1 and 16 calls.");
-  }
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "executeBatch",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.calls] as const,
-    value: input.value ?? input.calls.reduce((total, call) => total + call.value, 0n),
-  };
-}
-
-export function buildControllerScheduleBoardroomOperationTransaction(input: {
-  controller: Address;
-  expectedFacetSetHash: Hex;
-  calls: readonly BoardroomCall[];
-  salt: Hex;
-  expectedBoardroomEpoch: bigint;
-  expectedConfigurationEpoch: bigint;
-}) {
-  return {
-    address: input.controller,
-    abi: boardroomControllerAbi,
-    functionName: "scheduleBoardroomOperation",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.calls,
-      input.salt,
-      input.expectedBoardroomEpoch,
-      input.expectedConfigurationEpoch,
-    ] as const,
-  };
-}
-
-export function buildControllerScheduleConfigurationOperationTransaction(input: {
-  controller: Address;
-  expectedFacetSetHash: Hex;
-  data: Hex;
-  salt: Hex;
-  expectedBoardroomEpoch: bigint;
-  expectedConfigurationEpoch: bigint;
-}) {
-  return {
-    address: input.controller,
-    abi: boardroomControllerAbi,
-    functionName: "scheduleControllerOperation",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.data,
-      input.salt,
-      input.expectedBoardroomEpoch,
-      input.expectedConfigurationEpoch,
-    ] as const,
-  };
-}
-
-export function buildBoardroomVetoOperationTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  operationId: Hex;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "veto",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.operationId] as const,
-  };
-}
-
-export function buildControllerExecuteBoardroomOperationTransaction(input: {
-  controller: Address;
-  expectedFacetSetHash: Hex;
-  calls: readonly BoardroomCall[];
-  salt: Hex;
-  expectedBoardroomEpoch: bigint;
-  expectedConfigurationEpoch: bigint;
-  authority: Address;
-}) {
-  return {
-    address: input.controller,
-    abi: boardroomControllerAbi,
-    functionName: "executeBoardroomOperation",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.calls,
-      input.salt,
-      input.expectedBoardroomEpoch,
-      input.expectedConfigurationEpoch,
-      input.authority,
-    ] as const,
-  };
-}
-
-export function buildControllerExecuteConfigurationOperationTransaction(input: {
-  controller: Address;
-  expectedFacetSetHash: Hex;
-  data: Hex;
-  salt: Hex;
-  expectedBoardroomEpoch: bigint;
-  expectedConfigurationEpoch: bigint;
-  authority: Address;
-}) {
-  return {
-    address: input.controller,
-    abi: boardroomControllerAbi,
-    functionName: "executeControllerOperation",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.data,
-      input.salt,
-      input.expectedBoardroomEpoch,
-      input.expectedConfigurationEpoch,
-      input.authority,
-    ] as const,
-  };
-}
-
-export function buildBoardroomExecuteWindDownCallTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  call: BoardroomCall;
-}) {
-  if (input.call.value !== 0n) throw new Error("Wind-down calls cannot transfer native value.");
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "executeWindDownCall",
-    args: [requireFacetSetHash(input.expectedFacetSetHash), input.call] as const,
-  };
-}
-
-export type BoardroomCallExecutionPlan =
-  | { kind: "execute"; transaction: ReturnType<typeof buildBoardroomExecuteTransaction> | ReturnType<typeof buildBoardroomExecuteBatchTransaction> }
-  | { kind: "schedule"; transaction: ReturnType<typeof buildControllerScheduleBoardroomOperationTransaction> }
-  | { kind: "windDown"; transaction: ReturnType<typeof buildBoardroomExecuteWindDownCallTransaction> };
-
-export function planBoardroomCallExecution(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  calls: readonly BoardroomCall[];
-  lifecycle: {
-    launched: boolean;
-    status: number;
-    migrationRequired: boolean;
-    controller?: Address;
-    governanceEpoch?: bigint;
-    controllerConfigurationEpoch?: bigint;
-    proposer?: Address;
-  };
-  salt?: Hex;
-}): BoardroomCallExecutionPlan {
-  if (input.calls.length === 0) throw new Error("At least one Boardroom call is required.");
-  if (input.lifecycle.migrationRequired) {
-    throw new Error("The Boardroom must be migrated before calls can be prepared.");
-  }
-
-  if (input.lifecycle.status === 0) {
-    if (input.lifecycle.launched) {
-      if (!input.salt) throw new Error("A governance salt is required after launch.");
-      const { controller, governanceEpoch, controllerConfigurationEpoch } = input.lifecycle;
-      if (!controller || governanceEpoch === undefined || controllerConfigurationEpoch === undefined) {
-        throw new Error("Current controller and governance epochs are required after launch.");
-      }
-      return {
-        kind: "schedule",
-        transaction: buildControllerScheduleBoardroomOperationTransaction({
-          controller,
-          expectedFacetSetHash: input.expectedFacetSetHash,
-          calls: input.calls,
-          salt: input.salt,
-          expectedBoardroomEpoch: governanceEpoch,
-          expectedConfigurationEpoch: controllerConfigurationEpoch,
-        }),
-      };
-    }
-
-    return input.calls.length === 1
-      ? {
-          kind: "execute",
-          transaction: buildBoardroomExecuteTransaction({
-            boardroom: input.boardroom,
-            expectedFacetSetHash: input.expectedFacetSetHash,
-            call: input.calls[0]!,
-          }),
-        }
-      : {
-          kind: "execute",
-          transaction: buildBoardroomExecuteBatchTransaction({
-            boardroom: input.boardroom,
-            expectedFacetSetHash: input.expectedFacetSetHash,
-            calls: input.calls,
-          }),
-        };
-  }
-
-  if (input.lifecycle.status === 1) {
-    if (input.calls.length !== 1) throw new Error("Wind-down calls must be submitted one at a time.");
-    return {
-      kind: "windDown",
-      transaction: buildBoardroomExecuteWindDownCallTransaction({
-        boardroom: input.boardroom,
-        expectedFacetSetHash: input.expectedFacetSetHash,
-        call: input.calls[0]!,
-      }),
-    };
-  }
-
-  throw new Error("Boardroom calls are unavailable during snapshotting or after redemptions open.");
-}
-
-export function buildControllerUpdateConfigurationData(input: {
-  proposer: Address;
-  delay: bigint;
-  gracePeriod: bigint;
-}): Hex {
-  return encodeFunctionData({
-    abi: boardroomControllerAbi,
-    functionName: "updateConfiguration",
-    args: [input.proposer, input.delay, input.gracePeriod],
-  });
-}
-
-export function buildBoardroomReplaceControllerCall(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  expectedCurrentController: Address;
-  expectedNextController: Address;
-  nextProposer: Address;
-  nextDelay: bigint;
-  nextGracePeriod: bigint;
-  nextGeneration: bigint;
+export function buildBoardroomGrantCreationCall(input: {
+  factory: Address;
+  terms: GrantCreationTerms;
+  creationFee?: bigint;
 }): BoardroomCall {
-  return buildBoardroomSelfCall({
-    boardroom: input.boardroom,
+  return buildBoardroomCall({
+    target: input.factory,
+    value: input.creationFee ?? 0n,
     data: encodeFunctionData({
-      abi: boardroomAbi,
-      functionName: "replaceController",
+      abi: tokenGrantFactoryAbi,
+      functionName: "createGrant",
+      args: grantCreationArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomAssetGrantIssuanceBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: GrantCreationTerms;
+  creationFee?: bigint;
+}) {
+  if (input.terms.token.toLowerCase() === input.shareToken.toLowerCase()) {
+    throw new Error("Boardroom share tokens cannot be grant assets because owner execution rejects the share-token target.");
+  }
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls: [
+      buildBoardroomGrantApprovalCall({ token: input.terms.token, factory: input.factory, amount: input.terms.amount }),
+      buildBoardroomGrantCreationCall({
+        factory: input.factory,
+        terms: input.terms,
+        creationFee: input.creationFee ?? 0n,
+      }),
+    ],
+  });
+}
+
+export function buildGrantIssuerBoardroomCall(input: {
+  grant: Address;
+  functionName: "quarantineAndClose" | "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
+}): BoardroomCall {
+  return buildBoardroomCall({
+    target: input.grant,
+    data: encodeFunctionData({ abi: tokenGrantAbi, functionName: input.functionName }),
+  });
+}
+
+export function buildGrantIssuerBoardroomAction(input: {
+  boardroom: Address;
+  grant: Address;
+  status: 0 | 1;
+  functionName: "quarantineAndClose" | "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
+}) {
+  const call = buildGrantIssuerBoardroomCall(input);
+  return input.status === 0
+    ? buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call })
+    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.grant, data: call.data });
+}
+
+export function buildLiquidityLockerCreationCall(input: {
+  factory: Address;
+  terms: LiquidityLockerCreationTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: liquidityLockerFactoryAbi,
+      functionName: "createLocker",
       args: [
-        requireFacetSetHash(input.expectedFacetSetHash),
-        input.expectedCurrentController,
-        input.expectedNextController,
-        input.nextProposer,
-        input.nextDelay,
-        input.nextGracePeriod,
-        input.nextGeneration,
+        input.terms.quoteAsset,
+        input.terms.poolFee,
+        input.terms.tickSpacing,
+        requireBytes32(input.terms.salt, "Liquidity locker salt"),
       ],
     }),
   });
 }
 
-export function buildBoardroomMintCall(input: {
+export function buildBoardroomCreateLiquidityLockerTransaction(input: {
   boardroom: Address;
-  expectedFacetSetHash: Hex;
-  to: Address;
-  amount: bigint;
-}): BoardroomCall {
-  return buildBoardroomSelfCall({
-    boardroom: input.boardroom,
-    data: encodeFunctionData({
-      abi: boardroomAbi,
-      functionName: "mint",
-      args: [requireFacetSetHash(input.expectedFacetSetHash), input.to, input.amount],
-    }),
-  });
-}
-
-export function buildBoardroomRegisterRedeemableAssetCall(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  asset: Address;
-}): BoardroomCall {
-  return buildBoardroomSelfCall({
-    boardroom: input.boardroom,
-    data: encodeFunctionData({
-      abi: boardroomAbi,
-      functionName: "registerRedeemableAsset",
-      args: [requireFacetSetHash(input.expectedFacetSetHash), input.asset],
-    }),
-  });
-}
-
-export function buildBoardroomGrantApprovalCall(input: {
-  policy: Address;
-  shareToken: Address;
   factory: Address;
-  amount: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.shareToken,
-    data: encodeFunctionData({
-      abi: boardroomTokenAbi,
-      functionName: "approve",
-      args: [input.factory, input.amount],
-    }),
-  });
-}
-
-export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
-  return [
-    {
-      shareToken: terms.shareToken,
-      paymentToken: terms.paymentToken,
-      shareAmount: terms.shareAmount,
-      price: terms.price,
-      maxPerBuyer: terms.maxPerBuyer,
-      startTime: terms.startTime,
-      endTime: terms.endTime,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function bondMarketArgs(terms: BondMarketTerms) {
-  return [
-    {
-      quoteToken: terms.quoteToken,
-      kind: terms.kind,
-      capacity: terms.capacity,
-      initialPrice: terms.initialPrice,
-      minimumPrice: terms.minimumPrice,
-      debtBuffer: terms.debtBuffer,
-      vesting: terms.vesting,
-      start: terms.start,
-      duration: terms.duration,
-      depositInterval: terms.depositInterval,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function buildBondPurchaseTransaction(input: {
-  market: Address;
-  quoteAmount: bigint;
-  minimumPayout: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.market,
-    abi: bondMarketAbi,
-    functionName: "purchase",
-    args: [input.quoteAmount, input.minimumPayout, input.deadline] as const,
-  };
-}
-
-export function buildBondRedeemTransaction(input: { market: Address; positionId: bigint }) {
-  return {
-    address: input.market,
-    abi: bondMarketAbi,
-    functionName: "redeem",
-    args: [input.positionId] as const,
-  };
-}
-
-export function buildBondFinalizeTransaction(input: { market: Address }) {
-  return { address: input.market, abi: bondMarketAbi, functionName: "finalize" };
-}
-
-export function buildBoardroomBondMarketBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BondMarketTerms;
-  assetPolicy?: Address;
-  policy?: Address;
-}) {
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const calls = [
-    buildBoardroomCall({
-      policy: assetPolicy,
-      target: input.shareToken,
-      data: encodeFunctionData({
-        abi: boardroomTokenAbi,
-        functionName: "approve",
-        args: [input.factory, input.terms.capacity],
-      }),
-    }),
-    buildBoardroomCall({
-      policy: input.policy ?? input.factory,
-      target: input.factory,
-      data: encodeFunctionData({
-        abi: bondMarketFactoryAbi,
-        functionName: "createBondMarket",
-        args: bondMarketArgs(input.terms),
-      }),
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomBondMarketCloseCall(input: { policy: Address; market: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.market,
-    data: encodeFunctionData({ abi: bondMarketAbi, functionName: "close" }),
-  });
-}
-
-export function buildBoardroomBondMarketCloseAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  market: Address;
+  terms: LiquidityLockerCreationTerms;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomBondMarketCloseCall(input),
+    call: buildLiquidityLockerCreationCall(input),
   });
 }
 
-export function buildFixedPriceSaleBuyTransaction(input: {
-  sale: Address;
-  shareAmount: bigint;
-  recipient: Address;
-  maxPayment: bigint;
+function buildLiquidityLockerCall(input: {
+  locker: Address;
+  functionName: "registerPosition";
+  tokenId: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    target: input.locker,
+    data: encodeFunctionData({ abi: liquidityLockerAbi, functionName: input.functionName, args: [input.tokenId] }),
+  });
+}
+
+export function buildBoardroomRegisterLiquidityPositionTransaction(input: {
+  boardroom: Address;
+  locker: Address;
+  tokenId: bigint;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildLiquidityLockerCall({ ...input, functionName: "registerPosition" }),
+  });
+}
+
+export function buildLiquidityLockerCollectFeesTransaction(input: { locker: Address }) {
+  return { address: input.locker, abi: liquidityLockerAbi, functionName: "collectFees" as const };
+}
+
+export function buildBoardroomLiquidityLockerCancelTransaction(input: {
+  boardroom: Address;
+  locker: Address;
+  status: 0 | 1;
+}) {
+  const data = encodeFunctionData({ abi: liquidityLockerAbi, functionName: "cancel" });
+  return input.status === 0
+    ? buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call: buildBoardroomCall({ target: input.locker, data }) })
+    : buildBoardroomExecuteEscrowTransaction({ boardroom: input.boardroom, escrow: input.locker, data });
+}
+
+export function buildBoardroomLiquidityLockerExitTransaction(input: {
+  boardroom: Address;
+  locker: Address;
+  amount0Min: bigint;
+  amount1Min: bigint;
   deadline: bigint;
 }) {
-  return {
-    address: input.sale,
-    abi: fixedPriceSaleAbi,
-    functionName: "buy" as const,
-    args: [input.shareAmount, input.recipient, input.maxPayment, input.deadline] as const,
-  };
+  if (input.deadline <= 0n) throw new Error("Liquidity exit requires a deadline.");
+  const data = encodeFunctionData({
+    abi: liquidityLockerAbi,
+    functionName: "exit",
+    args: [requireUint128(input.amount0Min, "amount0Min"), requireUint128(input.amount1Min, "amount1Min"), input.deadline],
+  });
+  return buildBoardroomExecuteEscrowTransaction({
+    boardroom: input.boardroom,
+    escrow: input.locker,
+    data,
+  });
 }
 
 export function buildUniswapV4SwapExactInputSingleTransaction(input: {
@@ -1027,9 +466,8 @@ export function buildUniswapV4SwapExactInputSingleTransaction(input: {
   if (input.amountIn <= 0n || input.amountIn > MAX_UINT128) {
     throw new Error("amountIn must fit a positive uint128.");
   }
-  if (input.amountOutMin < 0n || input.amountOutMin > MAX_UINT128) {
-    throw new Error("amountOutMin must fit uint128.");
-  }
+  requireUint128(input.amountOutMin, "amountOutMin");
+  if (input.deadline <= 0n) throw new Error("Uniswap v4 swaps require a deadline.");
   const currency0 = input.poolKey.currency0.toLowerCase();
   const currency1 = input.poolKey.currency1.toLowerCase();
   if (currency0 >= currency1) throw new Error("Uniswap v4 PoolKey currencies must be sorted.");
@@ -1056,6 +494,7 @@ export function buildUniswapV4SwapExactInputSingleTransaction(input: {
     abi: uniswapUniversalRouterAbi,
     functionName: "execute" as const,
     args: [UNIVERSAL_ROUTER_V4_SWAP, [commandInput], input.deadline] as const,
+    ...(input.currencyIn.toLowerCase() === ZERO_ADDRESS ? { value: input.amountIn } : {}),
   };
 }
 
@@ -1066,7 +505,7 @@ export function buildPermit2ApprovalTransaction(input: {
   amount: bigint;
   expiration: number;
 }) {
-  if (input.amount < 0n || input.amount >= 1n << 160n) throw new Error("Permit2 amount must fit uint160.");
+  if (input.amount < 0n || input.amount > MAX_UINT160) throw new Error("Permit2 amount must fit uint160.");
   if (!Number.isSafeInteger(input.expiration) || input.expiration < 0 || input.expiration >= 2 ** 48) {
     throw new Error("Permit2 expiration must fit uint48.");
   }
@@ -1076,1011 +515,4 @@ export function buildPermit2ApprovalTransaction(input: {
     functionName: "approve" as const,
     args: [input.token, input.universalRouter, input.amount, input.expiration] as const,
   };
-}
-
-export function dutchAuctionArgs(terms: DutchAuctionTerms) {
-  return [
-    {
-      shareToken: terms.shareToken,
-      paymentToken: terms.paymentToken,
-      shareAmount: terms.shareAmount,
-      startPrice: terms.startPrice,
-      floorPrice: terms.floorPrice,
-      maxPerBuyer: terms.maxPerBuyer,
-      startTime: terms.startTime,
-      endTime: terms.endTime,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function buildDutchAuctionBuyTransaction(input: {
-  auction: Address;
-  shareAmount: bigint;
-  recipient: Address;
-  maxPayment: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.auction,
-    abi: dutchAuctionSaleAbi,
-    functionName: "buy",
-    args: [input.shareAmount, input.recipient, input.maxPayment, input.deadline] as const,
-  };
-}
-
-export function buildDutchAuctionFinalizeTransaction(input: { auction: Address }) {
-  return { address: input.auction, abi: dutchAuctionSaleAbi, functionName: "finalize" };
-}
-
-export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
-  return [
-    {
-      shareToken: terms.shareToken,
-      quoteToken: terms.quoteToken,
-      saleSupply: terms.saleSupply,
-      migrationSupply: terms.migrationSupply,
-      basePrice: terms.basePrice,
-      slope: terms.slope,
-      graduationQuoteTarget: terms.graduationQuoteTarget,
-      quoteToLpBps: terms.quoteToLpBps,
-      startTime: terms.startTime,
-      endTime: terms.endTime,
-      migrationSalt: terms.migrationSalt,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function buildMigratingBondingCurveBuyTransaction(input: {
-  curve: Address;
-  shareAmount: bigint;
-  recipient: Address;
-  maxQuoteIn: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "buy",
-    args: [input.shareAmount, input.recipient, input.maxQuoteIn, input.deadline] as const,
-  };
-}
-
-export function buildMigratingBondingCurveSellTransaction(input: {
-  curve: Address;
-  shareAmount: bigint;
-  recipient: Address;
-  minQuoteOut: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "sell",
-    args: [input.shareAmount, input.recipient, input.minQuoteOut, input.deadline] as const,
-  };
-}
-
-export function merkleAirdropArgs(terms: MerkleAirdropTerms) {
-  return [
-    {
-      shareToken: terms.shareToken,
-      shareAmount: terms.shareAmount,
-      merkleRoot: terms.merkleRoot,
-      startTime: terms.startTime,
-      endTime: terms.endTime,
-      maxGrantClaims: terms.maxGrantClaims,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function merkleAirdropGrantClaimArgs(terms: MerkleAirdropGrantClaimTerms) {
-  return {
-    paymentToken: terms.paymentToken,
-    price: terms.price,
-    expiry: terms.expiry,
-    vestingCliff: terms.vestingCliff,
-    vestingEnd: terms.vestingEnd,
-    transferable: terms.transferable,
-    transferUnlockTime: terms.transferUnlockTime,
-    salt: terms.salt,
-  } as const;
-}
-
-export function protocolLiquidityArgs(terms: ProtocolLiquidityTerms) {
-  return [
-    {
-      tokenA: terms.tokenA,
-      tokenB: terms.tokenB,
-      amountADesired: terms.amountADesired,
-      amountBDesired: terms.amountBDesired,
-      amountAMin: terms.amountAMin,
-      amountBMin: terms.amountBMin,
-      sqrtPriceX96: terms.sqrtPriceX96,
-      deadline: terms.deadline,
-      salt: terms.salt,
-    },
-  ] as const;
-}
-
-export function protocolLiquidityAddArgs(terms: ProtocolLiquidityAddTerms) {
-  return [
-    {
-      tokenA: terms.tokenA,
-      tokenB: terms.tokenB,
-      amountADesired: terms.amountADesired,
-      amountBDesired: terms.amountBDesired,
-      amountAMin: terms.amountAMin,
-      amountBMin: terms.amountBMin,
-      deadline: terms.deadline,
-    },
-  ] as const;
-}
-
-export function buildBoardroomFixedPriceSaleApprovalCall(input: {
-  policy: Address;
-  shareToken: Address;
-  factory: Address;
-  amount: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.shareToken,
-    data: encodeFunctionData({
-      abi: boardroomTokenAbi,
-      functionName: "approve",
-      args: [input.factory, input.amount],
-    }),
-  });
-}
-
-export function buildBoardroomFixedPriceSaleCreationCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: FixedPriceSaleTerms;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: distributionFactoryAbi,
-      functionName: "createFixedPriceSale",
-      args: fixedPriceSaleArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomFixedPriceSaleBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomFixedPriceSaleTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const terms = { ...input.terms, shareToken: input.shareToken } satisfies FixedPriceSaleTerms;
-  const calls = [
-    buildBoardroomFixedPriceSaleApprovalCall({
-      policy: assetPolicy,
-      shareToken: input.shareToken,
-      factory: input.factory,
-      amount: input.terms.shareAmount,
-    }),
-    buildBoardroomFixedPriceSaleCreationCall({
-      policy,
-      factory: input.factory,
-      terms,
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomFixedPriceSaleCloseAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  sale: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomFixedPriceSaleCloseCall(input),
-  });
-}
-
-export function buildBoardroomFixedPriceSaleCloseCall(input: { policy: Address; sale: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.sale,
-    data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }),
-  });
-}
-
-export function buildBoardroomFixedPriceSaleCancelAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  sale: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomFixedPriceSaleCancelCall(input),
-  });
-}
-
-export function buildBoardroomFixedPriceSaleCancelCall(input: { policy: Address; sale: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.sale,
-    data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }),
-  });
-}
-
-export function buildBoardroomDutchAuctionBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomDutchAuctionTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const terms = { ...input.terms, shareToken: input.shareToken } satisfies DutchAuctionTerms;
-  const calls = [
-    buildBoardroomCall({
-      policy: assetPolicy,
-      target: input.shareToken,
-      data: encodeFunctionData({
-        abi: boardroomTokenAbi,
-        functionName: "approve",
-        args: [input.factory, input.terms.shareAmount],
-      }),
-    }),
-    buildBoardroomCall({
-      policy,
-      target: input.factory,
-      data: encodeFunctionData({
-        abi: distributionFactoryAbi,
-        functionName: "createDutchAuction",
-        args: dutchAuctionArgs(terms),
-      }),
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomDutchAuctionCloseAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  auction: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.auction,
-      data: encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "close" }),
-    }),
-  });
-}
-
-export function buildBoardroomDutchAuctionCancelAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  auction: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.auction,
-      data: encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "cancel" }),
-    }),
-  });
-}
-
-export function buildBoardroomMigratingCurveApprovalCall(input: {
-  policy: Address;
-  shareToken: Address;
-  factory: Address;
-  saleSupply: bigint;
-  migrationSupply: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.shareToken,
-    data: encodeFunctionData({
-      abi: boardroomTokenAbi,
-      functionName: "approve",
-      args: [input.factory, input.saleSupply + input.migrationSupply],
-    }),
-  });
-}
-
-export function buildBoardroomMigratingCurveCreationCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: MigratingBondingCurveTerms;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: distributionFactoryAbi,
-      functionName: "createMigratingBondingCurve",
-      args: migratingBondingCurveArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomMigratingCurveBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomMigratingBondingCurveTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const terms = { ...input.terms, shareToken: input.shareToken } satisfies MigratingBondingCurveTerms;
-  const calls = [
-    buildBoardroomMigratingCurveApprovalCall({
-      policy: assetPolicy,
-      shareToken: input.shareToken,
-      factory: input.factory,
-      saleSupply: input.terms.saleSupply,
-      migrationSupply: input.terms.migrationSupply,
-    }),
-    buildBoardroomMigratingCurveCreationCall({
-      policy,
-      factory: input.factory,
-      terms,
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomMigratingCurveCancelAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  curve: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomMigratingCurveCancelCall(input),
-  });
-}
-
-export function buildBoardroomMigratingCurveCancelCall(input: { policy: Address; curve: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.curve,
-    data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
-  });
-}
-
-/**
- * Migration and settlement call back into the Boardroom, so the caller commits to the release
- * those callbacks must execute under. An activation landing first reverts the transaction.
- */
-export function buildMigratingBondingCurveMigrationTransaction(input: {
-  curve: Address;
-  expectedFacetSetHash: Hex;
-  minShareLiquidity: bigint;
-  minQuoteLiquidity: bigint;
-  sqrtPriceX96: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "migrate",
-    args: [
-      input.expectedFacetSetHash,
-      input.minShareLiquidity,
-      input.minQuoteLiquidity,
-      input.sqrtPriceX96,
-      input.deadline,
-    ] as const,
-  };
-}
-
-export function buildMigratingBondingCurveExpireTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "expire" } as const;
-}
-
-export function buildMigratingBondingCurveFallbackTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "fallbackToUnwind" } as const;
-}
-
-export function buildMigratingBondingCurveFinalizeUnwindTransaction(curve: Address, expectedFacetSetHash: Hex) {
-  return {
-    address: curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "finalizeUnwind",
-    args: [expectedFacetSetHash] as const,
-  } as const;
-}
-
-export function buildMigratingBondingCurveRecoverQuoteTransaction(curve: Address, expectedFacetSetHash: Hex) {
-  return {
-    address: curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "recoverQuarantinedQuote",
-    args: [expectedFacetSetHash] as const,
-  } as const;
-}
-
-export function buildMigratingBondingCurveOpenForfeitureTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "openQuoteForfeiture" } as const;
-}
-
-export function buildMigratingBondingCurveVetoForfeitureTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "vetoQuoteForfeiture" } as const;
-}
-
-export function buildMigratingBondingCurveFinalizeForfeitureTransaction(curve: Address, expectedFacetSetHash: Hex) {
-  return {
-    address: curve,
-    abi: migratingBondingCurveAbi,
-    functionName: "finalizeQuoteForfeiture",
-    args: [expectedFacetSetHash] as const,
-  } as const;
-}
-
-export function buildMigratingBondingCurveRecoverForfeitedQuoteTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "recoverForfeitedQuote" } as const;
-}
-
-export function buildBoardroomMerkleAirdropApprovalCall(input: {
-  policy: Address;
-  shareToken: Address;
-  factory: Address;
-  amount: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.shareToken,
-    data: encodeFunctionData({
-      abi: boardroomTokenAbi,
-      functionName: "approve",
-      args: [input.factory, input.amount],
-    }),
-  });
-}
-
-export function buildBoardroomMerkleAirdropCreationCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: MerkleAirdropTerms;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: distributionFactoryAbi,
-      functionName: "createMerkleAirdrop",
-      args: merkleAirdropArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomMerkleAirdropBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomMerkleAirdropTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const terms = { ...input.terms, shareToken: input.shareToken } satisfies MerkleAirdropTerms;
-  const calls = [
-    buildBoardroomMerkleAirdropApprovalCall({
-      policy: assetPolicy,
-      shareToken: input.shareToken,
-      factory: input.factory,
-      amount: input.terms.shareAmount,
-    }),
-    buildBoardroomMerkleAirdropCreationCall({
-      policy,
-      factory: input.factory,
-      terms,
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomMerkleAirdropCloseAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  airdrop: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomMerkleAirdropCloseCall(input),
-  });
-}
-
-export function buildBoardroomMerkleAirdropCloseCall(input: { policy: Address; airdrop: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.airdrop,
-    data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }),
-  });
-}
-
-export function buildBoardroomMerkleAirdropCancelAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  airdrop: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomMerkleAirdropCancelCall(input),
-  });
-}
-
-export function buildBoardroomMerkleAirdropCancelCall(input: { policy: Address; airdrop: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.airdrop,
-    data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityApprovalCall(input: {
-  policy: Address;
-  token: Address;
-  factory: Address;
-  amount: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.token,
-    data: encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "approve",
-      args: [input.factory, input.amount],
-    }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityCreationCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: ProtocolLiquidityTerms;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: pledgeV4LiquidityFactoryAbi,
-      functionName: "createProtocolLiquidity",
-      args: protocolLiquidityArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomProtocolLiquidityTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
-  const terms =
-    shareTokenSide === "tokenA"
-      ? ({
-          tokenA: input.shareToken,
-          tokenB: input.terms.quoteToken,
-          amountADesired: input.terms.shareAmountDesired,
-          amountBDesired: input.terms.quoteAmountDesired,
-          amountAMin: input.terms.shareAmountMin,
-          amountBMin: input.terms.quoteAmountMin,
-          sqrtPriceX96: input.terms.sqrtPriceX96,
-          deadline: input.terms.deadline,
-          salt: input.terms.salt,
-        } satisfies ProtocolLiquidityTerms)
-      : ({
-          tokenA: input.terms.quoteToken,
-          tokenB: input.shareToken,
-          amountADesired: input.terms.quoteAmountDesired,
-          amountBDesired: input.terms.shareAmountDesired,
-          amountAMin: input.terms.quoteAmountMin,
-          amountBMin: input.terms.shareAmountMin,
-          sqrtPriceX96: input.terms.sqrtPriceX96,
-          deadline: input.terms.deadline,
-          salt: input.terms.salt,
-        } satisfies ProtocolLiquidityTerms);
-  const calls = [
-    buildBoardroomProtocolLiquidityApprovalCall({
-      policy: assetPolicy,
-      token: input.shareToken,
-      factory: input.factory,
-      amount: input.terms.shareAmountDesired,
-    }),
-    buildBoardroomProtocolLiquidityApprovalCall({
-      policy: assetPolicy,
-      token: input.terms.quoteToken,
-      factory: input.factory,
-      amount: input.terms.quoteAmountDesired,
-    }),
-    buildBoardroomProtocolLiquidityCreationCall({
-      policy,
-      factory: input.factory,
-      terms,
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-  });
-}
-
-export function buildBoardroomProtocolLiquidityAddCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: ProtocolLiquidityAddTerms;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: pledgeV4LiquidityFactoryAbi,
-      functionName: "addProtocolLiquidity",
-      args: protocolLiquidityAddArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityAddBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomProtocolLiquidityAddTerms;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
-  const terms = shareTokenSide === "tokenA"
-    ? ({
-        tokenA: input.shareToken,
-        tokenB: input.terms.quoteToken,
-        amountADesired: input.terms.shareAmountDesired,
-        amountBDesired: input.terms.quoteAmountDesired,
-        amountAMin: input.terms.shareAmountMin,
-        amountBMin: input.terms.quoteAmountMin,
-        deadline: input.terms.deadline,
-      } satisfies ProtocolLiquidityAddTerms)
-    : ({
-        tokenA: input.terms.quoteToken,
-        tokenB: input.shareToken,
-        amountADesired: input.terms.quoteAmountDesired,
-        amountBDesired: input.terms.shareAmountDesired,
-        amountAMin: input.terms.quoteAmountMin,
-        amountBMin: input.terms.shareAmountMin,
-        deadline: input.terms.deadline,
-      } satisfies ProtocolLiquidityAddTerms);
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls: [
-      buildBoardroomProtocolLiquidityApprovalCall({
-        policy: assetPolicy,
-        token: input.shareToken,
-        factory: input.factory,
-        amount: input.terms.shareAmountDesired,
-      }),
-      buildBoardroomProtocolLiquidityApprovalCall({
-        policy: assetPolicy,
-        token: input.terms.quoteToken,
-        factory: input.factory,
-        amount: input.terms.quoteAmountDesired,
-      }),
-      buildBoardroomProtocolLiquidityAddCall({ policy, factory: input.factory, terms }),
-    ],
-  });
-}
-
-export function buildBoardroomProtocolLiquidityRemoveCall(input: {
-  policy: Address;
-  factory: Address;
-  liquidity: bigint;
-  amountAMin: bigint;
-  amountBMin: bigint;
-  deadline: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({
-      abi: pledgeV4LiquidityFactoryAbi,
-      functionName: "removeProtocolLiquidity",
-      args: [{
-        liquidity: input.liquidity,
-        amountAMin: input.amountAMin,
-        amountBMin: input.amountBMin,
-        deadline: input.deadline,
-      }],
-    }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityRemoveAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  factory: Address;
-  liquidity: bigint;
-  amountAMin: bigint;
-  amountBMin: bigint;
-  deadline: bigint;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomProtocolLiquidityRemoveCall(input),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityCloseCall(input: {
-  policy: Address;
-  factory: Address;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    data: encodeFunctionData({ abi: pledgeV4LiquidityFactoryAbi, functionName: "closeProtocolLiquidity" }),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityCloseAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  factory: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomProtocolLiquidityCloseCall(input),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityExitTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  amountAMin: bigint;
-  amountBMin: bigint;
-  deadline: bigint;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "exitProtocolLiquidity",
-    args: [
-      requireFacetSetHash(input.expectedFacetSetHash),
-      input.amountAMin,
-      input.amountBMin,
-      input.deadline,
-    ] as const,
-  };
-}
-
-export function buildBoardroomReturnProtocolLiquidityClaimsTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "returnProtocolLiquidityClaims",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomCloseProtocolLiquidityTransaction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "closeProtocolLiquidityAfterWindDown",
-    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
-  };
-}
-
-export function buildBoardroomProtocolLiquidityFeeClaimAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  vault: Address;
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildBoardroomProtocolLiquidityFeeClaimCall(input),
-  });
-}
-
-export function buildBoardroomProtocolLiquidityFeeClaimCall(input: { policy: Address; vault: Address }): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.vault,
-    data: encodeFunctionData({ abi: pledgeV4LiquidityVaultAbi, functionName: "claimFees" }),
-  });
-}
-
-export function buildProtocolLiquidityClaimDepositTransaction(input: {
-  vault: Address;
-  amountADesired: bigint;
-  amountBDesired: bigint;
-  amountAMin: bigint;
-  amountBMin: bigint;
-  recipient: Address;
-  deadline: bigint;
-}) {
-  return {
-    address: input.vault,
-    abi: pledgeV4LiquidityVaultAbi,
-    functionName: "depositLiquidityForClaims" as const,
-    args: [
-      input.amountADesired,
-      input.amountBDesired,
-      input.amountAMin,
-      input.amountBMin,
-      input.recipient,
-      input.deadline,
-    ] as const,
-  };
-}
-
-export function buildProtocolLiquidityClaimRedemptionTransaction(input: {
-  vault: Address;
-  claims: bigint;
-  amountAMin: bigint;
-  amountBMin: bigint;
-  recipient: Address;
-  deadline: bigint;
-}) {
-  return {
-    address: input.vault,
-    abi: pledgeV4LiquidityVaultAbi,
-    functionName: "redeemClaims" as const,
-    args: [input.claims, input.amountAMin, input.amountBMin, input.recipient, input.deadline] as const,
-  };
-}
-
-export function buildBoardroomGrantCreationCall(input: {
-  policy: Address;
-  factory: Address;
-  terms: GrantCreationTerms;
-  creationFee?: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.factory,
-    value: input.creationFee ?? 0n,
-    data: encodeFunctionData({
-      abi: tokenGrantFactoryAbi,
-      functionName: "createGrant",
-      args: grantCreationArgs(input.terms),
-    }),
-  });
-}
-
-export function buildBoardroomShareGrantIssuanceBatch(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  factory: Address;
-  shareToken: Address;
-  terms: BoardroomShareGrantTerms;
-  creationFee?: bigint;
-  policy?: Address;
-  assetPolicy?: Address;
-}) {
-  const policy = input.policy ?? input.factory;
-  const assetPolicy = requireAssetPolicy(input.assetPolicy);
-  const terms = { ...input.terms, token: input.shareToken } satisfies GrantCreationTerms;
-  const calls = [
-    buildBoardroomGrantApprovalCall({
-      policy: assetPolicy,
-      shareToken: input.shareToken,
-      factory: input.factory,
-      amount: input.terms.amount,
-    }),
-    buildBoardroomGrantCreationCall({
-      policy,
-      factory: input.factory,
-      terms,
-      creationFee: input.creationFee ?? 0n,
-    }),
-  ] as const;
-
-  return buildBoardroomExecuteBatchTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    calls,
-    value: input.creationFee ?? 0n,
-  });
-}
-
-export function buildGrantIssuerBoardroomAction(input: {
-  boardroom: Address;
-  expectedFacetSetHash: Hex;
-  policy: Address;
-  grant: Address;
-  functionName: "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-}) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    expectedFacetSetHash: input.expectedFacetSetHash,
-    call: buildGrantIssuerBoardroomCall(input),
-  });
-}
-
-export function buildGrantIssuerBoardroomCall(input: {
-  policy: Address;
-  grant: Address;
-  functionName: "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.grant,
-    data: encodeFunctionData({ abi: tokenGrantAbi, functionName: input.functionName }),
-  });
 }

@@ -1,102 +1,92 @@
 # pledge.cash
 
-pledge.cash is a permissionless protocol and product workspace for token-backed project accounts. Projects can issue tokens, create grants and distributions, govern delayed actions, own liquidity, and wind down into redemptions while keeping the resulting authority and asset movement explainable from contract state.
+pledge.cash is an unreleased protocol and product workspace for token-backed project
+accounts. Its lean core has four responsibilities:
 
-The repository is unreleased. Its sole contract line is canonical protocol v1:
-Boardrooms are asset-holding kernels routed through a protocol-owned facet
-registry. The Monad testnet artifact is pending; testnet
-deployment is the next operational stage after final local acceptance and
-review, and no mainnet deployment is supported.
+- a non-upgradeable **Boardroom** that owns treasury assets, issues one project token,
+  tracks open escrows, and ends in pro-rata redemption;
+- deterministic, fully escrowed **Token Grants** with optional paid settlement;
+- one canonical **Uniswap v4 liquidity locker** per Boardroom, with permissionless fee
+  collection and a fixed protocol split;
+- optional **peezy.tech identity** for sign-in and linked-wallet context, with no
+  onchain authority.
 
-## Repository Layout
+Token launches, swaps, pool execution, and project-owner governance are external. The
+app uses canonical Uniswap v4 periphery for swaps, points launch operators at Uniswap's
+CCA Liquidity Launchpad, and accepts an EOA, Safe, or separately deployed timelock as a
+Boardroom owner. There is no diamond, bespoke governance, distribution, bond, staking,
+rewards, hook, or custom AMM subsystem.
 
-- `packages/contracts`: Foundry contracts, tests, and contract-specific configuration.
-- `docs/pages`: public product and developer documentation published under `/docs`.
-- `docs/*.md`: deep protocol and engineering source notes linked from the public developer reference.
+No pledge.cash contract is live on a public network. Ethereum Sepolia and Base Sepolia
+are deployment candidates with pending artifacts; a public testnet broadcast is the
+next separately authorized step after local acceptance.
 
-## Start Here
+## Repository layout
 
-- [Public Docs](docs/pages/index.md): task-oriented product documentation for exploring, participating, operating, governing, and closing projects.
-- [Developer Docs](docs/pages/developers/index.md): public integration map and links into the deep protocol references.
-- [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
-- [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
-- [Staking And Rewards Protocol](docs/rewards-protocol.md): non-custodial token locks, active-staker governance, cooldowns, and project-funded reward periods.
-- [Distribution Protocol](docs/distribution-protocol.md): fixed-price sales, Merkle airdrops, and migrating bonding curves for Boardroom shares.
-- [Bond Market Protocol](docs/bond-market-protocol.md): oracleless reserve and first-party LP auctions with non-transferable vested positions.
-- [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
-- [Project Token Launch](docs/project-token-launch.md): local dogfood scenario for a Boardroom-backed project token.
-- [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and Monad testnet operator flows.
-- [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
-- [Security](SECURITY.md): supported scope and vulnerability reporting process.
-- [Agent Guide](AGENTS.md): operating rules for coding agents and humans making repo changes.
-- [Docs Authoring Standard](docs/AUTHORING.md): truth, structure, linking, and verification rules for public documentation.
+- `packages/contracts`: Foundry contracts, tests, network profiles, and deployment proof.
+- `packages/sdk`: lean ABIs, chain-aware reads, calls, swaps, and deployment parsing.
+- `apps/web`: routed project, grant, liquidity, identity, and transaction workspace.
+- `services/sentinel`: optional identity, authentication, and wallet-link service.
+- `docs/pages`: public product and developer documentation.
+- `docs/*.md`: deep protocol and deployment specifications.
 
-## Local Development
+## Start here
 
-Install dependencies:
+- [Public docs](docs/pages/index.md)
+- [Boardroom protocol](docs/boardroom-protocol.md)
+- [Token grant protocol](docs/token-grant-protocol.md)
+- [Liquidity protocol](docs/liquidity-protocol.md)
+- [Project token launch](docs/project-token-launch.md)
+- [Deployment](docs/deployment.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+
+## Local acceptance
+
+Install dependencies and use Foundry v1.7.1:
 
 ```sh
 bun install
+foundryup -i v1.7.1
+forge --version
 ```
 
-Run the core contract, SDK, and web tests:
+Run the normal repository gate:
 
 ```sh
 bun run test
-```
-
-Run the remaining service, docs, and formatting checks:
-
-```sh
 bun run sentinel:test
 bun run docs:check
 bun run format:check
 ```
 
-Run only the contracts package:
+Run the deployment and retained-lifecycle proof:
 
 ```sh
-bun --cwd packages/contracts test
+bun run validate:networks
+bun run simulate:network -- 11155111
+bun run simulate:network -- 84532
+bun run test:testnet-forks:deployment
+bun run scenario:project-token:local
 ```
 
-Simulate the Monad testnet deployment:
+These commands do not broadcast to a public network. Fork tests deploy only into
+disposable local Anvil processes. See [Deployment](docs/deployment.md) for the authority
+boundary.
 
-```sh
-bun run simulate:monad-testnet
-```
-
-The state-changing Monad broadcast command is reserved for the explicit
-testnet deployment ceremony after all gates in
-[`docs/deployment.md`](docs/deployment.md) pass:
-
-```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:monad-testnet
-```
-
-Build the product workspace and its public docs for GitHub Pages:
+Build the app and public docs:
 
 ```sh
 bun --cwd apps/web build
-```
-
-Check and build the public docs:
-
-```sh
-bun run docs:check
 bun run docs:build
 ```
 
-## Product Standard
+## Product standard
 
-This repo treats smart contracts as settlement software, not ordinary application code. A contract change is not ready just because it compiles. It needs:
-
-- a written state-machine model for the behavior being changed,
-- explicit invariants for asset custody and authority,
-- tests for both valid and invalid behavior,
-- deterministic local reproduction commands,
-- a clear failure model for external calls, token quirks, time, replay, and upgrades.
-
-Prototype code may be messy while ideas are forming. Product code should be small, explicit, tested against adversarial conditions, and easy to audit from first principles.
+Contract changes must state the affected state machine, asset authority, invariants,
+external-call assumptions, input bounds, and deterministic proof command. Small public
+APIs and explicit irreversible lifecycle transitions are preferred over configurable
+frameworks.
 
 ## License
 

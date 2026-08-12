@@ -3,13 +3,11 @@ import { useEffect, useState } from "react";
 import { parseDeployment } from "../lib/deployment";
 
 export type RuntimeDeploymentAvailabilityStatus = "loading" | "ready" | "pending" | "missing" | "error";
-export type RuntimeDeploymentSource = "runtime" | "generated";
 
 export type RuntimeDeploymentAvailability = {
   chainId: number;
   status: RuntimeDeploymentAvailabilityStatus;
   deployment: PledgeCashDeployment | undefined;
-  source: RuntimeDeploymentSource | undefined;
   reason: string | undefined;
 };
 
@@ -43,22 +41,8 @@ export type RuntimeDeploymentRecoveryOptions = {
 
 export const RUNTIME_DEPLOYMENT_RETRY_DELAYS_MS = [15_000, 30_000, 60_000, 120_000] as const;
 
-/**
- * Compatibility hook for the existing application coordinator.
- *
- * New surfaces should prefer useRuntimeDeploymentAvailability so loading,
- * pending, missing, and error states are not flattened into an address object.
- */
-export function useRuntimeDeployment(
-  chainId: number,
-  generatedDeployment: PledgeCashDeployment | undefined,
-): PledgeCashDeployment | undefined {
-  return useRuntimeDeploymentAvailability(chainId, generatedDeployment).deployment;
-}
-
 export function useRuntimeDeploymentAvailability(
   chainId: number,
-  generatedDeployment: PledgeCashDeployment | undefined,
 ): RuntimeDeploymentAvailability {
   const [runtimeDeploymentState, setRuntimeDeploymentState] = useState<RuntimeDeploymentState>(() => ({
     chainId,
@@ -76,7 +60,7 @@ export function useRuntimeDeploymentAvailability(
   const result = runtimeDeploymentState.chainId === chainId
     ? runtimeDeploymentState.result
     : { kind: "loading" } as const;
-  return selectRuntimeDeploymentAvailability(chainId, generatedDeployment, result);
+  return selectRuntimeDeploymentAvailability(chainId, result);
 }
 
 export function startRuntimeDeploymentRecovery({
@@ -159,35 +143,23 @@ export function startRuntimeDeploymentRecovery({
 
 export function selectRuntimeDeploymentAvailability(
   chainId: number,
-  generatedDeployment: PledgeCashDeployment | undefined,
   result: RuntimeDeploymentResult,
 ): RuntimeDeploymentAvailability {
-  const generatedFallback = isRuntimeDeploymentForChainOrUndefined(generatedDeployment, chainId)
-    ? generatedDeployment
-    : undefined;
-
   if (result.kind === "loading") {
-    return availability(chainId, "loading", generatedFallback, generatedFallback ? "generated" : undefined);
+    return availability(chainId, "loading");
   }
 
   if (result.kind === "missing") {
     return availability(
       chainId,
       "missing",
-      generatedFallback,
-      generatedFallback ? "generated" : undefined,
+      undefined,
       result.reason ?? "No deployment artifact is published for this network.",
     );
   }
 
   if (result.kind === "error") {
-    return availability(
-      chainId,
-      "error",
-      generatedFallback,
-      generatedFallback ? "generated" : undefined,
-      result.reason,
-    );
+    return availability(chainId, "error", undefined, result.reason);
   }
 
   const runtimeDeployment = result.deployment;
@@ -195,28 +167,24 @@ export function selectRuntimeDeploymentAvailability(
     return availability(
       chainId,
       "error",
-      generatedFallback,
-      generatedFallback ? "generated" : undefined,
+      undefined,
       `The runtime deployment artifact targets chain ${displayChainId(runtimeDeployment.chainId)}, not chain ${chainId.toString()}.`,
     );
   }
 
   const runtimeStatus = deploymentAvailabilityStatus(runtimeDeployment);
   if (runtimeStatus === "ready") {
-    return availability(chainId, "ready", runtimeDeployment, "runtime");
+    return availability(chainId, "ready", runtimeDeployment);
   }
 
-  const deployment = generatedFallback ?? runtimeDeployment;
-  const source = generatedFallback ? "generated" : "runtime";
   if (runtimeStatus === "pending") {
-    return availability(chainId, "pending", deployment, source, pendingDeploymentReason(runtimeDeployment));
+    return availability(chainId, "pending", runtimeDeployment, pendingDeploymentReason(runtimeDeployment));
   }
 
   return availability(
     chainId,
     runtimeStatus,
-    generatedFallback,
-    generatedFallback ? "generated" : undefined,
+    undefined,
     deploymentStatusReason(runtimeDeployment, runtimeStatus),
   );
 }
@@ -251,7 +219,7 @@ export function isRuntimeDeploymentForChain(deployment: PledgeCashDeployment, ch
 }
 
 function shouldRetryRuntimeDeployment(chainId: number, result: RuntimeDeploymentResult): boolean {
-  return selectRuntimeDeploymentAvailability(chainId, undefined, result).status !== "ready";
+  return selectRuntimeDeploymentAvailability(chainId, result).status !== "ready";
 }
 
 async function fetchRuntimeDeployment(chainId: number): Promise<RuntimeDeploymentResult> {
@@ -275,18 +243,10 @@ async function fetchRuntimeDeployment(chainId: number): Promise<RuntimeDeploymen
 function availability(
   chainId: number,
   status: RuntimeDeploymentAvailabilityStatus,
-  deployment: PledgeCashDeployment | undefined,
-  source: RuntimeDeploymentSource | undefined,
+  deployment: PledgeCashDeployment | undefined = undefined,
   reason?: string | undefined,
 ): RuntimeDeploymentAvailability {
-  return { chainId, status, deployment, source, reason };
-}
-
-function isRuntimeDeploymentForChainOrUndefined(
-  deployment: PledgeCashDeployment | undefined,
-  chainId: number,
-): deployment is PledgeCashDeployment {
-  return deployment !== undefined && isRuntimeDeploymentForChain(deployment, chainId);
+  return { chainId, status, deployment, reason };
 }
 
 function deploymentStatusReason(

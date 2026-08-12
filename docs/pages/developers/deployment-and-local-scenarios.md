@@ -1,88 +1,34 @@
 ---
 title: Deployment and local scenarios
-description: Developer bridge for deterministic broadcasts, verified and pending artifacts, local Anvil deployment, seeding, and browser verification.
+description: Validate network profiles, simulate the lean stack, rehearse on disposable forks, and run the retained lifecycle locally.
 ---
 
 # Deployment and local scenarios
 
-Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) for environment variables, authority wiring, deterministic salts, broadcast wrappers, artifact schema, and verification commands.
+The canonical manifest is `packages/contracts/config/networks.json`. Checked artifacts
+must match its chain-specific wrapped-native and Uniswap v4 periphery addresses. Both
+canonical testnet pledge.cash artifacts are currently pending.
 
-## Public testnet status
-
-Canonical protocol v1 is pending on Monad testnet `10143`. The checked-in
-artifact does not provide usable root addresses. Clients
-must withhold contract-dependent workflows while the selected artifact is
-pending.
-
-Do not develop against guessed or historical addresses. A candidate artifact
-becomes publishable only after deterministic provenance, the complete
-registry/facet release, live code, ownership, policy, helper, factory, router,
-fee, and immutable-wiring verification succeeds.
-
-## Deterministic deployment flow
-
-1. Configure deterministic deployer owner, protocol governance, treasury, wrapped native, canonical PoolManager,
-   Universal Router, v4 Quoter, StateView, PositionManager, Permit2, and broadcaster.
-2. Run the chain-specific dry-run wrapper and confirm chain id.
-3. Broadcast through the maintained wrapper.
-4. Verify the candidate against live RPC state and runtime code hashes.
-5. Retain the verified candidate and receipts, then promote them only through
-   a separate explicit release decision.
-6. Build the web app and confirm it resolves the promoted deployment.
-
-Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
-
-## Sepolia fork gate
-
-Before selecting a production network, run the complete deployment against a
-local fork of Ethereum Sepolia's canonical Uniswap v4 stack:
+Run from the repository root:
 
 ```sh
-bun run test:sepolia-fork:deployment
+bun run validate:networks
+bun run simulate:network -- 11155111
+bun run simulate:network -- 84532
+bun run test:testnet-forks:deployment
+bun run scenario:project-token:local
 ```
 
-The gate checks the upstream chain and dependency bytecode, deploys and
-receipt-verifies protocol genesis, reruns the deterministic deployment, and
-then verifies that its addresses, release identity, ownership, policies, and
-live wiring remain unchanged. It uses no Sepolia funds and sends no Sepolia
-transactions. Pin `SEPOLIA_FORK_BLOCK` when the evidence must be exactly
-repeatable.
+Simulation executes the Forge deployment script without public broadcast. Fork gates
+start disposable Anvil processes from Ethereum Sepolia and Base Sepolia state, deploy
+locally, verify wiring and runtime hashes, and prove a repeated deployment is
+idempotent. The scenario proves Boardroom creation, share issuance, grant escrow,
+position locking, fee collection, wind-down, locker exit, snapshotting, and redemption.
 
-## Local Anvil scenario
+The lean artifact includes only the deterministic deployer, Boardroom factory, grant
+factory, locker factory, fee router, external profile addresses, salts, code hashes,
+canonical authorities, and release identity. Root-specific owner and fee-recipient
+relationships are derived and checked against the live contracts. See the deep [deployment
+specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md).
 
-Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
-
-Also run `bun run scenario:boardroom:local` on a fresh Anvil state. That
-scenario activates release B, proves writes stop before migration, migrates
-three Boardrooms independently, and resumes cleanup and redemption.
-
-The seed covers standalone grant variants plus nine Boardroom projects: direct canonical P4LP/v4 liquidity, active fixed price, active
-Dutch auction, active curve, closed sale, live Merkle airdrop, launched generation-1 controller governance with a
-scheduled operation, winding down with an open distribution blocker, and winding down with CASH registered while the
-snapshot delay remains pending. The fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic
-actors, controller/proposer identity, operation hash/salt/calldata/Boardroom epoch, airdrop proofs, blocker identity,
-and snapshot-pending balances. Read ETA and expiry from the controller's `operationState`; Forge simulation timestamps are
-deliberately excluded from the fixture.
-
-Its addresses belong only to that Anvil state. Resetting Anvil invalidates the deployment artifact, seed manifest, browser cache, and prior receipt-refresh context together. Reuse a fixed `LOCAL_SEED_NONCE` only with a reset state; use a new nonce to append another deterministic batch.
-
-For a subpath browser deployment, use the repository's `build:local` or `dev:local` flow so app base path and RPC proxy agree.
-
-## Verification
-
-```sh
-bun run test
-bun run format:check
-bun run docs:check
-```
-
-Then verify in a real browser:
-
-- Explore discovery and canonical project routes;
-- project Overview, Participate, Governance, and Transparency;
-- Portfolio grant/role discovery;
-- Studio operator actions without sending unintended writes;
-- 320 px layout, titles, headings, overflow, and console errors;
-- the durable served app route and RPC route, not only a temporary dev server.
-
-Preserve the artifact and seed output with any reproducible bug report.
+None of these commands authorizes or performs a public-network broadcast.

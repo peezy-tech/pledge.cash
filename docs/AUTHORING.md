@@ -38,7 +38,7 @@ Resolve links against the page's published URL, not the Markdown file's director
 published without a trailing slash: links from `/developers` therefore use `developers/boardroom`, not `boardroom`.
 `docs:check` models this browser behavior.
 
-Every internal docs link must resolve to a page in `docs/pages`, every app handoff must resolve to a known product route, and every public page must appear exactly once in `docs/tome.config.js`. When a published route moves, add an entry to `docs/redirects.js` rather than breaking existing bookmarks and indexed URLs.
+Every internal docs link must resolve to a page in `docs/pages`, every app handoff must resolve to a known product route, and every public page must appear exactly once in `docs/tome.config.js`.
 
 ## Definition of done
 

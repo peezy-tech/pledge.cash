@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address } from "@pledge.cash/sdk";
+import type { Address, BoardroomState, LiquidityLockerState } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
   DesktopPrimaryNav,
@@ -9,6 +9,14 @@ import {
   StudioSectionNav,
 } from "../src/app/product-navigation";
 import { Web3Provider } from "../src/components/web3-provider";
+import { BoardroomWorkspace, type BoardroomWorkspaceForm } from "../src/features/boardrooms/boardroom-workspace";
+import {
+  defaultBoardroomGrantForm,
+  defaultLiquidityExitForm,
+  defaultLiquidityLockerForm,
+  defaultLiquidityPositionForm,
+  defaultWindDownForm,
+} from "../src/lib/forms";
 import {
   AppHeader,
   networkAvailabilityLabel,
@@ -35,28 +43,92 @@ describe("frontend foundation", () => {
     expect(html.match(/aria-current="page"/g)?.length).toBe(2);
   });
 
-  test("renders four canonical project sections with compact mobile labels", () => {
+  test("renders the three canonical project sections", () => {
     const html = renderToString(
-      <ProjectSectionNav active="governance" boardroom={boardroom} chainId={31337} />,
+      <ProjectSectionNav active="swap" boardroom={boardroom} chainId={31337} />,
     );
 
     expect(html).toContain('aria-label="Project sections"');
     expect(html).toContain(`/projects/31337/${boardroom}/overview`);
-    expect(html).toContain(`/projects/31337/${boardroom}/participate`);
-    expect(html).toContain(`/projects/31337/${boardroom}/governance`);
+    expect(html).toContain(`/projects/31337/${boardroom}/swap`);
     expect(html).toContain(`/projects/31337/${boardroom}/transparency`);
-    expect(html).toContain("Govern");
+    expect(html).toContain("Swap");
     expect(html).toContain("Transparency");
     expect(html.match(/aria-current="page"/g)?.length).toBe(1);
   });
 
   test("keeps every operator workflow reachable from Studio", () => {
-    const html = renderToString(<StudioSectionNav active="distributions" boardroom={boardroom} chainId={31337} />);
+    const html = renderToString(<StudioSectionNav active="liquidity" boardroom={boardroom} chainId={31337} />);
     expect(html).toContain('aria-label="Studio sections"');
     expect(html).toContain(`/studio/31337/${boardroom}/setup`);
-    expect(html).toContain(`/studio/31337/${boardroom}/governance`);
+    expect(html).toContain(`/studio/31337/${boardroom}/token`);
+    expect(html).toContain(`/studio/31337/${boardroom}/grants`);
+    expect(html).toContain(`/studio/31337/${boardroom}/liquidity`);
     expect(html).toContain(`/studio/31337/${boardroom}/close`);
     expect(html).toContain('aria-current="page"');
+  });
+
+  test("renders every retained project and studio workflow through the Boardroom workspace", () => {
+    const state = boardroomState();
+    const locker = lockerState();
+    const form = workspaceForm();
+    const common = {
+      account: state.owner,
+      boardroom: state,
+      canManage: true,
+      canWrite: true,
+      chainId: 31337,
+      form,
+      locker,
+      pendingAction: undefined,
+      setForm: () => undefined,
+      onAction: async () => undefined,
+    } as const;
+    const project = renderToString(<BoardroomWorkspace {...common} mode="project" projectSection="swap" swap={<p>Executable v4 swap</p>} />);
+    expect(project).toContain("Executable v4 swap");
+    expect(project).toContain(`/projects/31337/${boardroom}/transparency`);
+
+    const sections = ["setup", "token", "grants", "liquidity", "close"] as const;
+    const html = sections.map((section) => renderToString(<BoardroomWorkspace {...common} mode="studio" studioSection={section} />)).join("\n");
+    expect(html).toContain("Authority and custody");
+    expect(html).toContain("Share token");
+    expect(html).toContain("Minting");
+    expect(html).toContain("Mint shares");
+    expect(html).not.toContain(">Launch<");
+    expect(html).toContain("Treasury-funded grant");
+    expect(html).toContain("Position custody");
+    expect(html).toContain("Wind down and redeem");
+  });
+
+  test("keeps snapshot paging enabled while the frozen registry still has unprocessed assets", () => {
+    const state = {
+      ...boardroomState(),
+      status: 2 as const,
+      snapshotAssetCount: 2n,
+      snapshotCursor: 1n,
+      snapshotFrozen: true,
+      redemptionSupplyFrozen: true,
+    };
+    const html = renderToString(
+      <BoardroomWorkspace
+        account={state.owner}
+        boardroom={state}
+        canManage
+        canWrite
+        chainId={31337}
+        form={workspaceForm()}
+        locker={lockerState()}
+        mode="studio"
+        pendingAction={undefined}
+        setForm={() => undefined}
+        studioSection="close"
+        onAction={async () => undefined}
+      />,
+    );
+    const snapshotButton = html.match(/<button([^>]*)>.*?Snapshot assets.*?<\/button>/s);
+
+    expect(snapshotButton).not.toBeNull();
+    expect(snapshotButton?.[1]).not.toContain('disabled=""');
   });
 
   test("only intercepts unmodified primary-button anchor navigation", () => {
@@ -97,10 +169,10 @@ describe("frontend foundation", () => {
 
   test("labels and disables networks whose deployment is not ready", () => {
     const local = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 31337)!;
-    const monad = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 10143)!;
+    const sepolia = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 11155111)!;
 
     expect(networkOptionLabel(local)).toBe("Local Anvil — Local (resettable, no real value)");
-    expect(networkOptionLabel(monad, "pending")).toBe("Monad Testnet — deployment pending");
+    expect(networkOptionLabel(sepolia, "pending")).toBe("Ethereum Sepolia — Testnet — deployment pending");
     expect(networkAvailabilityLabel("missing")).toBe("not deployed");
     expect(networkOptionDisabled("pending")).toBe(true);
     expect(networkOptionDisabled("ready")).toBe(false);
@@ -110,7 +182,7 @@ describe("frontend foundation", () => {
         <AppHeader
           chainId={31337}
           chainName="Local Anvil"
-          networkAvailability={{ 10143: "pending", 31337: "ready" }}
+          networkAvailability={{ 11155111: "pending", 31337: "ready" }}
           networks={PLEDGE_CASH_NETWORKS}
           onNetworkChange={() => undefined}
           pendingAction={undefined}
@@ -121,7 +193,7 @@ describe("frontend foundation", () => {
       </Web3Provider>,
     );
 
-    expect(html).toContain("Monad Testnet — deployment pending");
+    expect(html).toContain("Ethereum Sepolia — Testnet — deployment pending");
     expect(html.match(/<option disabled=""/g)?.length).toBe(1);
   });
 
@@ -147,13 +219,62 @@ describe("frontend foundation", () => {
     expect(css).not.toContain("JetBrains Mono");
   });
 
-  test("keeps strict governance index validation out of the initial application chunk", async () => {
-    const source = await Bun.file(new URL("../src/app/App.tsx", import.meta.url)).text();
-
-    expect(source).toContain('import("../lib/governance-actions")');
-    expect(source).not.toMatch(/^import .*governance-actions/m);
-  });
 });
+
+function boardroomState(): BoardroomState {
+  return {
+    address: boardroom,
+    blockNumber: 10n,
+    factory: "0x1000000000000000000000000000000000000001",
+    owner: "0x1000000000000000000000000000000000000002",
+    wrappedNative: "0x1000000000000000000000000000000000000003",
+    shareToken: "0x1000000000000000000000000000000000000004",
+    redemptionExcessRecipient: "0x1000000000000000000000000000000000000005",
+    status: 0,
+    windDownStartedAt: 0n,
+    totalShareSupply: 1_000n,
+    treasuryShareBalance: 10n,
+    redeemableAssetCount: 1n,
+    snapshotAssetCount: 0n,
+    snapshotCursor: 0n,
+    snapshotFrozen: false,
+    redemptionSupply: 0n,
+    redemptionSupplyFrozen: false,
+    openEscrowCount: 1n,
+  };
+}
+
+function lockerState(): LiquidityLockerState {
+  return {
+    address: "0x2000000000000000000000000000000000000001",
+    boardroom,
+    shareToken: "0x1000000000000000000000000000000000000004",
+    quoteAsset: "0x2000000000000000000000000000000000000002",
+    currency0: "0x1000000000000000000000000000000000000004",
+    currency1: "0x2000000000000000000000000000000000000002",
+    protocolFeeRouter: "0x2000000000000000000000000000000000000003",
+    positionManager: "0x2000000000000000000000000000000000000004",
+    poolFee: 3000,
+    tickSpacing: 60,
+    tokenId: 7n,
+    positionRegistered: true,
+    closed: false,
+    positionLiquidity: 500n,
+  };
+}
+
+function workspaceForm(): BoardroomWorkspaceForm {
+  return {
+    mintTo: "",
+    mintAmount: "1",
+    snapshotMaximum: "32",
+    grant: defaultBoardroomGrantForm(),
+    locker: defaultLiquidityLockerForm(),
+    position: defaultLiquidityPositionForm(),
+    exit: defaultLiquidityExitForm(),
+    windDown: defaultWindDownForm(),
+  };
+}
 
 function cssColor(css: string, token: string): string {
   const match = css.match(new RegExp(`${token}\\s*:\\s*(#[0-9a-fA-F]{6})`));

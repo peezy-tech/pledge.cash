@@ -1,0 +1,6 @@
+{
+  "chainId": 11155111,
+  "status": "pending",
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Lean protocol v1 has not been broadcast to Ethereum Sepolia"
+}

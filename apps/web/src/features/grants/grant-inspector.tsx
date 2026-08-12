@@ -8,12 +8,12 @@ import { Input } from "../../components/ui/input";
 import { dateString } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type { GrantSnapshot } from "../../lib/types";
-import type { Capability } from "../capabilities/project-capabilities";
+import type { WalletActionCapability } from "../capabilities/wallet-action";
 import { GrantVestingChart } from "./grant-vesting-chart";
 
 type GrantInspectorProps = {
   account: Address | undefined;
-  actionCapability: Capability;
+  actionCapability: WalletActionCapability;
   addressLocked?: boolean | undefined;
   grantAddress: string;
   grantSnapshot: GrantSnapshot | undefined;
@@ -149,7 +149,7 @@ export function GrantInspector({
               <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
                 {isZeroAddress(grantSnapshot.paymentToken)
                   ? "This grant is free. Review one transaction to settle the currently vested amount."
-                  : `${formatTokenAmount(grantSnapshot.settlementCost, grantSnapshot.paymentTokenMetadata)} payment required. The first transaction may approve that exact cost; the next settles the same prepared amount even if more tokens vest.`}
+                  : `${formatTokenAmount(grantSnapshot.settlementCost, grantSnapshot.paymentTokenMetadata)} payment required. The first transaction may approve that exact cost; prepare again after approval to settle the currently vested amount.`}
               </p>
             </div>
             <ActionButton
@@ -172,7 +172,7 @@ export function GrantInspector({
               Advanced settlement controls
             </summary>
             <p className="m-0 border-t border-zinc-800 px-4 pt-4 text-xs leading-5 text-zinc-500">
-              Override the prepared flow only when you need to submit an exact token amount or approval. These controls do not rebind a previously prepared settlement.
+              Override the prepared flow only when you need to submit an exact token amount or approval.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2">
               <form className="grid content-start" onSubmit={submitPaymentApproval}>
@@ -304,7 +304,7 @@ function grantActionEligibility(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
   issuerActionsAvailable: boolean,
-  actionCapability: Capability,
+  actionCapability: WalletActionCapability,
 ): GrantActionEligibility {
   const holderAuthorized = canSettleGrant(account, grantSnapshot);
   const holderActionsAvailable = holderAuthorized && actionCapability.status === "enabled";
@@ -319,11 +319,11 @@ function grantActionEligibility(
   };
 }
 
-function capabilityReason(capability: Capability): string | undefined {
+function capabilityReason(capability: WalletActionCapability): string | undefined {
   return capability.status === "enabled" ? undefined : capability.reason ?? "This action is not available right now.";
 }
 
-function CapabilityNotice({ capability, id }: { capability: Capability; id?: string | undefined }): React.JSX.Element | null {
+function CapabilityNotice({ capability, id }: { capability: WalletActionCapability; id?: string | undefined }): React.JSX.Element | null {
   const reason = capabilityReason(capability);
   if (!reason) return null;
   return <p aria-live="polite" className="m-0 border-t border-zinc-800 p-4 text-sm text-amber-200" id={id}>{reason}</p>;

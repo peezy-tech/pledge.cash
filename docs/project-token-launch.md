@@ -1,67 +1,51 @@
-# Project Token Launch (Local v4 Scenario)
+# Project token launch
 
-`ProjectTokenLaunchScenario.s.sol` is a standalone local-Anvil scenario that dogfoods pledge.cash as its own
-Boardroom-backed project token. It labels Anvil's native gas token as HYPE and treats a local Solady `WETH` instance as
-wrapped HYPE. Those labels are local fixtures, not a claim about a live network deployment.
+pledge.cash provides the project custodian, escrow-backed grants, and a canonical v4
+position locker. It does not ship a token sale or auction. Projects that want a public
+launch can use Uniswap's [CCA Liquidity
+Launchpad](https://developers.uniswap.org/docs/liquidity/liquidity-launchpad/overview)
+or another external issuance path.
 
-The scenario uses `V4PoolManagerMock` to prove pledge.cash lifecycle integration. It does not represent a production
-Uniswap deployment and does not exercise Universal Router swaps.
+## CCA handoff
 
-## Initial economics
+Create the Boardroom and its locker first. Configure the launchpad liquidity strategy
+with `positionRecipient` set to the locker, not an operator wallet. The launchpad can
+mint a plain Uniswap v4 `PositionManager` NFT directly to that recipient. Holding the
+NFT gives the locker the standard periphery fee-collection path; the Boardroom must
+still call `registerPosition(tokenId)` after mint so the locker verifies the exact
+PoolKey, fee, tick spacing, hookless status, subscriber flag, and liquidity.
 
-The Boardroom creates `1,000,000 PLEDGE` against `100 wrapped HYPE` in its canonical full-range v4 vault. The resulting
-P4LP supply equals position liquidity and initially remains entirely protocol-owned inside the vault. A separate grant
-issuer escrows `25,000 PLEDGE` into a contributor grant and pays a `0.1 HYPE` creation fee to the Boardroom.
+Uniswap documents the strategy handoff in [Liquidity
+strategies](https://developers.uniswap.org/docs/liquidity/liquidity-launchpad/concepts/liquidity-strategies).
+The launchpad deployment registry lists the required contracts on Ethereum Sepolia and
+Base Sepolia. That means CCA rehearsal is available on both canonical pledge.cash
+testnets; it does not mean pledge.cash itself has been broadcast there.
 
-## State machine
+## Local dogfood flow
 
-1. Deploy the canonical Boardroom release, policy roots, token-grant factory, protocol-fee router, v4 manager test
-   double, `PledgeV4LiquidityFactory`, mined-permission hook, and wrapped-HYPE token.
-2. Register `AssetPolicy` and the v4 liquidity factory as Boardroom policies.
-3. Create the project Boardroom and use its share token as `PLEDGE`.
-4. Route fees earned by the protocol vault position through `ProtocolFeeRouter` to the Boardroom.
-5. Configure the `0.1 HYPE` grant creation fee and transfer `TokenGrantFactory` ownership to the Boardroom.
-6. Mint project tokens to the Boardroom for liquidity and to an external issuer for grant escrow.
-7. Execute two asset approvals and `createProtocolLiquidity` as one Boardroom batch.
-8. Verify the deterministic vault, PoolId, full-range position, P4LP supply, and Boardroom obligation record.
-9. Create the external grant and verify native creation-fee revenue reaches the Boardroom.
-10. Start wind-down and verify the Boardroom normalizes its native fee balance into wrapped HYPE first.
-
-The script does not call `Boardroom.launch()`: “launch” here means project-token liquidity creation. Governance remains
-in the prelaunch owner-execution phase, so this scenario does not exercise delayed controller scheduling or holder veto.
-
-## Assets and authorities
-
-- The Boardroom owns the project share token inventory and its protocol P4LP claims.
-- `PledgeV4LiquidityFactory` fixes PoolManager, hook, PoolKey parameters, vault implementation, Boardroom factory, and
-  protocol-fee recipient at deployment.
-- The hook authorizes only the factory's pending canonical pool initialization.
-- The Boardroom owner approves assets through `AssetPolicy` and invokes the liquidity-factory policy.
-- The external grant issuer owns its grant inventory, creates the grant, and pays the configured native fee.
-
-## Invariants
-
-- The vault address matches its deterministic prediction and the Boardroom's recorded liquidity vault.
-- The recorded PoolId matches the factory, vault, and Boardroom.
-- `P4LP.totalSupply() == positionLiquidity()` and the vault initially owns every claim.
-- The grant factory pays its configured fee recipient; ownership transfer alone does not change the recipient.
-- `startWindDown(expectedFacetSetHash)` wraps the Boardroom's raw HYPE before entering `WindingDown`.
-- The created grant escrows the full project-token grant amount for the contributor.
-
-## Commands
-
-Dry-run:
+The deterministic local scenario proves the complete retained lifecycle:
 
 ```sh
-bun run scenario:project-token:dry-run
-```
-
-Against local Anvil:
-
-```sh
-anvil
 bun run scenario:project-token:local
 ```
 
-The script uses standard Anvil private keys by default. Override `OWNER_PRIVATE_KEY`, `GRANT_ISSUER_PRIVATE_KEY`,
-`CONTRIBUTOR`, or `PROJECT_TOKEN_LAUNCH_NONCE` when needed. The nonce is included in deterministic clone salts.
+It deploys the lean protocol against local token and PositionManager doubles, creates a
+Boardroom and project token, funds an escrow-backed project-share grant from an external
+issuer, creates and registers a canonical locker, collects and splits simulated v4 fees,
+starts wind-down, exits the position, closes and prunes the grant, snapshots the treasury,
+and redeems shares. It sends no public-network transaction.
+
+## Operator sequence
+
+1. Choose the Boardroom owner and fee recipient deliberately.
+2. Create the Boardroom and issue the intended shares while it is Active.
+3. Create a locker through `Boardroom.execute` with the intended quote asset, pool fee,
+   and tick spacing.
+4. Run the external launch with the locker as `positionRecipient`.
+5. Register the received NFT through `Boardroom.execute` and verify the emitted identity.
+6. Collect fees permissionlessly while the Boardroom remains Active.
+7. Before redemption, close every grant and exit the locker through the bounded
+   wind-down path.
+
+Never infer a canonical locker from an address supplied by project metadata. Verify the
+factory, Boardroom, share token, PositionManager, and PoolKey on the selected chain.

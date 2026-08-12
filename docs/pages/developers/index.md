@@ -1,39 +1,24 @@
 ---
 title: Developer documentation
-description: Integration map from user-facing product flows to pledge.cash SDK helpers, contracts, deployment artifacts, and engineering specifications.
+description: Map the lean product to its contracts, SDK, deployment artifacts, and deterministic proof commands.
 ---
 
 # Developer documentation
 
-These pages bridge the product documentation to the repository's authoritative engineering notes. They do not duplicate every invariant or ABI.
+The integration surface is intentionally small:
 
-## Integration map
+- [Boardroom integration](developers/boardroom) for custody, execution, escrows, and redemption;
+- [Grant integration](developers/grants) for escrow, vesting, settlement, and grant-right NFTs;
+- [Uniswap v4 and liquidity integration](developers/amm-and-liquidity) for lockers, fees, and swaps;
+- [Deployment and local scenarios](developers/deployment-and-local-scenarios) for profiles,
+  artifacts, simulation, forks, and end-to-end proof.
 
-| Area | Start here | Authoritative engineering note |
-| --- | --- | --- |
-| Boardroom, governance, wind-down, redemption | [Boardroom integration](developers/boardroom) | [Boardroom protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroom-protocol.md) |
-| Direct and Boardroom-issued grants | [Grant integration](developers/grants) | [Token grant protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/token-grant-protocol.md) |
-| Dutch auctions, fixed sales, curves, and Merkle airdrops | [Distribution and airdrop integration](developers/distributions-and-airdrops) | [Distribution protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md) |
-| Reserve and liquidity bond auctions | [Distribution and airdrop integration](developers/distributions-and-airdrops) | [Bond market protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/bond-market-protocol.md) |
-| Uniswap v4, Universal Router, fees, and P4LP | [Uniswap v4 and liquidity integration](developers/amm-and-liquidity) | [Uniswap v4 and protocol-owned liquidity](https://github.com/peezy-tech/pledge.cash/blob/main/docs/amm-protocol.md) |
-| Broadcasts, artifacts, and local seeding | [Deployment and local scenarios](developers/deployment-and-local-scenarios) | [Deployment](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) |
+Use the generated SDK ABIs and the runtime `/deployments/<chainId>.json` artifacts
+rather than copying an interface or deployment address from prose. Canonical identity
+always includes chain, release artifact, factory relationship, and runtime code.
+The SDK publishes product integration ABIs only; deployment tooling verifies the
+operator-only deterministic deployer and fee router directly from contract artifacts.
 
-## Repository surfaces
-
-- `packages/contracts`: Solidity contracts, Foundry tests, deployment scripts, and artifacts.
-- `packages/sdk`: generated ABIs plus readers, discovery helpers, governance utilities, types, and transaction builders.
-- `apps/web`: canonical provenance checks and routes, product workflows, transaction review, receipt recovery, and the optional Sentinel client.
-- `services/sentinel`: optional hosted indexing, authentication, risk, and wallet-alert service where configured.
-- `docs`: engineering specifications and this public guide.
-
-## Integration rules
-
-1. Select a non-pending deployment artifact and verify its live code and wiring.
-2. Verify canonical factory relationships before rendering or enabling a write.
-3. Preserve chain, account, deployment identity, route, and submitted hash through receipt handling.
-4. Treat read failure as unknown or incomplete—not zero or empty.
-5. Use SDK transaction builders and onchain limits rather than reconstructing calldata casually.
-6. Simulate immediately before wallet submission and follow replacement receipts.
-7. Re-read scoped state after confirmation; do not report refresh success when a required reader failed.
-
-Run the smallest deterministic proof for the subsystem, then the full repository checks before publishing an integration.
+The protocol does not expose diamond facets, governance controllers, distributions,
+bonds, staking, rewards, custom AMM pools, hooks, or legacy aliases. Treat an ABI or
+artifact containing those surfaces as stale.

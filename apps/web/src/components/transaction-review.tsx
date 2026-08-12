@@ -121,7 +121,6 @@ function ReviewDetails({
           </div>
           <dl className="grid gap-px bg-zinc-800 sm:grid-cols-2">
             <CallFact label="Target" value={call.target} />
-            <CallFact label="Policy" value={call.policy} />
             <CallFact label="Decoded function" value={call.signature ?? "Not verified"} />
             <CallFact label="Native value" value={call.value === 0n ? "None" : `${formatUnits(call.value, 18)} native (${call.value.toString()} wei)`} />
             {call.parameters.map((parameter, parameterIndex) => (
@@ -141,7 +140,6 @@ function ReviewDetails({
             <summary className="cursor-pointer font-medium text-zinc-300">Advanced call details</summary>
             <dl className="mt-3 grid gap-2">
               <div><dt className="text-zinc-500">Full target</dt><dd className="m-0 mt-1 break-all font-mono text-zinc-300">{call.target}</dd></div>
-              <div><dt className="text-zinc-500">Full policy</dt><dd className="m-0 mt-1 break-all font-mono text-zinc-300">{call.policy}</dd></div>
               <div><dt className="text-zinc-500">Raw calldata</dt><dd className="m-0 mt-1 max-h-24 overflow-auto break-all font-mono text-zinc-300">{call.data}</dd></div>
             </dl>
           </details>

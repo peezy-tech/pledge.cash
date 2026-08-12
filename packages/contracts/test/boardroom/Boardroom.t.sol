@@ -2,964 +2,489 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {Vm} from "forge-std/Vm.sol";
-import {LibClone} from "solady/utils/LibClone.sol";
-import {SignatureCheckerLib} from "solady/utils/SignatureCheckerLib.sol";
-import {WETH} from "solady/tokens/WETH.sol";
-import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
-import {BoardroomCall} from "../../src/boardroom/IBoardroomGovernance.sol";
-import {BoardroomMarketLogic} from "../../src/boardroom/BoardroomMarketLogic.sol";
-import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
-import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
-import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
-import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
-import {IBoardroomObligationPolicy} from "../../src/policy/IBoardroomObligationPolicy.sol";
-import {BoardroomAuthorityFacet} from "../../src/boardroom/diamond/BoardroomAuthorityFacet.sol";
-import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
-import {BoardroomExecutionFacet} from "../../src/boardroom/diamond/BoardroomExecutionFacet.sol";
-import {BoardroomFacetTypes} from "../../src/boardroom/diamond/BoardroomFacetTypes.sol";
-import {BoardroomKernel} from "../../src/boardroom/diamond/BoardroomKernel.sol";
-import {BoardroomMarketFacet} from "../../src/boardroom/diamond/BoardroomMarketFacet.sol";
-import {BoardroomRedemptionFacet} from "../../src/boardroom/diamond/BoardroomRedemptionFacet.sol";
-import {BoardroomReleaseBMigrationFacet} from "../../src/boardroom/diamond/BoardroomReleaseBMigrationFacet.sol";
-import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
-import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
-import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
+import {Ownable} from "solady/auth/Ownable.sol";
+import {ERC20} from "solady/tokens/ERC20.sol";
+import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
+import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
-import {BoardroomRelease} from "../../src/boardroom/diamond/BoardroomRelease.sol";
-import {BoardroomViewFacet} from "../../src/boardroom/diamond/BoardroomViewFacet.sol";
-import {BoardroomViewFacetV2} from "../../src/boardroom/diamond/BoardroomViewFacetV2.sol";
-import {ProtocolFacetRegistry} from "../../src/boardroom/diamond/ProtocolFacetRegistry.sol";
-import {ProtocolFacetTypes} from "../../src/boardroom/diamond/ProtocolFacetTypes.sol";
+import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
+import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
+import {
+    OnePercentFeeTestERC20 as BoardroomFeeOnTransferToken,
+    SoladyTestERC20 as BoardroomTestERC20,
+    TestWrappedNative as BoardroomTestWrappedNative
+} from "../helpers/TestTokens.sol";
 
-contract BoardroomTestObligation {
-    address public immutable factory;
-    address public immutable boardroom;
-    address public immutable shareToken;
-    bool public isClosed;
+contract BoardroomMutableToken is BoardroomTestERC20 {
+    bool public balanceReadsFail;
 
-    constructor(address boardroom_, address shareToken_) {
-        factory = msg.sender;
-        boardroom = boardroom_;
-        shareToken = shareToken_;
+    constructor() BoardroomTestERC20("Mutable", "MUT") {}
+
+    function setBalanceReadsFail(bool fail) external {
+        balanceReadsFail = fail;
     }
 
-    function close() external {
+    function balanceOf(address account) public view override returns (uint256) {
+        if (balanceReadsFail) revert("BALANCE_READ_FAILED");
+        return super.balanceOf(account);
+    }
+}
+
+contract BoardroomEscrow {
+    address public immutable boardroom;
+    bool public isClosed;
+
+    constructor(address boardroom_) {
+        boardroom = boardroom_;
+    }
+
+    function close(address asset) external {
+        require(msg.sender == boardroom, "ONLY_BOARDROOM");
+        uint256 balance = ERC20(asset).balanceOf(address(this));
+        if (balance != 0) ERC20(asset).transfer(boardroom, balance);
+        isClosed = true;
+    }
+
+    function markClosed() external {
         isClosed = true;
     }
 }
 
-contract BoardroomTestModule is IBoardroomObligationPolicy {
-    uint256 public selectorCollisionCalls;
-
-    function createDistribution(address boardroom, address shareToken) external returns (address) {
-        return address(new BoardroomTestObligation(boardroom, shareToken));
+contract BoardroomCallbackModule {
+    function reserve(address boardroom, address asset) external {
+        IBoardroom(boardroom).reserveRedeemableAsset(asset);
     }
 
-    function configureCurve(
-        address boardroom,
-        bytes32 expectedFacetSetHash,
-        address predictedCurve,
-        address quoteAsset,
-        uint256 fundingAmount
-    ) external {
-        IBoardroom(boardroom).precommitBondingCurve(expectedFacetSetHash, predictedCurve, quoteAsset, fundingAmount);
+    function register(address boardroom, address escrow) external {
+        IBoardroom(boardroom).registerEscrow(escrow);
     }
 
-    function replaceController(bytes32, address, address, address, uint64, uint64, uint64) external {
-        ++selectorCollisionCalls;
-    }
-
-    function canCall(address, address, address target, uint256, bytes calldata) external view returns (bool) {
-        return target == address(this);
-    }
-
-    function obligationForCall(address, address, uint256, bytes calldata data, bytes calldata result)
-        external
-        pure
-        returns (Obligation memory obligation)
-    {
-        if (bytes4(data[:4]) == BoardroomTestModule.createDistribution.selector) {
-            obligation = Obligation({
-                kind: ObligationKind.Distribution, account: abi.decode(result, (address)), aux: address(0)
-            });
+    function reserveAndRegister(address boardroom, address escrow, address[] calldata assets) external {
+        uint256 length = assets.length;
+        for (uint256 i; i < length; ++i) {
+            IBoardroom(boardroom).reserveRedeemableAsset(assets[i]);
         }
-    }
-
-    function isLifecycleCallAllowed(address, address, bytes4 selector) external pure returns (bool) {
-        return selector == BoardroomTestObligation.close.selector;
+        IBoardroom(boardroom).registerEscrow(escrow);
     }
 }
 
-contract MismatchedKernel {
-    address public immutable facetRegistry;
-    bytes32 public immutable kernelSelectorSetHash;
+contract BoardroomCallTarget {
+    address public caller;
+    uint256 public value;
+    uint256 public stored;
 
-    constructor(address facetRegistry_, bytes32 kernelSelectorSetHash_) {
-        facetRegistry = facetRegistry_;
-        kernelSelectorSetHash = kernelSelectorSetHash_;
+    function set(uint256 next) external payable returns (uint256) {
+        caller = msg.sender;
+        value = msg.value;
+        stored = next;
+        return next + 1;
+    }
+
+    function fail() external pure {
+        revert("TARGET_FAILURE");
     }
 }
 
-contract Recursive1271Authority {
-    bytes4 internal constant MAGIC_VALUE = 0x1626ba7e;
+contract BoardroomReentrantOwner {
+    Boardroom public boardroom;
 
-    address public immutable authority;
-
-    constructor(address authority_) {
-        authority = authority_;
+    function setBoardroom(Boardroom boardroom_) external {
+        require(address(boardroom) == address(0), "ALREADY_SET");
+        boardroom = boardroom_;
     }
 
-    function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4) {
-        return
-            SignatureCheckerLib.isValidSignatureNowCalldata(authority, hash, signature)
-                ? MAGIC_VALUE
-                : bytes4(0xffffffff);
+    function attack() external {
+        boardroom.execute(IBoardroom.Call(address(this), 0, abi.encodeCall(this.reenter, ())));
+    }
+
+    function reenter() external {
+        require(msg.sender == address(boardroom), "ONLY_BOARDROOM");
+        boardroom.execute(IBoardroom.Call(address(this), 0, ""));
     }
 }
 
 contract BoardroomTest is Test {
-    address internal owner = address(0xA11CE);
-    address internal holder = address(0xB0B);
-    address internal permissionlessMigrator = address(0xCAFE);
+    event BoardroomCreated(
+        address indexed boardroom,
+        address indexed owner,
+        address indexed shareToken,
+        address wrappedNative,
+        string name,
+        string symbol,
+        bytes32 salt
+    );
 
-    WETH internal wrappedNative;
-    BoardroomPolicyRegistry internal policyRegistry;
-    ProtocolFacetRegistry internal registry;
-    BoardroomKernel internal kernelLogic;
+    BoardroomTestWrappedNative internal wrappedNative;
     BoardroomFactory internal factory;
-    IBoardroom internal boardroom;
+    Boardroom internal boardroom;
     BoardroomToken internal shares;
+    BoardroomTestERC20 internal asset;
+    BoardroomCallbackModule internal callbacks;
 
-    BoardroomRelease.Facets internal facets;
-    bytes32 internal releaseAHash;
+    address internal alice = makeAddr("alice");
+    address internal bob = makeAddr("bob");
+    bytes32 internal constant SALT = keccak256("boardroom-test");
 
     function setUp() public {
-        wrappedNative = new WETH();
-        policyRegistry = new BoardroomPolicyRegistry(address(this));
-        registry = new ProtocolFacetRegistry(address(this), _reservedKernelSelectors());
-        kernelLogic = new BoardroomKernel(address(registry));
-
-        BoardroomRedemptionPayout redemptionPayout = new BoardroomRedemptionPayout();
-        BoardroomGovernanceLogic governanceLogic = new BoardroomGovernanceLogic();
-        BoardroomMarketLogic marketLogic = new BoardroomMarketLogic();
-        factory = new BoardroomFactory(
-            address(registry),
-            address(policyRegistry),
-            address(wrappedNative),
-            address(kernelLogic),
-            address(redemptionPayout),
-            address(governanceLogic),
-            address(marketLogic)
-        );
-
-        address controllerFactory = factory.controllerFactory();
-        facets.authority = address(
-            new BoardroomAuthorityFacet(
-                address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic)
-            )
-        );
-        facets.execution = address(
-            new BoardroomExecutionFacet(
-                address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic)
-            )
-        );
-        facets.market = address(
-            new BoardroomMarketFacet(
-                address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic)
-            )
-        );
-        facets.redemption = address(
-            new BoardroomRedemptionFacet(
-                address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic)
-            )
-        );
-        facets.viewFacet = address(
-            new BoardroomViewFacet(
-                address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic)
-            )
-        );
-        facets.migration = address(new BoardroomReleaseBMigrationFacet());
-        facets.viewV2 = address(new BoardroomViewFacetV2());
-
-        ProtocolFacetTypes.FacetSetManifest memory releaseA = BoardroomRelease.releaseA(facets);
-        releaseAHash = registry.publishFacetSet(releaseA);
-        registry.activateFacetSet(releaseAHash);
-
-        address predicted = factory.predictBoardroomAddress(owner, "Diamond Boardroom", "DBR", bytes32("one"));
-        address created = factory.createBoardroom(releaseAHash, owner, "Diamond Boardroom", "DBR", bytes32("one"));
-        assertEq(created, predicted);
-        boardroom = IBoardroom(created);
+        wrappedNative = new BoardroomTestWrappedNative();
+        factory = new BoardroomFactory(address(wrappedNative));
+        address predicted = factory.predictBoardroomAddress(address(this), "Pledge", "PLDG", SALT);
+        boardroom = Boardroom(payable(factory.createBoardroom(address(this), "Pledge", "PLDG", SALT)));
+        assertEq(address(boardroom), predicted);
         shares = BoardroomToken(boardroom.shareToken());
+        asset = new BoardroomTestERC20("Asset", "AST");
+        callbacks = new BoardroomCallbackModule();
     }
 
-    function testReleaseACreatesUsableSingleCustodyBoardroom() public {
-        assertEq(registry.owner(), address(this));
-        assertEq(registry.activeRelease(), 1);
-        assertEq(registry.facetAddress(BoardroomAuthorityFacet.mint.selector), facets.authority);
-        assertEq(address(factory.facetRegistry()), address(registry));
-        assertEq(factory.boardroomKernelLogic(), address(kernelLogic));
+    function testFactoryCreatesDeterministicCanonicalBoardroom() public view {
         assertTrue(factory.isBoardroom(address(boardroom)));
-        assertEq(boardroom.facetRegistry(), address(registry));
-        assertEq(boardroom.facetSetHash(), releaseAHash);
-        assertEq(boardroom.appliedStorageVersion(), 1);
-        assertEq(boardroom.appliedStorageLayoutHash(), registry.activeStorageLayoutHash());
-        assertFalse(boardroom.migrationRequired());
-        assertEq(boardroom.owner(), owner);
-        assertEq(boardroom.policyRegistry(), address(policyRegistry));
+        assertTrue(factory.isShareToken(address(shares)));
+        assertEq(factory.boardroomImplementation() == address(boardroom), false);
+        assertEq(boardroom.factory(), address(factory));
+        assertEq(boardroom.owner(), address(this));
         assertEq(boardroom.wrappedNative(), address(wrappedNative));
-        assertEq(boardroom.controllerFactory(), factory.controllerFactory());
-        assertEq(boardroom.governanceLogic(), factory.governanceLogic());
-        assertEq(boardroom.marketLogic(), factory.marketLogic());
-        assertEq(boardroom.redemptionPayoutLogic(), factory.redemptionPayoutLogic());
-        assertEq(shares.boardroom(), address(boardroom));
-        assertEq(shares.name(), "Diamond Boardroom");
-        assertEq(shares.symbol(), "DBR");
         assertEq(boardroom.redeemableAssetCount(), 1);
         assertEq(boardroom.redeemableAssetAt(0), address(wrappedNative));
-
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, owner, 100 ether);
-        assertEq(shares.balanceOf(owner), 100 ether);
-
-        vm.prank(owner);
-        shares.transfer(holder, 40 ether);
-        assertEq(shares.balanceOf(holder), 40 ether);
-
-        vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(BoardroomKernel.FacetSetHashMismatch.selector, bytes32("stale"), releaseAHash)
-        );
-        boardroom.mint(bytes32("stale"), owner, 1 ether);
+        assertEq(shares.boardroom(), address(boardroom));
+        assertEq(shares.name(), "Pledge");
+        assertEq(shares.symbol(), "PLDG");
     }
 
-    function testFactoryRejectsKernelSelectorSetMismatch() public {
-        bytes32 expectedHash = registry.kernelSelectorSetHash();
-        bytes32 actualHash = keccak256("different-kernel-selectors");
-        MismatchedKernel mismatchedKernel = new MismatchedKernel(address(registry), actualHash);
-        address redemptionPayout = factory.redemptionPayoutLogic();
-        address governance = factory.governanceLogic();
-        address market = factory.marketLogic();
+    function testFactoryEmitsBoardroomDiscoveryEvent() public {
+        bytes32 salt = keccak256("second-boardroom");
+        address predicted = factory.predictBoardroomAddress(alice, "Second", "SCND", salt);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(BoardroomFactory.InvalidKernelSelectorSetHash.selector, expectedHash, actualHash)
-        );
-        new BoardroomFactory(
-            address(registry),
-            address(policyRegistry),
-            address(wrappedNative),
-            address(mismatchedKernel),
-            redemptionPayout,
-            governance,
-            market
-        );
+        vm.expectEmit(true, true, false, false, address(factory));
+        emit BoardroomCreated(predicted, alice, address(0), address(0), "", "", bytes32(0));
+
+        address created = factory.createBoardroom(alice, "Second", "SCND", salt);
+        assertEq(created, predicted);
+        assertTrue(factory.isBoardroom(created));
+        assertTrue(factory.isShareToken(Boardroom(payable(created)).shareToken()));
     }
 
-    function testReleaseAInitializationEmitsCanonicalEventOrder() public {
-        bytes32 salt = bytes32("event-order");
-        address predicted = factory.predictBoardroomAddress(owner, "Event Boardroom", "EVT", salt);
-        bytes32 assetRegisteredTopic = keccak256("RedeemableAssetRegistered(address)");
-        bytes32 initializedTopic = keccak256("BoardroomInitialized(address,address,address,address,string,string)");
-        bytes32 excessRecipientTopic = keccak256("RedemptionExcessRecipientSet(address)");
-
-        vm.recordLogs();
-        factory.createBoardroom(releaseAHash, owner, "Event Boardroom", "EVT", salt);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        bytes32[3] memory observedTopics;
-        uint256 observedCount;
-        for (uint256 i; i < logs.length; ++i) {
-            if (logs[i].emitter != predicted || logs[i].topics.length == 0) continue;
-            bytes32 topic = logs[i].topics[0];
-            if (topic != assetRegisteredTopic && topic != initializedTopic && topic != excessRecipientTopic) continue;
-            assertLt(observedCount, observedTopics.length);
-            observedTopics[observedCount++] = topic;
-        }
-
-        assertEq(observedCount, observedTopics.length);
-        assertEq(observedTopics[0], assetRegisteredTopic);
-        assertEq(observedTopics[1], initializedTopic);
-        assertEq(observedTopics[2], excessRecipientTopic);
+    function testImplementationCannotBeInitialized() public {
+        Boardroom implementation = Boardroom(payable(factory.boardroomImplementation()));
+        vm.expectRevert(Ownable.AlreadyInitialized.selector);
+        vm.prank(address(factory));
+        implementation.initialize(address(this), "Other", "OTH");
     }
 
-    function testGlobalReleaseDuringRedemptionsBlocksWritesUntilPermissionlessMigration() public {
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, holder, 100 ether);
+    function testMintAndOwnershipAreOwnerBound() public {
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.mint(alice, 4 ether);
 
-        vm.deal(address(this), 10 ether);
-        wrappedNative.deposit{value: 10 ether}();
-        wrappedNative.transfer(address(boardroom), 10 ether);
+        boardroom.mint(alice, 4 ether);
+        assertEq(shares.balanceOf(alice), 4 ether);
+        vm.expectRevert(Boardroom.OwnershipRenunciationDisabled.selector);
+        boardroom.renounceOwnership();
 
-        vm.prank(owner);
-        boardroom.startWindDown(releaseAHash);
-        vm.warp(block.timestamp + boardroom.windDownDelay());
-        boardroom.beginSnapshot(releaseAHash);
-        boardroom.snapshotAssets(releaseAHash, 32);
-        boardroom.openRedemptions(releaseAHash);
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
-
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
-
-        assertEq(boardroom.facetSetHash(), releaseBHash);
-        assertEq(boardroom.appliedStorageVersion(), 1);
-        assertTrue(boardroom.migrationRequired());
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
-
-        vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.StorageMigrationRequired.selector, uint64(1), uint64(2)));
-        boardroom.redeem(releaseBHash, 50 ether);
-
-        vm.prank(holder);
-        vm.expectRevert(
-            abi.encodeWithSelector(BoardroomKernel.FacetSetHashMismatch.selector, releaseAHash, releaseBHash)
-        );
-        boardroom.redeem(releaseAHash, 50 ether);
-
-        vm.prank(permissionlessMigrator);
-        boardroom.migrateBoardroom(releaseBHash);
-        assertEq(boardroom.appliedStorageVersion(), 2);
-        assertEq(boardroom.appliedStorageLayoutHash(), registry.activeStorageLayoutHash());
-        assertFalse(boardroom.migrationRequired());
-        (bytes32 migrationMarker,, uint64 fromVersion) = boardroom.releaseBMigrationState();
-        assertEq(migrationMarker, keccak256("pledge.cash.boardroom.diamond.release-b"));
-        assertEq(fromVersion, 1);
-
-        vm.prank(permissionlessMigrator);
-        vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.AlreadyMigrated.selector, uint64(2)));
-        boardroom.migrateBoardroom(releaseBHash);
-
-        vm.prank(holder);
-        boardroom.redeem(releaseBHash, 50 ether);
-        vm.prank(holder);
-        uint256 paid = boardroom.claimRedemptionAsset(releaseBHash, address(wrappedNative), holder, 5 ether);
-        assertEq(paid, 5 ether);
-        assertEq(wrappedNative.balanceOf(holder), 5 ether);
+        boardroom.transferOwnership(bob);
+        assertEq(boardroom.owner(), bob);
+        assertEq(boardroom.redemptionExcessRecipient(), bob);
+        vm.prank(bob);
+        boardroom.mint(alice, 1 ether);
+        assertEq(shares.balanceOf(alice), 5 ether);
     }
 
-    function testGlobalActivationAndMigrationAreIndependentAcrossBoardrooms() public {
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, holder, 2 ether);
-        IBoardroom second =
-            IBoardroom(factory.createBoardroom(releaseAHash, holder, "Second Boardroom", "DB2", bytes32("two")));
-        assertEq(second.appliedStorageVersion(), 1);
+    function testExecuteAndBatchPreserveBoardroomAsCallerAndBubbleFailure() public {
+        BoardroomCallTarget target = new BoardroomCallTarget();
+        vm.deal(address(boardroom), 3 ether);
+        IBoardroom.Call memory call_ =
+            IBoardroom.Call({target: address(target), value: 1 ether, data: abi.encodeCall(target.set, (41))});
+        bytes memory output = boardroom.execute(call_);
+        assertEq(abi.decode(output, (uint256)), 42);
+        assertEq(target.caller(), address(boardroom));
+        assertEq(target.value(), 1 ether);
 
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
+        IBoardroom.Call[] memory calls = new IBoardroom.Call[](2);
+        calls[0] = IBoardroom.Call(address(target), 0, abi.encodeCall(target.set, (7)));
+        calls[1] = IBoardroom.Call(address(target), 0, abi.encodeCall(target.set, (9)));
+        bytes[] memory outputs = boardroom.executeBatch(calls);
+        assertEq(abi.decode(outputs[0], (uint256)), 8);
+        assertEq(abi.decode(outputs[1], (uint256)), 10);
+        assertEq(target.stored(), 9);
 
-        assertEq(boardroom.facetSetHash(), releaseBHash);
-        assertEq(second.facetSetHash(), releaseBHash);
-        assertTrue(boardroom.migrationRequired());
-        assertTrue(second.migrationRequired());
-
-        vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.StorageMigrationRequired.selector, uint64(1), uint64(2)));
-        shares.transfer(owner, 1 ether);
-
-        boardroom.migrateBoardroom(releaseBHash);
-        assertFalse(boardroom.migrationRequired());
-        assertTrue(second.migrationRequired());
-        vm.prank(holder);
-        shares.transfer(owner, 1 ether);
-
-        vm.prank(permissionlessMigrator);
-        second.migrateBoardroom(releaseBHash);
-        assertFalse(second.migrationRequired());
+        vm.expectRevert("TARGET_FAILURE");
+        boardroom.execute(IBoardroom.Call(address(target), 0, abi.encodeCall(target.fail, ())));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.InvalidExecutionTarget.selector, address(boardroom)));
+        boardroom.execute(IBoardroom.Call(address(boardroom), 0, ""));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.InvalidExecutionTarget.selector, address(shares)));
+        boardroom.execute(IBoardroom.Call(address(shares), 0, ""));
     }
 
-    function testBoardroomCreatedUnderReleaseBRunsReleaseGenesisMigration() public {
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
+    function testCallbacksOnlyWorkInsideTheAuthorizedTargetFrame() public {
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.InvalidExecutionContext.selector, address(this)));
+        boardroom.reserveRedeemableAsset(address(asset));
 
-        address releaseBOwner = address(0xBADDCAFE);
-        IBoardroom releaseBBoardroom = IBoardroom(
-            factory.createBoardroom(
-                releaseBHash, releaseBOwner, "Release B Boardroom", "DBB", bytes32("release-b-genesis")
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.reserve, (address(boardroom), address(asset)))
             )
         );
+        assertTrue(boardroom.isRedeemableAsset(address(asset)));
 
-        assertEq(releaseBBoardroom.owner(), releaseBOwner);
-        assertEq(releaseBBoardroom.appliedStorageVersion(), 2);
-        assertEq(releaseBBoardroom.appliedStorageLayoutHash(), registry.activeStorageLayoutHash());
-        assertFalse(releaseBBoardroom.migrationRequired());
-        (bytes32 migrationMarker, uint64 migratedAt, uint64 fromVersion) = releaseBBoardroom.releaseBMigrationState();
-        assertEq(migrationMarker, keccak256("pledge.cash.boardroom.diamond.release-b"));
-        assertEq(migratedAt, uint64(block.timestamp));
-        assertEq(fromVersion, 0);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.RedeemableAssetAlreadyRegistered.selector, address(asset)));
+        boardroom.registerRedeemableAsset(address(asset));
     }
 
-    function testGlobalReleaseDuringWindingDownMigratesAndResumesLifecycle() public {
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, holder, 1 ether);
-        vm.prank(owner);
-        boardroom.startWindDown(releaseAHash);
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.WindingDown));
-
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
-        vm.warp(block.timestamp + boardroom.windDownDelay());
-
-        vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.StorageMigrationRequired.selector, uint64(1), uint64(2)));
-        boardroom.beginSnapshot(releaseBHash);
-        boardroom.migrateBoardroom(releaseBHash);
-        boardroom.beginSnapshot(releaseBHash);
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.Snapshotting));
-    }
-
-    function testGlobalReleaseDuringSnapshottingMigratesAndResumesSnapshot() public {
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, holder, 1 ether);
-        vm.prank(owner);
-        boardroom.startWindDown(releaseAHash);
-        vm.warp(block.timestamp + boardroom.windDownDelay());
-        boardroom.beginSnapshot(releaseAHash);
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.Snapshotting));
-
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
-
-        vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.StorageMigrationRequired.selector, uint64(1), uint64(2)));
-        boardroom.snapshotAssets(releaseBHash, 32);
-        boardroom.migrateBoardroom(releaseBHash);
-        assertEq(boardroom.snapshotAssets(releaseBHash, 32), 1);
-        boardroom.openRedemptions(releaseBHash);
-        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
-    }
-
-    function testExecutionObligationsAndMarketCallbacksUseReleaseBoundSurface() public {
-        BoardroomTestModule module = new BoardroomTestModule();
-        policyRegistry.registerModulePolicy(address(module));
-
-        BoardroomFacetTypes.Call memory createCall = BoardroomFacetTypes.Call({
-            policy: address(module),
-            target: address(module),
-            value: 0,
-            data: abi.encodeCall(BoardroomTestModule.createDistribution, (address(boardroom), address(shares)))
-        });
-        vm.prank(owner);
-        bytes memory result = boardroom.execute(releaseAHash, createCall);
-        BoardroomTestObligation obligation = BoardroomTestObligation(abi.decode(result, (address)));
-        assertEq(boardroom.activeObligationCount(), 1);
-        (address canonicalPolicy,, bool active, bool everRegistered) = boardroom.obligationOf(address(obligation));
-        assertEq(canonicalPolicy, address(module));
-        assertTrue(active);
-        assertTrue(everRegistered);
-
-        obligation.close();
-        assertTrue(boardroom.pruneObligation(releaseAHash, address(obligation)));
-        assertEq(boardroom.activeObligationCount(), 0);
-
-        address predictedCurve = address(0xC0FFEE);
-        BoardroomFacetTypes.Call memory marketCall = BoardroomFacetTypes.Call({
-            policy: address(module),
-            target: address(module),
-            value: 0,
-            data: abi.encodeCall(
-                BoardroomTestModule.configureCurve,
-                (address(boardroom), releaseAHash, predictedCurve, address(wrappedNative), 10 ether)
-            )
-        });
-        vm.prank(owner);
-        boardroom.execute(releaseAHash, marketCall);
-        assertEq(uint8(boardroom.primaryMarketMode()), 1);
-        assertEq(boardroom.bondingCurve(), predictedCurve);
-    }
-
-    function testControllerOperationIdentityCommitsFacetSetHash() public {
-        address proposer = vm.addr(0x5151);
-        BoardroomController implementation = new BoardroomController();
-        BoardroomController controller = BoardroomController(LibClone.clone(address(implementation)));
-        controller.initialize(address(boardroom), proposer, uint64(1 days), uint64(1 days), 1);
-        BoardroomCall[] memory calls = new BoardroomCall[](1);
-        calls[0] = BoardroomCall({
-            policy: address(0),
-            target: address(boardroom),
-            value: 0,
-            data: abi.encodeCall(IBoardroom.mint, (releaseAHash, holder, 1 ether))
-        });
-        bytes32 hashA = controller.hashBoardroomOperation(releaseAHash, calls, bytes32("salt"), 1, 1, proposer);
-        bytes32 hashB =
-            controller.hashBoardroomOperation(bytes32("other-release"), calls, bytes32("salt"), 1, 1, proposer);
-        assertNotEq(hashA, hashB);
-    }
-
-    function testERC1271ReleaseAEnvelopeBecomesInvalidAfterLiveReleaseBActivation() public {
-        uint256 proposerKey = 0x5151;
-        address proposer = vm.addr(proposerKey);
-        BoardroomController controller = _launchBoardroom(proposer);
-        BoardroomCall[] memory calls = new BoardroomCall[](1);
-        calls[0] = BoardroomCall({
-            policy: address(0),
-            target: address(boardroom),
-            value: 0,
-            data: abi.encodeCall(IBoardroom.mint, (releaseAHash, holder, 1 ether))
-        });
-        bytes32 salt = keccak256("erc1271-live-release");
-        bytes32 releaseAOperation = controller.hashBoardroomOperation(releaseAHash, calls, salt, 1, 1, proposer);
-        bytes memory releaseAEnvelope = _erc1271Envelope(controller, releaseAOperation, releaseAHash, proposerKey);
-        assertEq(controller.isValidSignature(releaseAOperation, releaseAEnvelope), controller.ERC1271_MAGIC_VALUE());
-
-        bytes32 releaseBHash = _activateReleaseB();
-        bytes32 releaseBOperation = controller.hashBoardroomOperation(releaseBHash, calls, salt, 1, 1, proposer);
-        assertNotEq(releaseAOperation, releaseBOperation);
-        assertEq(controller.isValidSignature(releaseAOperation, releaseAEnvelope), controller.ERC1271_INVALID_VALUE());
-
-        bytes memory releaseBEnvelope = _erc1271Envelope(controller, releaseBOperation, releaseBHash, proposerKey);
-        assertEq(controller.isValidSignature(releaseBOperation, releaseBEnvelope), controller.ERC1271_INVALID_VALUE());
-
-        boardroom.migrateBoardroom(releaseBHash);
-        assertEq(controller.isValidSignature(releaseBOperation, releaseBEnvelope), controller.ERC1271_MAGIC_VALUE());
-    }
-
-    function testERC1271EnvelopeFailsClosedForMalformedWrongSignerAndInactiveLifecycle() public {
-        uint256 proposerKey = 0x5151;
-        BoardroomController controller = _launchBoardroom(vm.addr(proposerKey));
-        bytes32 messageHash = keccak256("release-bound-message");
-        bytes32 digest = _erc1271Digest(controller, messageHash, releaseAHash);
-
-        assertEq(controller.isValidSignature(messageHash, hex"1234"), controller.ERC1271_INVALID_VALUE());
-        assertEq(
-            controller.isValidSignature(
-                messageHash, _erc1271EnvelopeForSignature(controller, releaseAHash, _sign(0xBAD, digest))
-            ),
-            controller.ERC1271_INVALID_VALUE()
+    function testExecutionIsNonReentrantEvenWhenTheTargetIsTheOwner() public {
+        BoardroomReentrantOwner reentrantOwner = new BoardroomReentrantOwner();
+        Boardroom owned = Boardroom(
+            payable(factory.createBoardroom(address(reentrantOwner), "Reentrant", "RENT", bytes32(uint256(2))))
         );
-
-        bytes memory envelope = _erc1271EnvelopeForSignature(controller, releaseAHash, _sign(proposerKey, digest));
-        vm.prank(address(0x5157));
-        boardroom.startWindDown(releaseAHash);
-        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
+        reentrantOwner.setBoardroom(owned);
+        vm.expectRevert(ReentrancyGuard.Reentrancy.selector);
+        reentrantOwner.attack();
     }
 
-    function testERC1271EnvelopeRejectsWrongSchemeAndEveryExplicitContextChange() public {
-        uint256 proposerKey = 0x5151;
-        BoardroomController controller = _launchBoardroom(vm.addr(proposerKey));
-        bytes32 messageHash = keccak256("explicit-context");
-        uint256 boardroomEpoch = boardroom.governanceEpoch();
-        uint256 controllerGeneration = controller.generation();
-        uint256 configurationEpoch = controller.configurationEpoch();
-        bytes32 configurationHash = controller.configurationHash();
-        bytes32 digest = controller.hashERC1271Digest(
-            messageHash,
-            address(boardroom),
-            releaseAHash,
-            boardroomEpoch,
-            controllerGeneration,
-            configurationEpoch,
-            configurationHash
-        );
-        bytes memory proposerSignature = _sign(proposerKey, digest);
-        bytes4 scheme = controller.ERC1271_ENVELOPE_SCHEME();
-        bytes memory validEnvelope = abi.encode(
-            scheme,
-            releaseAHash,
-            boardroomEpoch,
-            controllerGeneration,
-            configurationEpoch,
-            configurationHash,
-            proposerSignature
-        );
-        assertEq(controller.isValidSignature(messageHash, validEnvelope), controller.ERC1271_MAGIC_VALUE());
+    function testBatchInputsAreBounded() public {
+        IBoardroom.Call[] memory emptyCalls = new IBoardroom.Call[](0);
+        vm.expectRevert(Boardroom.EmptyBatch.selector);
+        boardroom.executeBatch(emptyCalls);
 
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    bytes4(0),
-                    releaseAHash,
-                    boardroomEpoch,
-                    controllerGeneration,
-                    configurationEpoch,
-                    configurationHash,
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    scheme,
-                    bytes32("wrong-release"),
-                    boardroomEpoch,
-                    controllerGeneration,
-                    configurationEpoch,
-                    configurationHash,
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    scheme,
-                    releaseAHash,
-                    boardroomEpoch + 1,
-                    controllerGeneration,
-                    configurationEpoch,
-                    configurationHash,
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    scheme,
-                    releaseAHash,
-                    boardroomEpoch,
-                    controllerGeneration + 1,
-                    configurationEpoch,
-                    configurationHash,
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    scheme,
-                    releaseAHash,
-                    boardroomEpoch,
-                    controllerGeneration,
-                    configurationEpoch + 1,
-                    configurationHash,
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(
-                messageHash,
-                abi.encode(
-                    scheme,
-                    releaseAHash,
-                    boardroomEpoch,
-                    controllerGeneration,
-                    configurationEpoch,
-                    bytes32("wrong-configuration"),
-                    proposerSignature
-                )
-            ),
-            controller.ERC1271_INVALID_VALUE()
-        );
-        assertEq(
-            controller.isValidSignature(messageHash, bytes.concat(validEnvelope, hex"00")),
-            controller.ERC1271_INVALID_VALUE()
-        );
-    }
-
-    function testERC1271ReleaseBoundEnvelopeRecursesThroughContractProposer() public {
-        uint256 signerKey = 0x5151;
-        Recursive1271Authority recursive = new Recursive1271Authority(vm.addr(signerKey));
-        BoardroomController controller = _launchBoardroom(address(recursive));
-        bytes32 messageHash = keccak256("recursive-release-bound-message");
-        bytes memory envelope = _erc1271Envelope(controller, messageHash, releaseAHash, signerKey);
-
-        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_MAGIC_VALUE());
-    }
-
-    function testERC1271FailsClosedWhenControllerIsNotActiveForBoardroom() public {
-        uint256 proposerKey = 0x5151;
-        BoardroomController controller = _newStandaloneController(vm.addr(proposerKey));
-        bytes32 messageHash = keccak256("inactive-controller");
-        bytes memory envelope = _erc1271Envelope(controller, messageHash, releaseAHash, proposerKey);
-
-        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
-    }
-
-    function testERC1271FailsClosedWhenBoardroomContextReadsRevert() public {
-        uint256 proposerKey = 0x5151;
-        address nonexistentBoardroom = address(0xBEEF);
-        BoardroomController implementation = new BoardroomController();
-        BoardroomController controller = BoardroomController(LibClone.clone(address(implementation)));
-        controller.initialize(nonexistentBoardroom, vm.addr(proposerKey), uint64(1 days), uint64(1 days), 1);
-        bytes32 messageHash = keccak256("failed-boardroom-read");
-        bytes32 configurationHash = controller.configurationHash();
-        bytes32 digest =
-            controller.hashERC1271Digest(messageHash, nonexistentBoardroom, releaseAHash, 1, 1, 1, configurationHash);
-        bytes memory envelope = abi.encode(
-            controller.ERC1271_ENVELOPE_SCHEME(),
-            releaseAHash,
-            uint256(1),
-            uint256(1),
-            uint256(1),
-            configurationHash,
-            _sign(proposerKey, digest)
-        );
-
-        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
-    }
-
-    function testControllerCannotScheduleWhileBoardroomMigrationIsRequired() public {
-        BoardroomController controller = _launchBoardroom();
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
-
-        BoardroomCall[] memory calls = new BoardroomCall[](1);
-        calls[0] = BoardroomCall({
-            policy: address(0),
-            target: address(boardroom),
-            value: 0,
-            data: abi.encodeCall(IBoardroom.mint, (releaseBHash, holder, 1 ether))
-        });
-
-        vm.prank(owner);
-        vm.expectRevert(BoardroomController.BoardroomMigrationRequired.selector);
-        controller.scheduleBoardroomOperation(releaseBHash, calls, bytes32("blocked"), 1, 1);
-
-        boardroom.migrateBoardroom(releaseBHash);
-        vm.prank(owner);
-        (bytes32 operationId,) =
-            controller.scheduleBoardroomOperation(releaseBHash, calls, bytes32("after-migration"), 1, 1);
-        (,, BoardroomController.OperationStatus status) = controller.operationState(operationId);
-        assertEq(uint8(status), uint8(BoardroomController.OperationStatus.Pending));
-    }
-
-    function testScheduledControllerOperationCannotCrossGlobalActivation() public {
-        BoardroomController controller = _launchBoardroom();
-        BoardroomCall[] memory calls = new BoardroomCall[](1);
-        calls[0] = BoardroomCall({
-            policy: address(0),
-            target: address(boardroom),
-            value: 0,
-            data: abi.encodeCall(IBoardroom.mint, (releaseAHash, holder, 1 ether))
-        });
-        bytes32 salt = keccak256("release-bound-schedule");
-
-        vm.prank(owner);
-        (, uint256 eta) = controller.scheduleBoardroomOperation(releaseAHash, calls, salt, 1, 1);
-
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        bytes32 releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
-        vm.warp(eta);
-
+        IBoardroom.Call[] memory tooManyCalls = new IBoardroom.Call[](boardroom.MAX_BATCH_CALLS() + 1);
         vm.expectRevert(
-            abi.encodeWithSelector(BoardroomController.FacetSetMismatch.selector, releaseAHash, releaseBHash)
+            abi.encodeWithSelector(Boardroom.TooManyCalls.selector, tooManyCalls.length, boardroom.MAX_BATCH_CALLS())
         );
-        controller.executeBoardroomOperation(releaseAHash, calls, salt, 1, 1, owner);
-
-        bytes32 substitutedId = controller.hashBoardroomOperation(releaseBHash, calls, salt, 1, 1, owner);
-        vm.expectRevert(BoardroomController.BoardroomMigrationRequired.selector);
-        controller.executeBoardroomOperation(releaseBHash, calls, salt, 1, 1, owner);
-
-        boardroom.migrateBoardroom(releaseBHash);
-        vm.expectRevert(abi.encodeWithSelector(BoardroomController.OperationNotPending.selector, substitutedId));
-        controller.executeBoardroomOperation(releaseBHash, calls, salt, 1, 1, owner);
+        boardroom.executeBatch(tooManyCalls);
     }
 
-    function testControllerReplacementUsesHashBoundSelectorAndCanonicalFactory() public {
-        BoardroomController currentController = _launchBoardroom();
-        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroom.controllerFactory());
-        address nextProposer = address(0xBEEF);
-        uint64 nextGeneration = 2;
-        address predictedNext = controllerFactory.predictControllerAddress(address(boardroom), nextGeneration);
+    function testEscrowBlocksSnapshotUntilOwnerClosesIt() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        address[] memory assets = new address[](1);
+        assets[0] = address(asset);
+        asset.mint(address(escrow), 30 ether);
 
-        BoardroomCall[] memory calls = new BoardroomCall[](1);
-        calls[0] = BoardroomCall({
-            policy: address(0),
-            target: address(boardroom),
-            value: 0,
-            data: abi.encodeCall(
-                IBoardroom.replaceController,
-                (
-                    releaseAHash,
-                    address(currentController),
-                    predictedNext,
-                    nextProposer,
-                    uint64(2 days),
-                    uint64(3 days),
-                    nextGeneration
-                )
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks),
+                0,
+                abi.encodeCall(callbacks.reserveAndRegister, (address(boardroom), address(escrow), assets))
             )
-        });
-        bytes32 salt = keccak256("boardroom-controller-replacement");
-        uint256 expectedEpoch = boardroom.governanceEpoch();
-        uint256 expectedConfigurationEpoch = currentController.configurationEpoch();
-
-        vm.prank(owner);
-        (, uint256 eta) = currentController.scheduleBoardroomOperation(
-            releaseAHash, calls, salt, expectedEpoch, expectedConfigurationEpoch
         );
-        vm.warp(eta);
-        currentController.executeBoardroomOperation(
-            releaseAHash, calls, salt, expectedEpoch, expectedConfigurationEpoch, owner
+        assertEq(boardroom.openEscrowCount(), 1);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Open));
+        assertTrue(boardroom.isRedeemableAsset(address(asset)));
+
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        vm.expectRevert(Boardroom.SnapshotNotReady.selector);
+        boardroom.beginSnapshot();
+
+        boardroom.executeEscrow(address(escrow), abi.encodeCall(escrow.close, (address(asset))));
+        assertEq(asset.balanceOf(address(boardroom)), 30 ether);
+        assertEq(boardroom.openEscrowCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Closed));
+
+        boardroom.beginSnapshot();
+        assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.Snapshotting));
+    }
+
+    function testClosedEscrowCanBePermissionlesslyPruned() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
         );
-
-        BoardroomController nextController = BoardroomController(predictedNext);
-        assertEq(boardroom.controller(), predictedNext);
-        assertEq(boardroom.owner(), predictedNext);
-        assertEq(boardroom.controllerGeneration(), nextGeneration);
-        assertEq(boardroom.governanceEpoch(), expectedEpoch + 1);
-        assertEq(nextController.factory(), address(controllerFactory));
-        assertEq(nextController.boardroom(), address(boardroom));
-        assertEq(nextController.proposer(), nextProposer);
-        assertEq(nextController.delay(), 2 days);
-        assertEq(nextController.gracePeriod(), 3 days);
-        assertEq(nextController.generation(), nextGeneration);
-        assertTrue(controllerFactory.isController(predictedNext));
+        escrow.markClosed();
+        vm.prank(alice);
+        boardroom.pruneEscrow(address(escrow));
+        assertEq(boardroom.openEscrowCount(), 0);
+        assertEq(uint256(boardroom.escrowState(address(escrow))), uint256(IBoardroom.EscrowState.Closed));
     }
 
-    function testExternalSelectorCollisionDoesNotTriggerControllerReplacementBatchRule() public {
-        BoardroomController controller = _launchBoardroom();
-        BoardroomTestModule module = new BoardroomTestModule();
-        policyRegistry.registerModulePolicy(address(module));
-
-        bytes memory collisionCall = abi.encodeCall(
-            BoardroomTestModule.replaceController,
-            (releaseAHash, address(1), address(2), address(3), uint64(1), uint64(2), uint64(3))
-        );
-        BoardroomCall[] memory calls = new BoardroomCall[](2);
-        calls[0] = BoardroomCall({policy: address(module), target: address(module), value: 0, data: collisionCall});
-        calls[1] = BoardroomCall({policy: address(module), target: address(module), value: 0, data: collisionCall});
-
-        bytes32 salt = keccak256("external-selector-collision");
-        vm.prank(owner);
-        (, uint256 eta) = controller.scheduleBoardroomOperation(releaseAHash, calls, salt, 1, 1);
-        vm.warp(eta);
-        controller.executeBoardroomOperation(releaseAHash, calls, salt, 1, 1, owner);
-
-        assertEq(module.selectorCollisionCalls(), 2);
-    }
-
-    function _launchBoardroom() internal returns (BoardroomController controller) {
-        return _launchBoardroom(owner);
-    }
-
-    function _launchBoardroom(address proposer) internal returns (BoardroomController controller) {
-        address protection = address(0x5157);
-        BoardroomRewardsFactory rewardsFactory = new BoardroomRewardsFactory(address(factory));
-        policyRegistry.registerModulePolicy(address(rewardsFactory));
-
-        BoardroomFacetTypes.Call memory createRewards = BoardroomFacetTypes.Call({
-            policy: address(rewardsFactory),
-            target: address(rewardsFactory),
-            value: 0,
-            data: abi.encodeCall(BoardroomRewardsFactory.createRewards, (uint64(1 days), bytes32("boardroom-rewards")))
-        });
-        vm.prank(owner);
-        BoardroomRewards rewards =
-            BoardroomRewards(abi.decode(boardroom.execute(releaseAHash, createRewards), (address)));
-
-        vm.prank(owner);
-        boardroom.mint(releaseAHash, protection, 100 ether);
-        vm.prank(protection);
-        shares.approve(address(rewards), 100 ether);
-        vm.prank(protection);
-        rewards.stake(100 ether);
-        vm.roll(block.number + 1);
-
-        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroom.controllerFactory());
-        address predictedController = controllerFactory.predictControllerAddress(address(boardroom), 1);
-        BoardroomFacetTypes.LaunchConfig memory config = BoardroomFacetTypes.LaunchConfig({
-            proposer: proposer,
-            predictedController: predictedController,
-            protectionStaker: protection,
-            expectedRewardPool: address(rewards),
-            expectedRedemptionExcessRecipient: owner,
-            controllerDelay: 1 days,
-            windDownDelay: 1 days,
-            gracePeriod: 1 days,
-            generation: 1
-        });
-        vm.prank(owner);
-        boardroom.launch(releaseAHash, config);
-        controller = BoardroomController(predictedController);
-    }
-
-    function _newStandaloneController(address proposer) internal returns (BoardroomController controller) {
-        BoardroomController implementation = new BoardroomController();
-        controller = BoardroomController(LibClone.clone(address(implementation)));
-        controller.initialize(address(boardroom), proposer, uint64(1 days), uint64(1 days), 1);
-    }
-
-    function _erc1271Digest(BoardroomController controller, bytes32 messageHash, bytes32 facetSetHash)
-        internal
-        view
-        returns (bytes32)
-    {
-        return controller.hashERC1271Digest(
-            messageHash,
-            address(boardroom),
-            facetSetHash,
-            boardroom.governanceEpoch(),
-            controller.generation(),
-            controller.configurationEpoch(),
-            controller.configurationHash()
+    function testAlreadyClosedEscrowCannotBeRegistered() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        escrow.markClosed();
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EscrowAlreadyClosed.selector, address(escrow)));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
         );
     }
 
-    function _erc1271Envelope(
-        BoardroomController controller,
-        bytes32 messageHash,
-        bytes32 facetSetHash,
-        uint256 signerKey
-    ) internal view returns (bytes memory) {
-        return _erc1271EnvelopeForSignature(
-            controller, facetSetHash, _sign(signerKey, _erc1271Digest(controller, messageHash, facetSetHash))
+    function testClosedEscrowCannotBeReopened() public {
+        BoardroomEscrow escrow = new BoardroomEscrow(address(boardroom));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
+        );
+        escrow.markClosed();
+        boardroom.pruneEscrow(address(escrow));
+
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EscrowAlreadyRegistered.selector, address(escrow)));
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.register, (address(boardroom), address(escrow)))
+            )
         );
     }
 
-    function _erc1271EnvelopeForSignature(
-        BoardroomController controller,
-        bytes32 facetSetHash,
-        bytes memory proposerSignature
-    ) internal view returns (bytes memory) {
-        return abi.encode(
-            controller.ERC1271_ENVELOPE_SCHEME(),
-            facetSetHash,
-            boardroom.governanceEpoch(),
-            controller.generation(),
-            controller.configurationEpoch(),
-            controller.configurationHash(),
-            proposerSignature
+    function testSnapshotUsesActualBalanceReceivedByDirectTransfer() public {
+        BoardroomFeeOnTransferToken feeToken = new BoardroomFeeOnTransferToken();
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.reserve, (address(boardroom), address(feeToken)))
+            )
         );
+        feeToken.mint(address(this), 100 ether);
+        assertTrue(feeToken.transfer(address(boardroom), 100 ether));
+        assertEq(feeToken.balanceOf(address(boardroom)), 99 ether);
+
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        boardroom.beginSnapshot();
+        boardroom.snapshotAssets(32);
+
+        (uint256 frozenBalance,) = boardroom.redemptionAssetState(address(feeToken));
+        assertEq(frozenBalance, 99 ether);
+
+        boardroom.openRedemptions();
+        vm.startPrank(alice);
+        boardroom.redeem(1 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.UnexpectedRedeemableAssetBalanceChange.selector, address(feeToken), 99 ether, 98.01 ether
+            )
+        );
+        boardroom.claimRedemptionAsset(address(feeToken), alice, 0);
+        vm.stopPrank();
+
+        assertEq(feeToken.balanceOf(address(boardroom)), 99 ether);
+        (, uint256 paidAmount) = boardroom.redemptionAssetState(address(feeToken));
+        assertEq(paidAmount, 0);
     }
 
-    function _activateReleaseB() internal returns (bytes32 releaseBHash) {
-        ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomRelease.releaseB(facets, releaseAHash);
-        releaseBHash = registry.publishFacetSet(releaseB);
-        registry.activateFacetSet(releaseBHash);
+    function testOwnerRegistersDirectlyTransferredAssetDuringWindDown() public {
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EmptyRedeemableAsset.selector, address(asset)));
+        boardroom.registerRedeemableAsset(address(asset));
+
+        asset.mint(address(this), 10 ether);
+        assertTrue(asset.transfer(address(boardroom), 10 ether));
+        boardroom.registerRedeemableAsset(address(asset));
+
+        assertTrue(boardroom.isRedeemableAsset(address(asset)));
+        assertEq(asset.balanceOf(address(boardroom)), 10 ether);
     }
 
-    function _sign(uint256 signerKey, bytes32 digest) internal pure returns (bytes memory signature) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
-        signature = abi.encodePacked(r, s, v);
+    function testWindDownSnapshotAndRedemptionAreExact() public {
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.reserve, (address(boardroom), address(asset)))
+            )
+        );
+        asset.mint(address(this), 100 ether);
+        assertTrue(asset.transfer(address(boardroom), 100 ether));
+
+        boardroom.mint(alice, 2 ether);
+        boardroom.mint(bob, 1 ether);
+        boardroom.mint(address(boardroom), 1 ether);
+        boardroom.startWindDown();
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        boardroom.beginSnapshot();
+
+        assertEq(shares.balanceOf(address(boardroom)), 0);
+        (uint256 frozenAssets, uint256 cursor, bool assetsFrozen) = boardroom.assetSnapshotProgress();
+        assertEq(frozenAssets, boardroom.redeemableAssetCount());
+        assertEq(cursor, 0);
+        assertTrue(assetsFrozen);
+        (uint256 frozenSupply, bool frozen) = boardroom.redemptionSupplyState();
+        assertEq(frozenSupply, 3 ether);
+        assertTrue(frozen);
+        assertEq(boardroom.snapshotAssets(32), 2);
+        boardroom.openRedemptions();
+
+        vm.startPrank(alice);
+        boardroom.redeem(2 ether);
+        assertEq(boardroom.claimRedemptionAsset(address(asset), alice, 66 ether), 66_666666666666666666);
+        vm.stopPrank();
+        vm.startPrank(bob);
+        boardroom.redeem(1 ether);
+        assertEq(boardroom.claimRedemptionAsset(address(asset), bob, 33 ether), 33_333333333333333334);
+        vm.stopPrank();
+
+        assertEq(asset.balanceOf(alice), 66_666666666666666666);
+        assertEq(asset.balanceOf(bob), 33_333333333333333334);
+        assertEq(asset.balanceOf(address(boardroom)), 0);
+        assertEq(shares.totalSupply(), 0);
     }
 
-    function _reservedKernelSelectors() internal pure returns (bytes4[] memory reserved) {
-        reserved = new bytes4[](8);
-        reserved[0] = bytes4(keccak256("facetRegistry()"));
-        reserved[1] = bytes4(keccak256("facetSetHash()"));
-        reserved[2] = BoardroomKernel.initialize.selector;
-        reserved[3] = BoardroomKernel.appliedStorageVersion.selector;
-        reserved[4] = BoardroomKernel.migrationRequired.selector;
-        reserved[5] = bytes4(keccak256("viewDispatcher()"));
-        reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
-        reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
-        for (uint256 i = 1; i < reserved.length; ++i) {
-            bytes4 current = reserved[i];
-            uint256 j = i;
-            while (j != 0 && reserved[j - 1] > current) {
-                reserved[j] = reserved[j - 1];
-                --j;
-            }
-            reserved[j] = current;
-        }
+    function testUnreadableAssetIsClassifiedWithoutBlockingRedemptions() public {
+        BoardroomMutableToken mutableAsset = new BoardroomMutableToken();
+        boardroom.execute(
+            IBoardroom.Call(
+                address(callbacks), 0, abi.encodeCall(callbacks.reserve, (address(boardroom), address(mutableAsset)))
+            )
+        );
+        mutableAsset.mint(address(boardroom), 10 ether);
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        boardroom.beginSnapshot();
+        mutableAsset.setBalanceReadsFail(true);
+        boardroom.snapshotAssets(32);
+        assertEq(
+            uint256(boardroom.redeemableAssetSnapshotStatus(address(mutableAsset))),
+            uint256(IBoardroom.SnapshotStatus.Unreadable)
+        );
+        boardroom.openRedemptions();
+    }
+
+    function testNativeBalanceWrapsAndLateForcedValueRemainsRecoverableAsExcess() public {
+        boardroom.mint(alice, 1 ether);
+        vm.deal(address(boardroom), 2 ether);
+        boardroom.startWindDown();
+        assertEq(wrappedNative.balanceOf(address(boardroom)), 2 ether);
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        boardroom.beginSnapshot();
+        boardroom.snapshotAssets(32);
+        boardroom.openRedemptions();
+
+        vm.deal(address(boardroom), 1 ether);
+        vm.prank(alice);
+        boardroom.wrapNativeBalance();
+        assertEq(wrappedNative.balanceOf(address(boardroom)), 3 ether);
+        assertEq(boardroom.sweepRedemptionExcess(address(wrappedNative)), 1 ether);
+        assertEq(wrappedNative.balanceOf(address(this)), 1 ether);
+    }
+
+    function testLifecycleCannotMoveBackward() public {
+        boardroom.mint(alice, 1 ether);
+        boardroom.startWindDown();
+        assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.WindingDown));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.InvalidStatus.selector, IBoardroom.Status.Active, IBoardroom.Status.WindingDown
+            )
+        );
+        boardroom.mint(alice, 1 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.InvalidStatus.selector, IBoardroom.Status.Active, IBoardroom.Status.WindingDown
+            )
+        );
+        boardroom.execute(IBoardroom.Call(address(callbacks), 0, ""));
+
+        vm.warp(block.timestamp + boardroom.MIN_WIND_DOWN_DELAY());
+        boardroom.beginSnapshot();
+        boardroom.snapshotAssets(32);
+        boardroom.openRedemptions();
+        assertEq(uint256(boardroom.status()), uint256(IBoardroom.Status.RedemptionsOpen));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.InvalidStatus.selector, IBoardroom.Status.WindingDown, IBoardroom.Status.RedemptionsOpen
+            )
+        );
+        boardroom.beginSnapshot();
     }
 }

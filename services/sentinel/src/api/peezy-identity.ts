@@ -17,11 +17,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { authorizationCodeRequest, getOAuth2Tokens } from "better-auth/oauth2";
-import {
-  genericOAuth,
-  organization,
-  type GenericOAuthConfig
-} from "better-auth/plugins";
+import { genericOAuth, type GenericOAuthConfig } from "better-auth/plugins";
 import { and, eq, gt, inArray, lt, lte, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 import { parseSiweMessage } from "viem/siwe";
@@ -62,7 +58,7 @@ import {
 import {
   createSentinelAuthDatabaseAdapter,
   createPledgeCashSiweVerifier,
-  ALERTS_SIWE_STATEMENT,
+  PRODUCT_SIWE_STATEMENT,
   internalAuthHeaders,
   WALLET_LINK_SIWE_STATEMENT
 } from "./better-auth";
@@ -94,7 +90,7 @@ const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "twitter"
 ]);
 
-type IdentityConfig = NonNullable<Config["auth"]["identity"]>;
+type IdentityConfig = Config["auth"]["identity"];
 type IdentityFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type PeezyIdentityAuthAdapterOptions = {
   readonly hydrationCacheMs?: number;
@@ -161,9 +157,6 @@ export function createPeezyIdentityAuthAdapter(
   fetcher: IdentityFetch = fetch,
   options: PeezyIdentityAuthAdapterOptions = {}
 ): AuthAdapter {
-  if (config.auth.identity === undefined) {
-    throw new Error("peezy.tech Identity is not configured");
-  }
   const identity = config.auth.identity;
   const identityFetcher = createTimeoutFetcher(
     fetcher,
@@ -284,24 +277,13 @@ export function createPeezyIdentityAuthAdapter(
         identityHydrator,
         config.webOrigin,
         requestContext
-      ),
-      organization({
-        allowUserToCreateOrganization: false,
-        requireEmailVerificationOnInvitation: true,
-        schema: {
-          invitation: { modelName: "organizationInvitations" },
-          member: { modelName: "organizationMembers" },
-          organization: { modelName: "organizations" },
-          session: { fields: { activeOrganizationId: "activeOrganizationId" } }
-        }
-      })
+      )
     ]
   });
 
   return {
     socialProviders: [],
     sharedIdentityClientId: identity.clientId,
-    usesSharedIdentity: true,
     async createWalletChallenge({ address, chainId, clientIp, purpose }) {
       return gateway.createWalletChallenge({
         address,
@@ -332,14 +314,6 @@ export function createPeezyIdentityAuthAdapter(
         mergeReconciledWallets(snapshot, reconciledWallets),
         identityUser
       );
-    },
-    async hydrateWallet(userId, wallet) {
-      const subject = await identitySubjectForProductUser(db, userId);
-      if (subject === undefined) {
-        return { ...wallet, canSignIn: false };
-      }
-      const identityUser = await identityHydrator.get(subject);
-      return hydrateIdentityWallet(wallet, identityUser);
     },
     async getSocialProviders() {
       const capabilities = await gateway.capabilities();
@@ -578,23 +552,6 @@ function mergeReconciledWallets(
   return { ...snapshot, wallets: [...wallets.values()] };
 }
 
-function hydrateIdentityWallet(
-  wallet: WalletDto,
-  identity: IdentityMeResponse
-): WalletDto {
-  const credential = identity.credentials.find(
-    (candidate) =>
-      candidate.kind === "wallet" &&
-      candidate.accountKind === "eoa" &&
-      candidate.address.toLowerCase() === wallet.address.toLowerCase()
-  );
-  return {
-    ...wallet,
-    canSignIn:
-      credential?.kind === "wallet" ? credential.signInEnabled : false
-  };
-}
-
 async function identityLinkUserForCallback(
   db: SentinelDb,
   request: Request
@@ -642,7 +599,7 @@ function peezyWalletSessionPlugin(
 ) {
   const verifyLegacySiwe = createPledgeCashSiweVerifier(
     { webOrigin },
-    [ALERTS_SIWE_STATEMENT]
+    [PRODUCT_SIWE_STATEMENT]
   );
   return {
     id: "peezy-wallet-session",
@@ -860,7 +817,7 @@ function peezyWalletSessionPlugin(
               ...(target.userId === undefined
                 ? {}
                 : { requiredUserId: target.userId }),
-              walletCoverage: {
+              walletLink: {
                 address,
                 canSignIn: verifiedWallet.signInEnabled,
                 chainId: context.body.chainId,
@@ -1268,7 +1225,7 @@ async function provisionProductUser(
   identity: IdentityMeResponse,
   options: {
     readonly requiredUserId?: string;
-    readonly walletCoverage?: {
+    readonly walletLink?: {
       readonly address: AddressDto;
       readonly canSignIn: boolean;
       readonly chainId: number;
@@ -1283,8 +1240,8 @@ async function provisionProductUser(
     await transaction.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${identityUser.id}`}))`
     );
-    if (options.walletCoverage !== undefined) {
-      await lockWalletAddress(transaction, options.walletCoverage.address);
+    if (options.walletLink !== undefined) {
+      await lockWalletAddress(transaction, options.walletLink.address);
     }
 
     const candidateUserIds = await identityCandidateUserIds(
@@ -1342,10 +1299,9 @@ async function provisionProductUser(
       identityUser.id,
       productUser.id
     );
-    if (options.walletCoverage !== undefined) {
-      await upsertWalletCoverage(transaction, {
-        ...options.walletCoverage,
-        reenableAlerts: false,
+    if (options.walletLink !== undefined) {
+      await upsertWalletLink(transaction, {
+        ...options.walletLink,
         userId: productUser.id
       });
     }
@@ -1504,7 +1460,7 @@ async function consumeLegacySiweNonce(
     }
 
     const candidateUserIds = new Set<string>();
-    const [owner, credentials, coverage] = await Promise.all([
+    const [owner, credentials, walletLinks] = await Promise.all([
       transaction
         .select({ userId: walletOwners.userId })
         .from(walletOwners)
@@ -1521,7 +1477,7 @@ async function consumeLegacySiweNonce(
         .where(sql`lower(${wallets.address}) = lower(${input.address})`)
         .limit(2)
     ]);
-    for (const row of [...owner, ...credentials, ...coverage]) {
+    for (const row of [...owner, ...credentials, ...walletLinks]) {
       candidateUserIds.add(row.userId);
     }
     if (candidateUserIds.size > 1) {
@@ -1619,7 +1575,7 @@ async function linkIdentityWalletCredential(
       input.chainId
     );
     if (cachedCentralWallet !== undefined) {
-      return finalizeIdentityWalletCoverage(db, existingIdentity, {
+      return finalizeIdentityWalletLink(db, existingIdentity, {
         address: input.address,
         canSignIn: cachedCentralWallet.signInEnabled,
         chainId: input.chainId,
@@ -1652,7 +1608,7 @@ async function linkIdentityWalletCredential(
     input.chainId
   );
   if (existingCentralWallet !== undefined) {
-    return finalizeIdentityWalletCoverage(db, existingIdentity, {
+    return finalizeIdentityWalletLink(db, existingIdentity, {
       address: input.address,
       canSignIn: existingCentralWallet.signInEnabled,
       chainId: input.chainId,
@@ -1712,7 +1668,7 @@ async function linkIdentityWalletCredential(
   if (centralWallet === undefined) {
     throw new Error("Identity wallet grant did not link the requested wallet");
   }
-  return finalizeIdentityWalletCoverage(db, centralIdentity, {
+  return finalizeIdentityWalletLink(db, centralIdentity, {
     address: input.address,
     canSignIn: centralWallet.signInEnabled,
     chainId: input.chainId,
@@ -1884,7 +1840,7 @@ async function reconcilePendingIdentityWalletLinks(
       continue;
     }
     reconciled.push(
-      await finalizeIdentityWalletCoverage(db, identity, {
+      await finalizeIdentityWalletLink(db, identity, {
         address: link.address as AddressDto,
         canSignIn: centralWallet.signInEnabled,
         chainId: link.chainId,
@@ -1946,7 +1902,7 @@ async function deleteRejectedIdentityWalletLink(
   });
 }
 
-async function finalizeIdentityWalletCoverage(
+async function finalizeIdentityWalletLink(
   db: SentinelDb,
   identity: IdentityMeResponse,
   input: {
@@ -1977,11 +1933,10 @@ async function finalizeIdentityWalletCoverage(
       throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
     }
     await bindIdentitySubject(transaction, input.subject, input.userId);
-    const wallet = await upsertWalletCoverage(transaction, {
+    const wallet = await upsertWalletLink(transaction, {
       address: input.address,
       canSignIn: input.canSignIn,
       chainId: input.chainId,
-      reenableAlerts: true,
       siweMessage: input.siweMessage,
       userId: input.userId,
       verifiedAt: input.verifiedAt
@@ -2027,13 +1982,12 @@ async function lockWalletAddress(
   );
 }
 
-async function upsertWalletCoverage(
+async function upsertWalletLink(
   transaction: SentinelTransaction,
   input: {
     readonly address: AddressDto;
     readonly canSignIn: boolean;
     readonly chainId: number;
-    readonly reenableAlerts: boolean;
     readonly siweMessage: string;
     readonly userId: string;
     readonly verifiedAt: Date;
@@ -2057,25 +2011,10 @@ async function upsertWalletCoverage(
     throw new Error("Wallet is already linked to another account");
   }
 
-  const [alertPreference] = await transaction
-    .select({
-      alertsEnabled: sql<boolean | null>`bool_or(${wallets.alertsEnabled})`
-    })
-    .from(wallets)
-    .where(
-      and(
-        eq(wallets.userId, input.userId),
-        sql`lower(${wallets.address}) = lower(${checksumAddress})`
-      )
-    );
-  const alertsEnabled =
-    input.reenableAlerts || (alertPreference?.alertsEnabled ?? true);
-
   await transaction
     .insert(wallets)
     .values({
       address: checksumAddress,
-      alertsEnabled,
       chainId: input.chainId,
       siweMessage: input.siweMessage,
       userId: input.userId,
@@ -2101,7 +2040,6 @@ async function upsertWalletCoverage(
   const [row] = await transaction
     .update(wallets)
     .set({
-      ...(input.reenableAlerts ? { alertsEnabled: true } : {}),
       siweMessage: input.siweMessage,
       verifiedAt: input.verifiedAt
     })
@@ -2114,11 +2052,10 @@ async function upsertWalletCoverage(
     )
     .returning();
   if (row === undefined) {
-    throw new Error("PledgeCash wallet coverage could not be provisioned");
+    throw new Error("PledgeCash wallet link could not be provisioned");
   }
   return {
     address: row.address.toLowerCase() as AddressDto,
-    alertsEnabled: row.alertsEnabled,
     canSignIn: input.canSignIn,
     verifiedAt: row.verifiedAt.toISOString()
   };

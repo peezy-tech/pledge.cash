@@ -1,29 +1,11 @@
 import type { Address } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getAddress, type WalletClient } from "viem";
-import { useAccount, useBalance, useSwitchChain, useWalletClient } from "wagmi";
+import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
 import { walletRpcUrl, type PledgeCashNetwork } from "../lib/contracts";
 import { shortAddress, walletState } from "../lib/forms";
 import type { WalletState } from "../lib/types";
 import type { PushLog } from "./use-action-runner";
-
-export type NativeBalanceState =
-  | { status: "disconnected" }
-  | { status: "loading" }
-  | { status: "error"; error: unknown }
-  | { status: "ready"; value: bigint };
-
-export function resolveNativeBalanceState(
-  account: Address | undefined,
-  queryStatus: "pending" | "error" | "success",
-  value: bigint | undefined,
-  error: unknown,
-): NativeBalanceState {
-  if (!account) return { status: "disconnected" };
-  if (queryStatus === "success" && value !== undefined) return { status: "ready", value };
-  if (queryStatus === "error") return { status: "error", error };
-  return { status: "loading" };
-}
 
 export function useWagmiWallet({
   network,
@@ -35,27 +17,15 @@ export function useWagmiWallet({
   pushLog: PushLog;
 }): {
   activeAccount: () => Address;
-  nativeBalance: NativeBalanceState;
   switchChain: () => Promise<void>;
   wallet: WalletState;
   walletClient: () => WalletClient;
 } {
   const { address, chainId } = useAccount();
   const account = useMemo(() => (address ? getAddress(address) : undefined), [address]);
-  const balanceQuery = useBalance({
-    address: account,
-    chainId: network.chainId,
-    query: { enabled: account !== undefined },
-  });
   const { data: client } = useWalletClient({ chainId: network.chainId });
   const { switchChainAsync } = useSwitchChain();
   const previousAccount = useRef<Address | undefined>(undefined);
-  const nativeBalance = resolveNativeBalanceState(
-    account,
-    balanceQuery.status,
-    balanceQuery.data?.value,
-    balanceQuery.error,
-  );
   const wallet = useMemo(() => walletState(account, chainId), [account, chainId]);
 
   useEffect(() => {
@@ -100,7 +70,7 @@ export function useWagmiWallet({
     pushLog(`Wallet switched to ${network.name}.`, "success");
   }, [network, pushLog, switchChainAsync]);
 
-  return { activeAccount, nativeBalance, switchChain, wallet, walletClient };
+  return { activeAccount, switchChain, wallet, walletClient };
 }
 
 function hasAccountChanged(previousAccount: Address | undefined, account: Address | undefined): boolean {

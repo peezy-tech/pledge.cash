@@ -42,9 +42,9 @@ describe("preview directory routing", () => {
       rewrittenUrl: "/pledge-cash/docs/guides/wind-down-and-redeem/?audit=hq",
     });
 
-    expect(previewDirectoryIndexRoute("/docs/flows/receive-grant?source=legacy", "/", outputRoot)).toEqual({
-      indexFile: join(outputRoot, "docs/flows/receive-grant/index.html"),
-      rewrittenUrl: "/docs/flows/receive-grant/?source=legacy",
+    expect(previewDirectoryIndexRoute("/docs/guides/receive-and-settle-grant?ref=portfolio", "/", outputRoot)).toEqual({
+      indexFile: join(outputRoot, "docs/guides/receive-and-settle-grant/index.html"),
+      rewrittenUrl: "/docs/guides/receive-and-settle-grant/?ref=portfolio",
     });
   });
 

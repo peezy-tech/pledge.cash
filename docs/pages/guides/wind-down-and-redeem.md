@@ -1,149 +1,31 @@
 ---
 title: Wind down and redeem
-description: Invalidate governance, close obligations and singleton liquidity, process a bounded asset snapshot, and claim per-asset redemption credits.
+description: Close grants and liquidity, freeze a bounded treasury snapshot, burn shares, and claim each asset.
 ---
 
 # Wind down and redeem
 
-Wind-down is a one-way shutdown path:
+Wind-down is irreversible. It stops minting and general execution, so inventory every
+escrow and required exit call before starting.
 
-```text
-Active -> WindingDown -> Snapshotting -> RedemptionsOpen
-```
+## Operator sequence
 
-Canonical protocol v1 is pending on both target testnets and is not
-mainnet-ready. Do not begin from incomplete registry/release identity,
-migration, obligation, liquidity, or asset reads. Unknown is not zero.
+1. Confirm the owner, status, open escrow count, registered assets, and balances.
+2. Start wind-down. The Boardroom wraps its native balance and begins the minimum delay.
+3. Exit the registered liquidity position through `executeEscrow`, using fresh
+   minimum amounts and a deadline. An empty locker may be cancelled instead.
+4. Close Boardroom-funded grants by settlement, expiry recovery, or the bounded
+   quarantine path when an expired hostile token cannot transfer exactly.
+5. Prune every closed escrow that was not closed through `executeEscrow`.
+6. After the delay, begin snapshotting. This burns treasury-held shares and freezes
+   redemption supply.
+7. Process asset pages until the cursor is complete, then open redemptions.
 
-## 1. Start wind-down
+## Holder sequence
 
-Before launch, the owner may start wind-down. After launch, a holder must meet the 10% threshold using current and
-previous-block active stake against current and previous-block governance-eligible supply.
+1. Re-read frozen supply, asset statuses, and balances.
+2. Call `redeem(shares)` once to burn shares into credits.
+3. Claim each included asset with a recipient and acceptable minimum output.
 
-The transition:
-
-- stops new issuance and commitments;
-- advances the Boardroom governance epoch, invalidating older controller operations in O(1);
-- starts the immutable wind-down delay;
-- disables ordinary active-state governance and liquidity mutation;
-- preserves permissionless bounded cleanup.
-
-The controller proposer and permissionless executor are not required for holder-triggered wind-down.
-
-## 2. Resolve obligations
-
-Redemptions cannot begin while `activeObligationCount() != 0`.
-
-- Close fixed-price sales and airdrops; return unused inventory.
-- Settle or terminalize grants, bonds, distributions, and the canonical reward pool.
-- Prune each terminal obligation with `pruneObligation`, or use a bounded batch of at most 32 addresses.
-- Verify scalar total/per-kind counts and every per-asset dependency count after pruning.
-
-Pruning never erases factory provenance or append-only discovery history.
-
-A curve with an open sell liability or stranded quote is not terminal. Cancellation, expiry, or migration fallback enters
-a 30-day sell-only unwind. Any current holder may sell transferable shares against the global liability; afterward anyone
-may finalize and remaining holders keep their shares. A graduated curve first has a seven-day permissionless migration
-window.
-
-If quote return fails, anyone may retry recovery. Forfeiture is unavailable before wind-down and requires 30 days of
-quarantine plus an unvetoed seven-day window; a 1% current-and-previous-block eligible staker can restart the delay.
-Only recovery or finalized forfeiture closes that dependency and releases its liquidity reservation. Do not bypass it
-with a fabricated close state.
-
-## 3. Resolve singleton P4LP liquidity
-
-Each Boardroom has at most one canonical P4LP vault and Uniswap v4 PoolId.
-
-During WindingDown anyone may:
-
-1. attempt full exact exit of the vault position to the Boardroom;
-2. use the hostile-token fallback, which calls neither underlying, enters Claims, and transfers protocol-held P4LP to
-   the Boardroom;
-3. call the Boardroom close/finalize route to mark the factory and Boardroom singleton Closed and prune its obligation.
-
-P4LP was registered as an obligation dependency when the vault was created. The Claims fallback therefore lets the
-Boardroom close its lifecycle record before the vault position is empty, while external claim holders retain their
-proportional redemption route. Verify no migration reservation remains and that the P4LP snapshot entry is included.
-An exact exit with no external claims can instead empty and close the vault immediately.
-
-## 4. Begin Snapshotting
-
-After the wind-down delay and once obligations/reward/liquidity gates are
-clear, anyone calls `beginSnapshot(expectedFacetSetHash)`.
-
-That transaction:
-
-- wraps current native value;
-- burns Boardroom-held treasury shares;
-- freezes total redemption supply;
-- freezes the append-only asset-registry length;
-- enters `Snapshotting`;
-- forbids later asset registration, treasury-share treatment changes, and liquidity mutation.
-
-Record `assetSnapshotProgress()` and `redemptionSupplyState()`.
-
-## 5. Process bounded asset pages
-
-Anyone calls `snapshotAssets(expectedFacetSetHash, maximum)`; the maximum page
-is 32. Each registry entry becomes:
-
-- Included, with its frozen Boardroom balance;
-- Excluded, if membership was removed before freeze;
-- Unreadable, if the bounded balance probe failed.
-
-Every attempted entry advances the cursor. Re-read events and per-asset status after each page. No transaction performs
-work proportional to the full lifetime registry.
-
-Only when the cursor equals the frozen count may anyone call
-`openRedemptions(expectedFacetSetHash)`.
-
-## 6. Redeem and claim assets
-
-`redeem(expectedFacetSetHash, shares)` burns the caller's shares into
-caller-owned redemption credits. It does not loop over the asset registry.
-
-For each Included asset, the credit owner calls
-`claimRedemptionAsset(expectedFacetSetHash, asset, recipient, minAmountOut)`.
-Each asset is allocated once for the relevant credit. A hostile or temporarily
-failing token cannot roll back claims for unrelated assets.
-
-A failed asset transfer does not remint shares. Retry only that asset with the credit-owner wallet after checking
-`allocatedRedemptionShares`, `redemptionAssetState`, and the earlier receipt.
-
-Late deposits do not change frozen holder entitlements. Proven excess is
-sweepable only to the preserved `redemptionExcessRecipient`. Curve quote must
-be recovered or resolve through its time-delayed, vetoable terminal policy
-before snapshotting.
-
-Registry activation remains possible during wind-down, snapshotting, and open
-redemptions. A changed hash makes old calldata stale; a storage-version release
-also pauses writes until this Boardroom is permissionlessly migrated. Re-read
-the active hash and migration state before every transaction.
-
-## Success proof
-
-Project-level proof requires:
-
-- status `RedemptionsOpen`;
-- zero active obligations and per-kind counts;
-- terminal reward pool;
-- liquidity `Closed` and no reservation;
-- frozen supply;
-- snapshot cursor equal to frozen count;
-- explicit status for every registry entry;
-- matching redemption credit, allocation, payout, and excess events.
-
-Holder completion requires every intended Included asset to be allocated and paid or deliberately accepted at the
-holder's chosen minimum.
-
-## Recovery
-
-- **Cannot start:** verify prelaunch owner or the 10% two-checkpoint staker threshold.
-- **Cannot begin snapshot:** verify delay, scalar obligation counts, reward terminalization, singleton closure, and
-  reservation state.
-- **Snapshot page fails:** keep the same frozen registry and retry a bounded page; do not rebuild state from a partial
-  client list.
-- **Asset is Unreadable:** treat the explicit zero snapshot as a security/liveness event and investigate the token.
-- **Claim fails:** inspect only that asset's credit/allocation and retry with a deliberate minimum.
-- **Curve blocks closure:** stop. The purchaser, timing, migration-price, or quarantine gate is unresolved.
+An unreadable asset can be excluded. Claims for other assets remain independent. Do not
+assume one successful claim means every asset was included or paid.

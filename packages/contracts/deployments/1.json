@@ -1,0 +1,6 @@
+{
+  "chainId": 1,
+  "status": "pending",
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Lean protocol v1 deployment to Ethereum mainnet is not authorized"
+}

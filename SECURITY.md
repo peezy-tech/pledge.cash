@@ -1,77 +1,52 @@
-# Security Policy
+# Security policy
 
-pledge.cash is currently an unreleased local-review candidate. Canonical
-protocol v1 has not been broadcast to Monad testnet. The contracts
-are not mainnet production software, and this repository does not support a
-mainnet deployment.
+pledge.cash is an unreleased local-review candidate. No canonical pledge.cash contract
+has been broadcast to Ethereum Sepolia, Base Sepolia, or a mainnet.
 
-## Supported Scope
+## Supported scope
 
 Security reports are in scope for:
 
-- all Solidity protocol code under `packages/contracts/src`, including the
-  Boardroom registry, kernel, facets, storage migration, governance,
-  redemption, policy registries, token grants, distributions, bonding-curve
-  migration, AMM pools and routing, locked liquidity, protocol fee routing,
-  token-transfer helpers, factories, and deterministic deployment primitives,
-- deployment and verification surfaces that can publish or attest an unsafe contract stack, including
-  `packages/contracts/script/Deploy.s.sol`, chain-specific deployment wrappers and artifact verifiers,
-  `PledgeCashDeploymentSalts.sol`, and checked-in deployment artifacts,
-- SDK or web deployment parsing when a defect can select, conceal, or misrepresent a contract address, authority,
-  runtime code hash, or chain,
-- documentation that materially misstates custody, authority, or protocol risk
+- `Boardroom`, `BoardroomFactory`, and `BoardroomToken`, including execution,
+  obligation, wind-down, snapshot, and redemption behavior;
+- `TokenGrant` and `TokenGrantFactory`, including escrow, vesting, paid settlement,
+  grant-right transfer, Boardroom callbacks, recovery, and quarantine;
+- `LiquidityLocker`, `LiquidityLockerFactory`, the minimal PositionManager interface,
+  and `ProtocolFeeRouter`, including position validation, fee collection, exit, and
+  exact token movements;
+- deterministic deployment primitives, salts, network profiles, simulations, fork
+  wrappers, artifact generation, and verification;
+- SDK, app, or documentation behavior that can select, conceal, or misrepresent chain,
+  contract identity, authority, asset custody, or runtime code.
 
 Out of scope:
 
-- mainnet deployments, because none are supported by this repo yet,
-- denial-of-service testing against public RPCs, DNS, hosting, or third-party
-  infrastructure,
-- social engineering, phishing, spam, or physical attacks,
-- issues that require compromised private keys, wallets, developer machines, or
-  third-party accounts.
+- mainnet or public pledge.cash deployments, because none exists;
+- denial-of-service testing against public RPC, DNS, hosting, or third-party services;
+- social engineering, phishing, spam, or physical attacks;
+- issues that require compromised keys, wallets, developer machines, or third-party
+  accounts.
 
 ## Reporting
 
-Use a private GitHub Security Advisory for this repository when available. Do
-not open a public issue with exploit details, live exploit steps, private keys,
-or sensitive infrastructure data.
+Use a private GitHub Security Advisory when available. Do not publish exploit details,
+private keys, or sensitive infrastructure in an issue.
 
-Include:
-
-- affected files, contracts, functions, or UI flows,
-- a short impact statement,
-- reproduction steps or a failing test,
-- affected assets and required authority,
-- the expected invariant and the state transition that violates it,
-- any external-call or non-standard-token assumptions needed for impact,
-- whether the issue affects local release proof, a future testnet candidate, or
-  a future mainnet deployment.
-
-If private advisories are not available, open a minimal public issue asking for
-a private security contact without including technical details.
+Include the affected file and function, impact, minimal reproduction, assets and
+required authority, violated invariant, external-call or token assumption, and whether
+the result affects local proof or a future testnet candidate. If private advisories are
+unavailable, open a minimal public issue asking for a private contact.
 
 ## Expectations
 
-Please avoid interacting with funds, contracts, accounts, or infrastructure you do not own. Do not demonstrate a
-finding against a shared live deployment when a local Foundry test, fork, or self-deployed testnet instance can prove
-it. Testnet proofs should use self-funded test accounts and should not degrade public RPC, hosting, or wallet-provider
-services.
-
-This repository has no supported public deployment. Treat reports against the
-current contracts as unreleased protocol-v1 findings unless a future release
-states otherwise.
+Prove findings with local Foundry tests, disposable forks, or self-owned test accounts.
+Do not interact with funds, contracts, accounts, or infrastructure you do not own. A
+pending artifact, configured profile, or local simulation is not a supported public
+deployment.
 
 ## GitHub Actions
 
-Pull request CI runs untrusted code on GitHub-hosted runners. Keep workflow
-tokens read-only, do not persist checkout credentials, do not use
-`pull_request_target` for build or test jobs, and do not attach secrets to PR
-checks.
-
-Repository administrators should keep these GitHub Actions settings enabled:
-
-- require approval for workflow runs from outside contributors,
-- set default workflow permissions to read-only,
-- disable GitHub Actions creating or approving pull requests,
-- reserve deployment or publishing jobs for protected branches or protected
-  environments.
+Pull request CI runs untrusted code on hosted runners. Keep tokens read-only, do not
+persist checkout credentials, do not use `pull_request_target` for build or test jobs,
+and do not attach secrets to PR checks. Deployment and publishing jobs belong behind
+protected branches or environments.

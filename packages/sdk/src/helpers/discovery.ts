@@ -1,40 +1,19 @@
 import { getAbiItem, isHex, type Address, type Hex } from "viem";
 import {
   boardroomFactoryAbi,
-  distributionFactoryAbi,
-  pledgeV4LiquidityFactoryAbi,
+  liquidityLockerFactoryAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import { pledgeCashErrorMessage } from "./errors";
-import {
-  readBoardroomState,
-  readDutchAuctionState,
-  readFixedPriceSaleState,
-  readGrantState,
-  readProtocolLiquidityVaultState,
-  readMerkleAirdropState,
-  readMigratingBondingCurveState,
-} from "./readers";
 import type {
-  BoardroomState,
   DiscoveredBoardroom,
-  DiscoveredDistribution,
   DiscoveredGrant,
-  DiscoveredProtocolLiquidity,
+  DiscoveredLiquidityLocker,
   DiscoveryError,
   DiscoveryRange,
   DiscoveryResult,
-  EnrichedDiscovery,
-  FixedPriceSaleState,
-  DutchAuctionState,
   GrantDiscoveryRange,
-  GrantState,
-  ProtocolLiquidityVaultState,
-  MerkleAirdropState,
-  MigratingBondingCurveState,
-  PledgeCashBlockReadClient,
   PledgeCashLogClient,
-  PledgeCashReadClient,
 } from "./types";
 
 type RawEventLog = {
@@ -53,17 +32,10 @@ const boardroomCreatedEvent = getAbiItem({
   abi: boardroomFactoryAbi,
   name: "BoardroomCreated",
 });
-const distributionCreatedEvent = getAbiItem({ abi: distributionFactoryAbi, name: "DistributionCreated" });
-const protocolLiquidityCreatedEvent = getAbiItem({ abi: pledgeV4LiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
-
-export async function queryGrantHistory(
-  client: PledgeCashLogClient,
-  range: GrantDiscoveryRange,
-): Promise<DiscoveredGrant[]> {
-  const result = await discoverGrantHistory(client, range);
-  if (!result.complete) throw new Error(discoveryErrorsMessage(result.errors));
-  return result.items;
-}
+const liquidityLockerCreatedEvent = getAbiItem({
+  abi: liquidityLockerFactoryAbi,
+  name: "LiquidityLockerCreated",
+});
 
 export async function discoverGrantHistory(
   client: PledgeCashLogClient,
@@ -167,20 +139,17 @@ export async function discoverBoardrooms(
     const boardroom = addressArg(args, "boardroom");
     const owner = addressArg(args, "owner");
     const shareToken = addressArg(args, "shareToken");
-    const facetSetHash = hexArg(args, "facetSetHash");
-    if (!boardroom || !owner || !shareToken || !facetSetHash) continue;
+    if (!boardroom || !owner || !shareToken) continue;
     if (input.owner && !sameAddress(owner, input.owner)) continue;
 
     boardrooms.set(addressKey(boardroom), {
       boardroom,
       owner,
-      policyRegistry: addressArg(args, "policyRegistry") ?? ZERO_ADDRESS,
       wrappedNative: addressArg(args, "wrappedNative") ?? ZERO_ADDRESS,
       shareToken,
       name: stringArg(args, "name") ?? "",
       symbol: stringArg(args, "symbol") ?? "",
       salt: hexArg(args, "salt") ?? "0x",
-      facetSetHash,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -193,68 +162,28 @@ export async function discoverBoardrooms(
   );
 }
 
-export async function discoverBoardroomDistributions(
+export async function discoverLiquidityLockers(
   client: PledgeCashLogClient,
   input: DiscoveryRange & { factory: Address; boardroom?: Address },
-): Promise<DiscoveryResult<DiscoveredDistribution>> {
-  const result = await getLogs(client, input, input.factory, distributionCreatedEvent);
-  const distributions = new Map<string, DiscoveredDistribution>();
+): Promise<DiscoveryResult<DiscoveredLiquidityLocker>> {
+  const result = await getLogs(client, input, input.factory, liquidityLockerCreatedEvent);
+  const lockers = new Map<string, DiscoveredLiquidityLocker>();
 
   for (const log of [...result.logs].sort(compareLogs)) {
     const args = log.args ?? {};
-    const distribution = addressArg(args, "distribution");
+    const locker = addressArg(args, "locker");
     const boardroom = addressArg(args, "boardroom");
-    if (!distribution || !boardroom) continue;
+    if (!locker || !boardroom) continue;
     if (input.boardroom && !sameAddress(boardroom, input.boardroom)) continue;
 
-    distributions.set(addressKey(distribution), {
-      distribution,
+    lockers.set(addressKey(locker), {
+      locker,
       boardroom,
       factory: input.factory,
-      kind: distributionKindLabel(bigintArg(args, "kind")),
-      shareToken: addressArg(args, "shareToken") ?? ZERO_ADDRESS,
-      paymentToken: addressArg(args, "paymentToken") ?? ZERO_ADDRESS,
-      shareAmount: bigintArg(args, "shareAmount") ?? 0n,
-      salt: hexArg(args, "salt") ?? "0x",
-      createdAtBlock: log.blockNumber ?? 0n,
-      transactionHash: log.transactionHash ?? "0x",
-    });
-  }
-
-  return discoveryResult(
-    input,
-    [...distributions.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
-    [result],
-  );
-}
-
-export async function discoverBoardroomProtocolLiquidity(
-  client: PledgeCashLogClient,
-  input: DiscoveryRange & { factory: Address; boardroom?: Address },
-): Promise<DiscoveryResult<DiscoveredProtocolLiquidity>> {
-  const result = await getLogs(client, input, input.factory, protocolLiquidityCreatedEvent);
-  const vaults = new Map<string, DiscoveredProtocolLiquidity>();
-
-  for (const log of [...result.logs].sort(compareLogs)) {
-    const args = log.args ?? {};
-    const vault = addressArg(args, "vault");
-    const boardroom = addressArg(args, "boardroom");
-    const poolId = hexArg(args, "poolId");
-    if (!vault || !boardroom || !poolId) continue;
-    if (input.boardroom && !sameAddress(boardroom, input.boardroom)) continue;
-
-    vaults.set(addressKey(vault), {
-      vault,
-      boardroom,
-      factory: input.factory,
-      poolId,
       quoteAsset: addressArg(args, "quoteAsset") ?? ZERO_ADDRESS,
-      amountA: bigintArg(args, "amountA") ?? 0n,
-      amountB: bigintArg(args, "amountB") ?? 0n,
-      liquidity: bigintArg(args, "liquidity") ?? 0n,
-      sqrtPriceX96: bigintArg(args, "sqrtPriceX96") ?? 0n,
+      poolFee: numberArg(args, "poolFee") ?? 0,
+      tickSpacing: numberArg(args, "tickSpacing") ?? 0,
       salt: hexArg(args, "salt") ?? "0x",
-      curve: addressArg(args, "curve") ?? ZERO_ADDRESS,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -262,111 +191,9 @@ export async function discoverBoardroomProtocolLiquidity(
 
   return discoveryResult(
     input,
-    [...vaults.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
+    [...lockers.values()].sort((left, right) => compareBlockDesc(left.createdAtBlock, right.createdAtBlock)),
     [result],
   );
-}
-
-export async function enrichDiscoveredBoardrooms(
-  client: PledgeCashBlockReadClient,
-  boardrooms: readonly DiscoveredBoardroom[],
-): Promise<EnrichedDiscovery<DiscoveredBoardroom, BoardroomState>[]> {
-  return await Promise.all(
-    boardrooms.map(async (boardroom) => {
-      try {
-        return { ...boardroom, state: await readBoardroomState(client, boardroom.boardroom), stale: false };
-      } catch (error) {
-        return { ...boardroom, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredGrants(
-  client: PledgeCashReadClient,
-  grants: readonly DiscoveredGrant[],
-): Promise<EnrichedDiscovery<DiscoveredGrant, GrantState>[]> {
-  return await Promise.all(
-    grants.map(async (grant) => {
-      try {
-        return { ...grant, state: await readGrantState(client, grant.grantAddress), stale: false };
-      } catch (error) {
-        return { ...grant, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredDistributions(
-  client: PledgeCashReadClient,
-  distributions: readonly DiscoveredDistribution[],
-): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | DutchAuctionState | MigratingBondingCurveState | MerkleAirdropState>[]> {
-  return await Promise.all(
-    distributions.map(async (distribution) => {
-      try {
-        if (distribution.kind === "migrating-bonding-curve") {
-          return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "fixed-price-sale") {
-          return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "merkle-airdrop") {
-          return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
-        }
-        if (distribution.kind === "dutch-auction") {
-          return { ...distribution, state: await readDutchAuctionState(client, distribution.distribution), stale: false };
-        }
-
-        try {
-          return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
-        } catch {
-          try {
-            return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
-          } catch {
-            return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
-          }
-        }
-      } catch (error) {
-        return { ...distribution, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function enrichDiscoveredProtocolLiquidity(
-  client: PledgeCashReadClient,
-  vaults: readonly DiscoveredProtocolLiquidity[],
-): Promise<EnrichedDiscovery<DiscoveredProtocolLiquidity, ProtocolLiquidityVaultState>[]> {
-  return await Promise.all(
-    vaults.map(async (vault) => {
-      try {
-        return { ...vault, state: await readProtocolLiquidityVaultState(client, vault.vault), stale: false };
-      } catch (error) {
-        return { ...vault, stale: true, error: error instanceof Error ? error.message : String(error) };
-      }
-    }),
-  );
-}
-
-export async function queryGrantsIssuedByAddress(
-  client: PledgeCashLogClient,
-  input: GrantDiscoveryRange & { issuer: Address; includeClosed?: boolean },
-): Promise<DiscoveredGrant[]> {
-  const grants = await queryGrantHistory(client, input);
-  return grants.filter(
-    (grant) => sameAddress(grant.issuer, input.issuer) && (input.includeClosed || !grant.closed),
-  );
-}
-
-export async function queryGrantsHeldByAddress(
-  client: PledgeCashLogClient,
-  input: GrantDiscoveryRange & { holder: Address; includeClosed?: boolean },
-): Promise<DiscoveredGrant[]> {
-  const grants = await queryGrantHistory(client, input);
-  return grants.filter((grant) => {
-    if (sameAddress(grant.currentHolder, input.holder) && (input.includeClosed || !grant.closed)) return true;
-    return Boolean(input.includeClosed && grant.closed && grant.lastHolder && sameAddress(grant.lastHolder, input.holder));
-  });
 }
 
 type LogDiscoveryResult = DiscoveryResult<RawEventLog> & {
@@ -543,11 +370,6 @@ function discoveryError(
   };
 }
 
-function discoveryErrorsMessage(errors: readonly DiscoveryError[]): string {
-  if (errors.length === 0) return "Discovery failed.";
-  return errors.map((error) => error.message).join(" ");
-}
-
 function minBigInt(left: bigint, right: bigint): bigint {
   return left < right ? left : right;
 }
@@ -592,14 +414,6 @@ function stringArg(args: Record<string, unknown>, name: string): string | undefi
   return typeof value === "string" ? value : undefined;
 }
 
-function distributionKindLabel(kind: bigint | undefined): DiscoveredDistribution["kind"] {
-  if (kind === 0n) return "fixed-price-sale";
-  if (kind === 1n) return "migrating-bonding-curve";
-  if (kind === 2n) return "merkle-airdrop";
-  if (kind === 3n) return "dutch-auction";
-  return "unknown";
-}
-
 function hexArg(args: Record<string, unknown>, name: string): Hex | undefined {
   const value = args[name];
   return typeof value === "string" && isHex(value) ? value : undefined;
@@ -609,6 +423,13 @@ function bigintArg(args: Record<string, unknown>, name: string): bigint | undefi
   const value = args[name];
   if (typeof value === "bigint") return value;
   if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  return undefined;
+}
+
+function numberArg(args: Record<string, unknown>, name: string): number | undefined {
+  const value = args[name];
+  if (typeof value === "number" && Number.isSafeInteger(value)) return value;
+  if (typeof value === "bigint" && value <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(value);
   return undefined;
 }
 

@@ -17,6 +17,16 @@ output/playwright/
 .DS_Store
 
 packages/contracts/deployments/*.json
-!packages/contracts/deployments/10143.json
-!packages/contracts/deployments/10143.receipts.json
+!packages/contracts/deployments/1.json
+!packages/contracts/deployments/1.receipts.json
+!packages/contracts/deployments/8453.json
+!packages/contracts/deployments/8453.receipts.json
+!packages/contracts/deployments/4663.json
+!packages/contracts/deployments/4663.receipts.json
+!packages/contracts/deployments/42161.json
+!packages/contracts/deployments/42161.receipts.json
+!packages/contracts/deployments/84532.json
+!packages/contracts/deployments/84532.receipts.json
+!packages/contracts/deployments/11155111.json
+!packages/contracts/deployments/11155111.receipts.json
 packages/contracts/deployments/releases/

@@ -1,24 +1,10 @@
 import { decodeErrorResult, isHex, type Abi, type Hex } from "viem";
 import {
   boardroomAbi,
-  boardroomControllerAbi,
-  boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
-  boardroomKernelAbi,
-  boardroomPolicyRegistryAbi,
-  boardroomReleaseBMigrationFacetAbi,
   boardroomTokenAbi,
-  boardroomRewardsFactoryAbi,
-  bondMarketFactoryAbi,
-  distributionFactoryAbi,
-  dutchAuctionSaleAbi,
-  fixedPriceSaleAbi,
-  pledgeV4HookAbi,
-  pledgeV4LiquidityFactoryAbi,
-  pledgeV4LiquidityVaultAbi,
-  migratingBondingCurveAbi,
-  merkleAirdropAbi,
-  protocolFacetRegistryAbi,
+  liquidityLockerAbi,
+  liquidityLockerFactoryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
@@ -26,24 +12,10 @@ import type { DecodedPledgeCashError } from "./types";
 
 const pledgeCashErrorAbis: readonly Abi[] = [
   boardroomAbi,
-  boardroomControllerAbi,
-  boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
-  boardroomKernelAbi,
-  boardroomPolicyRegistryAbi,
-  boardroomReleaseBMigrationFacetAbi,
   boardroomTokenAbi,
-  boardroomRewardsFactoryAbi,
-  bondMarketFactoryAbi,
-  distributionFactoryAbi,
-  dutchAuctionSaleAbi,
-  fixedPriceSaleAbi,
-  pledgeV4HookAbi,
-  pledgeV4LiquidityFactoryAbi,
-  pledgeV4LiquidityVaultAbi,
-  migratingBondingCurveAbi,
-  merkleAirdropAbi,
-  protocolFacetRegistryAbi,
+  liquidityLockerAbi,
+  liquidityLockerFactoryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 ];
@@ -120,10 +92,6 @@ function humanErrorMessage(name: string, args: readonly unknown[]): string {
       return `Insufficient vested amount: requested ${argString(args[0])}, available ${argString(args[1])}.`;
     case "AmountExceedsTotal":
       return `Amount exceeds grant total: requested ${argString(args[0])}, available ${argString(args[1])}.`;
-    case "PolicyNotAllowed":
-      return `Boardroom policy ${argString(args[0])} is not allowed.`;
-    case "CallNotAllowed":
-      return `Boardroom policy rejected call to ${argString(args[1])} with selector ${argString(args[2])}.`;
     case "CallFailed":
       return `Boardroom call to ${argString(args[0])} failed.`;
     case "EmptyBatch":
@@ -140,6 +108,14 @@ function humanErrorMessage(name: string, args: readonly unknown[]): string {
       return "Vesting cliff must be before or equal to vesting end.";
     case "InvalidExpiry":
       return "Expiry must be in the future and at or after vesting end.";
+    case "OnlyBoardroom":
+      return `Only the locker Boardroom may perform this action; caller was ${argString(args[0])}.`;
+    case "PositionNotRegistered":
+      return "The liquidity locker has no active PositionManager position.";
+    case "LockerAlreadyClosed":
+      return "The liquidity locker is already closed.";
+    case "DeadlineExpired":
+      return `The transaction deadline ${argString(args[0])} has expired.`;
     default:
       return `${name}${args.length > 0 ? `(${args.map(argString).join(", ")})` : ""}`;
   }

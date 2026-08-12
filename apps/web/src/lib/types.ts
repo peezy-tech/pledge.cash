@@ -1,22 +1,6 @@
-import type {
-  Address,
-  BoardroomState,
-  BondMarketState,
-  DiscoveredBoardroom,
-  DiscoveredDistribution,
-  DiscoveredGrant,
-  DiscoveredProtocolLiquidity as DiscoveredLockedLiquidity,
-  DutchAuctionState,
-  FixedPriceSaleState,
-  GrantState,
-  ProtocolLiquidityVaultState as LockedLiquidityState,
-  MerkleAirdropState,
-  MigratingBondingCurveState,
-} from "@pledge.cash/sdk";
+import type { Address, DiscoveredBoardroom, DiscoveredGrant, DiscoveredLiquidityLocker } from "@pledge.cash/sdk";
 import type { Hex } from "viem";
 import type { TokenMetadata } from "./token-amounts";
-
-export type Tab = "direct" | "grant" | "boardroom" | "discovery";
 
 export type WalletState = {
   account?: Address;
@@ -71,53 +55,9 @@ export type BoardroomForm = {
   salt: string;
 };
 
-export type BoardroomGrantSnapshot = {
-  address: Address;
-  state?: GrantState;
-  error?: string;
-  tokenMetadata?: TokenMetadata | undefined;
-  paymentTokenMetadata?: TokenMetadata | undefined;
-};
-
-export type BoardroomDistributionSnapshot = {
-  address: Address;
-  kind: "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
-  state?: BondMarketState | DutchAuctionState | FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
-  error?: string;
-  shareTokenMetadata?: TokenMetadata | undefined;
-  paymentTokenMetadata?: TokenMetadata | undefined;
-  quoteTokenMetadata?: TokenMetadata | undefined;
-};
-
-export type BoardroomLockedLiquiditySnapshot = {
-  address: Address;
-  state?: LockedLiquidityState;
-  error?: string;
-  claimableA?: bigint | undefined;
-  claimableB?: bigint | undefined;
-  tokenAMetadata?: TokenMetadata | undefined;
-  tokenBMetadata?: TokenMetadata | undefined;
-  liquidityMetadata?: TokenMetadata | undefined;
-};
-
-export type BoardroomSnapshot = BoardroomState & {
-  /** Bounded canonical provenance records for display only; lifecycle safety uses the scalar active counts. */
-  issuedGrants: Address[];
-  issuedDistributions: Address[];
-  lockedLiquidityPositions: Address[];
-  redeemableAssets: Address[];
-  grantRecordCount?: number | undefined;
-  distributionRecordCount: number;
-  lockedLiquidityRecordCount: number;
-  shareTokenMetadata?: TokenMetadata | undefined;
-  summaryWarnings?: string[] | undefined;
-  grantSummaries: BoardroomGrantSnapshot[];
-  distributionSummaries: BoardroomDistributionSnapshot[];
-  lockedLiquiditySummaries: BoardroomLockedLiquiditySnapshot[];
-};
-
 export type BoardroomGrantForm = {
   holder: string;
+  token: string;
   paymentToken: string;
   amount: string;
   price: string;
@@ -129,95 +69,28 @@ export type BoardroomGrantForm = {
   salt: string;
 };
 
-export type FixedPriceSaleForm = {
-  paymentToken: string;
-  shareAmount: string;
-  price: string;
-  maxPerBuyer: string;
-  startTime: string;
-  endTime: string;
+export type LiquidityLockerForm = {
+  quoteAsset: string;
+  poolFee: string;
+  tickSpacing: string;
   salt: string;
 };
 
-export type DutchAuctionForm = {
-  paymentToken: string;
-  shareAmount: string;
-  startPrice: string;
-  floorPrice: string;
-  maxPerBuyer: string;
-  startTime: string;
-  endTime: string;
-  salt: string;
+export type LiquidityPositionForm = {
+  tokenId: string;
 };
 
-export type MerkleAirdropForm = {
-  shareAmount: string;
-  merkleRoot: string;
-  startTime: string;
-  endTime: string;
-  maxGrantClaims: string;
-  salt: string;
-};
-
-export type BondMarketForm = {
-  quoteToken: string;
-  kind: "reserve" | "liquidity";
-  capacity: string;
-  initialPrice: string;
-  minimumPrice: string;
-  debtBuffer: string;
-  vesting: string;
-  start: string;
-  duration: string;
-  depositInterval: string;
-  salt: string;
-};
-
-export type MigratingCurveForm = {
-  quoteToken: string;
-  saleSupply: string;
-  migrationSupply: string;
-  basePrice: string;
-  slope: string;
-  graduationQuoteTarget: string;
-  quoteToLpBps: string;
-  startTime: string;
-  endTime: string;
-  migrationSalt: string;
-  salt: string;
-};
-
-export type LockedLiquidityForm = {
-  quoteToken: string;
-  shareAmountDesired: string;
-  quoteAmountDesired: string;
-  shareAmountMin: string;
-  quoteAmountMin: string;
-  sqrtPriceX96: string;
-  deadline: string;
-  salt: string;
-  shareTokenSide: "tokenA" | "tokenB";
-};
-
-export type CurveMigrationForm = {
-  minShareLiquidity: string;
-  minQuoteLiquidity: string;
-  deadline: string;
-};
-
-export type LockedLiquidityExitForm = {
-  liquidity: string;
-  amountAMin: string;
-  amountBMin: string;
+export type LiquidityExitForm = {
+  amount0Min: string;
+  amount1Min: string;
   deadline: string;
 };
 
 export type WindDownForm = {
-  redeemableAsset: string;
-  redeemShares: string;
-  claimAsset: string;
-  claimRecipient: string;
-  claimMinAmount: string;
+  asset: string;
+  shares: string;
+  recipient: string;
+  minAmount: string;
 };
 
 export type LogEntry = {
@@ -237,17 +110,13 @@ export type DiscoveryForm = {
 };
 
 export type DiscoverySnapshot = {
-  chainId?: number;
   loadedFor?: Address;
   fromBlock?: bigint;
   toBlock?: bigint | "latest";
-  chunkSize?: bigint;
-  rangeMode?: "deployment" | "recent" | "manual";
   lastScannedBlock?: bigint;
   complete: boolean;
   errors: string[];
   boardroomsByAddress: Record<string, DiscoveredBoardroom>;
   grantsByAddress: Record<string, DiscoveredGrant>;
-  distributionsByAddress: Record<string, DiscoveredDistribution>;
-  lockersByAddress: Record<string, DiscoveredLockedLiquidity>;
+  lockersByAddress: Record<string, DiscoveredLiquidityLocker>;
 };

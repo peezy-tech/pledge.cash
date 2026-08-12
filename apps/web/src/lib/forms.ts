@@ -1,16 +1,12 @@
 import { pledgeCashErrorMessage, ZERO_ADDRESS, type Address } from "@pledge.cash/sdk";
 import { getAddress, isAddress, type Hex } from "viem";
 import type {
-  BondMarketForm,
-  CurveMigrationForm,
-  DutchAuctionForm,
-  FixedPriceSaleForm,
-  GrantForm,
-  LockedLiquidityExitForm,
-  LockedLiquidityForm,
-  MerkleAirdropForm,
-  MigratingCurveForm,
+  BoardroomForm,
   BoardroomGrantForm,
+  GrantForm,
+  LiquidityExitForm,
+  LiquidityLockerForm,
+  LiquidityPositionForm,
   WalletState,
   WindDownForm,
 } from "./types";
@@ -29,9 +25,7 @@ export function randomSalt(): Hex {
   if (globalThis.crypto) {
     globalThis.crypto.getRandomValues(bytes);
   } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
   }
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
@@ -42,14 +36,6 @@ export function defaultTimes(): Pick<GrantForm, "vestingCliff" | "vestingEnd" | 
     vestingCliff: secondsAfter(now, SECONDS_PER_MINUTE),
     vestingEnd: secondsAfter(now, SECONDS_PER_HOUR),
     expiry: secondsAfter(now, 2 * SECONDS_PER_DAY),
-  };
-}
-
-export function defaultWorkflowWindow(): { startTime: string; endTime: string } {
-  const now = currentUnixSeconds();
-  return {
-    startTime: String(now),
-    endTime: secondsAfter(now, 2 * SECONDS_PER_HOUR),
   };
 }
 
@@ -71,9 +57,14 @@ export function defaultGrantForm(): GrantForm {
   };
 }
 
+export function defaultBoardroomForm(owner = ""): BoardroomForm {
+  return { owner, name: "", symbol: "", salt: randomSalt() };
+}
+
 export function defaultBoardroomGrantForm(): BoardroomGrantForm {
   return {
     holder: "",
+    token: "",
     paymentToken: ZERO_ADDRESS,
     amount: "1",
     price: "0",
@@ -84,109 +75,20 @@ export function defaultBoardroomGrantForm(): BoardroomGrantForm {
   };
 }
 
-export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
-  return {
-    paymentToken: "",
-    shareAmount: "1",
-    price: "1",
-    maxPerBuyer: "0",
-    ...defaultWorkflowWindow(),
-    salt: randomSalt(),
-  };
+export function defaultLiquidityLockerForm(): LiquidityLockerForm {
+  return { quoteAsset: "", poolFee: "3000", tickSpacing: "60", salt: randomSalt() };
 }
 
-export function defaultDutchAuctionForm(): DutchAuctionForm {
-  return {
-    paymentToken: "",
-    shareAmount: "1",
-    startPrice: "2",
-    floorPrice: "1",
-    maxPerBuyer: "0",
-    ...defaultWorkflowWindow(),
-    salt: randomSalt(),
-  };
+export function defaultLiquidityPositionForm(): LiquidityPositionForm {
+  return { tokenId: "" };
 }
 
-export function defaultBondMarketForm(): BondMarketForm {
-  return {
-    quoteToken: "",
-    kind: "reserve",
-    capacity: "1000",
-    initialPrice: "1",
-    minimumPrice: "1",
-    debtBuffer: "10000",
-    vesting: String(7 * SECONDS_PER_DAY),
-    start: "0",
-    duration: String(30 * SECONDS_PER_DAY),
-    depositInterval: String(SECONDS_PER_DAY),
-    salt: randomSalt(),
-  };
-}
-
-export function defaultMerkleAirdropForm(): MerkleAirdropForm {
-  return {
-    shareAmount: "1",
-    merkleRoot: "",
-    ...defaultWorkflowWindow(),
-    maxGrantClaims: "0",
-    salt: randomSalt(),
-  };
-}
-
-export function defaultMigratingCurveForm(): MigratingCurveForm {
-  return {
-    quoteToken: "",
-    saleSupply: "1",
-    migrationSupply: "1",
-    basePrice: "1",
-    slope: "0",
-    graduationQuoteTarget: "1",
-    quoteToLpBps: "5000",
-    ...defaultWorkflowWindow(),
-    migrationSalt: randomSalt(),
-    salt: randomSalt(),
-  };
-}
-
-export function defaultLockedLiquidityForm(): LockedLiquidityForm {
-  return {
-    quoteToken: "",
-    shareAmountDesired: "1",
-    quoteAmountDesired: "1",
-    shareAmountMin: "0.95",
-    quoteAmountMin: "0.95",
-    sqrtPriceX96: (1n << 96n).toString(),
-    deadline: defaultDeadline(),
-    salt: randomSalt(),
-    shareTokenSide: "tokenA",
-  };
-}
-
-export function defaultCurveMigrationForm(): CurveMigrationForm {
-  return {
-    minShareLiquidity: "",
-    minQuoteLiquidity: "",
-    deadline: defaultDeadline(),
-  };
-}
-
-export function defaultLockedLiquidityExitForm(): LockedLiquidityExitForm {
-  return {
-    liquidity: "0",
-    amountAMin: "0",
-    amountBMin: "0",
-    deadline: defaultDeadline(),
-  };
+export function defaultLiquidityExitForm(): LiquidityExitForm {
+  return { amount0Min: "0", amount1Min: "0", deadline: defaultDeadline() };
 }
 
 export function defaultWindDownForm(): WindDownForm {
-  return {
-    redeemableAsset: "",
-    redeemShares: "0",
-    claimAsset: "",
-    claimRecipient: "",
-    claimMinAmount: "0",
-  };
+  return { asset: "", shares: "0", recipient: "", minAmount: "0" };
 }
 
 export function shortAddress(address: string | undefined): string {
@@ -199,8 +101,7 @@ export function errorMessage(error: unknown): string {
 }
 
 export function bigintString(value: bigint | undefined): string {
-  if (value === undefined) return "Unknown";
-  return value.toString();
+  return value === undefined ? "Unknown" : value.toString();
 }
 
 export function dateString(timestamp: bigint | undefined, nowMilliseconds = Date.now()): string {
@@ -255,15 +156,11 @@ export function uintInput(value: string, label: string): bigint {
 
 export function optionalPaymentToken(value: string): Address {
   const trimmed = value.trim();
-  if (!trimmed) return ZERO_ADDRESS;
-  return requireAddress(trimmed, "Payment token");
+  return trimmed ? requireAddress(trimmed, "Payment token") : ZERO_ADDRESS;
 }
 
 export function walletState(account: Address | undefined, chainId: number | undefined): WalletState {
-  const next: WalletState = {};
-  if (account) next.account = account;
-  if (chainId !== undefined) next.chainId = chainId;
-  return next;
+  return { ...(account ? { account } : {}), ...(chainId === undefined ? {} : { chainId }) };
 }
 
 function currentUnixSeconds(): number {

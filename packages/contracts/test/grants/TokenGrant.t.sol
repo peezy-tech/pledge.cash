@@ -7,48 +7,11 @@ import {Base64} from "solady/utils/Base64.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
-
-contract GrantERC20 {
-    string public name;
-    string public symbol;
-    uint8 public immutable decimals;
-    uint256 public totalSupply;
-
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-
-    constructor(string memory name_, string memory symbol_, uint8 decimals_) {
-        name = name_;
-        symbol = symbol_;
-        decimals = decimals_;
-    }
-
-    function mint(address to, uint256 amount) external {
-        balanceOf[to] += amount;
-        totalSupply += amount;
-    }
-
-    function approve(address spender, uint256 amount) public virtual returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        return true;
-    }
-
-    function transfer(address to, uint256 amount) public virtual returns (bool) {
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) public virtual returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) {
-            allowance[from][msg.sender] = allowed - amount;
-        }
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        return true;
-    }
-}
+import {
+    FeeOnTransferTestERC20 as FeeOnTransferERC20,
+    MutableFailureTestERC20 as MutableFailureGrantERC20,
+    TestERC20 as GrantERC20
+} from "../helpers/TestTokens.sol";
 
 contract NoReturnERC20 {
     string public name;
@@ -91,10 +54,33 @@ contract NoReturnERC20 {
 }
 
 contract NoDecimalsERC20 {
+    uint256 public totalSupply;
+    mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
 
     function approve(address spender, uint256 amount) external returns (bool) {
         allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - amount;
+        }
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
         return true;
     }
 }
@@ -108,46 +94,6 @@ contract FalseReturnERC20 is GrantERC20 {
 
     function transferFrom(address, address, uint256) public pure override returns (bool) {
         return false;
-    }
-}
-
-contract FeeOnTransferERC20 is GrantERC20 {
-    uint256 internal immutable feeBps;
-    bool internal immutable feeOnTransfer;
-    bool internal immutable feeOnTransferFrom;
-
-    constructor(
-        string memory name_,
-        string memory symbol_,
-        uint8 decimals_,
-        uint256 feeBps_,
-        bool feeOnTransfer_,
-        bool feeOnTransferFrom_
-    ) GrantERC20(name_, symbol_, decimals_) {
-        feeBps = feeBps_;
-        feeOnTransfer = feeOnTransfer_;
-        feeOnTransferFrom = feeOnTransferFrom_;
-    }
-
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        _move(msg.sender, to, amount, feeOnTransfer);
-        return true;
-    }
-
-    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
-        uint256 allowed = allowance[from][msg.sender];
-        if (allowed != type(uint256).max) {
-            allowance[from][msg.sender] = allowed - amount;
-        }
-        _move(from, to, amount, feeOnTransferFrom);
-        return true;
-    }
-
-    function _move(address from, address to, uint256 amount, bool applyFee) internal {
-        uint256 fee = applyFee ? (amount * feeBps) / 10_000 : 0;
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount - fee;
-        totalSupply -= fee;
     }
 }
 
@@ -185,8 +131,8 @@ contract SenderSurchargeERC20 is GrantERC20 {
 
     function _moveWithSenderSurcharge(address from, address to, uint256 amount, bool applySurcharge) internal {
         uint256 surcharge = applySurcharge ? (amount * surchargeBps) / 10_000 : 0;
-        balanceOf[from] -= amount + surcharge;
-        balanceOf[to] += amount;
+        balances[from] -= amount + surcharge;
+        balances[to] += amount;
         totalSupply -= surcharge;
     }
 }
@@ -215,21 +161,6 @@ contract ReentrantPaymentERC20 is GrantERC20 {
             (reenteredOk,) = target.call(payload);
         }
         return super.transferFrom(from, to, amount);
-    }
-}
-
-contract MutableFailureGrantERC20 is GrantERC20 {
-    bool public transfersFail;
-
-    constructor() GrantERC20("Mutable Grant", "MGRANT", 18) {}
-
-    function setTransfersFail(bool fail_) external {
-        transfersFail = fail_;
-    }
-
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        if (transfersFail) return false;
-        return super.transfer(to, amount);
     }
 }
 
@@ -340,7 +271,6 @@ contract TokenGrantTest is Test {
         assertEq(grant.grantSize(), GRANT_SIZE);
         assertEq(grant.claimable(), GRANT_SIZE);
         assertEq(grant.tokenDecimals(), 18);
-        assertEq(grant.paymentTokenDecimals(), 0);
         assertEq(grant.tokenUnit(), 1 ether);
         assertEq(token.balanceOf(grantAddress), GRANT_SIZE);
         assertEq(token.balanceOf(issuer), 0);
@@ -402,20 +332,10 @@ contract TokenGrantTest is Test {
         factory.setCreationFee(0.01 ether);
     }
 
-    function testBoardroomOwnerPolicyAllowsFeeAndRecipientUpdatesAndOwnershipRotation() public {
+    function testFactoryOwnerCanUpdateFeesAndRotateOwnership() public {
         address boardroom = address(0xB04D);
         address nextOwner = address(0xA0A0);
         factory.transferOwnership(boardroom);
-
-        bytes memory setFeeData = abi.encodeCall(TokenGrantFactory.setCreationFee, (0.02 ether));
-        bytes memory setFeeRecipientData = abi.encodeCall(TokenGrantFactory.setFeeRecipient, (stranger));
-        bytes memory transferOwnershipData = abi.encodeWithSignature("transferOwnership(address)", nextOwner);
-
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeData));
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeRecipientData));
-        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, transferOwnershipData));
-        assertFalse(factory.canCall(stranger, address(this), address(factory), 0, setFeeData));
-        assertFalse(factory.canCall(boardroom, address(this), address(factory), 1, setFeeData));
 
         vm.prank(boardroom);
         factory.setCreationFee(0.02 ether);
@@ -614,7 +534,7 @@ contract TokenGrantTest is Test {
         assertEq(paymentToken.balanceOf(issuer), PRICE);
     }
 
-    function testSafeTransferFromSyncsGrantHolder() public {
+    function testSafeTransferFromUsesCanonicalNftOwnerAsHolder() public {
         address newHolder = address(0xD00D);
         TokenGrant grant = _createGrant(
             _grantCreate(
@@ -753,17 +673,6 @@ contract TokenGrantTest is Test {
         factory.closeGrant(grantTokenId);
     }
 
-    function testOnlyFactoryCanSyncGrantHolder() public {
-        (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
-
-        vm.expectRevert(TokenGrant.OnlyFactory.selector);
-        grant.onGrantRightTransferred(holder, stranger);
-
-        vm.prank(address(factory));
-        vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
-        grant.onGrantRightTransferred(stranger, stranger);
-    }
-
     function testFullSettlementBurnsGrantNft() public {
         (TokenGrant grant,) = _createFreeGrant("full-settle-burn");
         uint256 grantTokenId = grant.tokenId();
@@ -817,6 +726,20 @@ contract TokenGrantTest is Test {
         assertEq(token.balanceOf(grantAddress), 0);
         vm.expectRevert(ERC721.TokenDoesNotExist.selector);
         factory.ownerOf(grantTokenId);
+    }
+
+    function testHaltAtTimestampZeroRemainsObservableAfterGrantRightBurns() public {
+        (TokenGrant grant,) = _createFreeGrant("halt-at-zero");
+        vm.warp(0);
+
+        vm.prank(issuer);
+        grant.stopVestingAndWithdrawUnvested();
+
+        assertTrue(grant.vestingIsHalted());
+        assertEq(grant.vestingHaltTimestamp(), 0);
+        assertEq(grant.claimable(), 0);
+        assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
     }
 
     function testPaymentTokenReentryCannotTransferGrantNftDuringSettlement() public {
@@ -1148,19 +1071,20 @@ contract TokenGrantTest is Test {
         );
     }
 
-    function testRejectsUnsupportedPaymentTokenDecimals() public {
+    function testPaymentTokenDecimalsDoNotAffectSettlementMath() public {
         GrantERC20 highDecimalPayment = new GrantERC20("High Payment", "HPAY", 78);
 
-        _createGrantExpectRevert(
-            abi.encodeWithSelector(
-                TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)
-            ),
-            "high-payment",
-            address(token),
-            holder,
-            address(highDecimalPayment),
-            _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("high-payment"),
+                holder,
+                address(token),
+                address(highDecimalPayment),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+            )
         );
+
+        assertEq(grant.getSettlementCost(10 ether), 20_000000);
     }
 
     function testRejectsTokenWithoutDecimals() public {
@@ -1176,17 +1100,32 @@ contract TokenGrantTest is Test {
         );
     }
 
-    function testRejectsPaymentTokenWithoutDecimals() public {
+    function testSupportsPaymentTokenWithoutDecimalsMetadata() public {
         NoDecimalsERC20 noDecimals = new NoDecimalsERC20();
+        noDecimals.mint(holder, 1_000_000000);
 
-        _createGrantExpectRevert(
-            abi.encodeWithSelector(TokenGrant.InvalidTokenDecimals.selector, address(noDecimals)),
-            "no-decimals-payment",
-            address(token),
-            holder,
-            address(noDecimals),
-            _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("no-decimals-payment"),
+                holder,
+                address(token),
+                address(noDecimals),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+            )
         );
+
+        vm.warp(1_500);
+        uint256 settleAmount = 10 ether;
+        uint256 expectedCost = 20_000000;
+
+        vm.prank(holder);
+        noDecimals.approve(address(grant), expectedCost);
+
+        vm.prank(holder);
+        grant.settle(settleAmount);
+
+        assertEq(token.balanceOf(holder), settleAmount);
+        assertEq(noDecimals.balanceOf(issuer), expectedCost);
     }
 
     function testSupportsNoReturnTokens() public {

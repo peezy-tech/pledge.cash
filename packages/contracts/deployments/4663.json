@@ -1,0 +1,6 @@
+{
+  "chainId": 4663,
+  "status": "pending",
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Lean protocol v1 deployment to Robinhood Chain mainnet is not authorized"
+}

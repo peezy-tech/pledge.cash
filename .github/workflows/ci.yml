@@ -106,6 +106,16 @@ jobs:
         working-directory: packages/contracts
         run: forge build --sizes
 
+      - name: Validate canonical network profiles
+        run: |
+          bun --cwd packages/contracts validate:networks
+          bun --cwd packages/contracts test:network-profiles
+          bash -n \
+            packages/contracts/script/deploy-network.sh \
+            packages/contracts/script/network-fork/deploy.sh \
+            packages/contracts/script/verify-network-artifact.sh \
+            packages/contracts/script/verify-network-profile-live.sh
+
       - name: Verify generated SDK is current
         run: |
           bun --cwd packages/sdk generate
@@ -143,13 +153,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           persist-credentials: false
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.7.1
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -159,84 +163,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Prepare pinned peezy.tech Identity fixture
-        env:
-          PEEZY_IDENTITY_COMMIT: 47cc0d9fb3efbb26f3669b7c9918743082dcd998
-        run: |
-          identity_dir="${RUNNER_TEMP}/peezy-identity"
-          git init "$identity_dir"
-          git -C "$identity_dir" remote add origin https://github.com/peezy-tech/identity.git
-          git -C "$identity_dir" fetch --depth 1 origin "$PEEZY_IDENTITY_COMMIT"
-          git -C "$identity_dir" checkout --detach "$PEEZY_IDENTITY_COMMIT"
-          test "$(git -C "$identity_dir" rev-parse HEAD)" = "$PEEZY_IDENTITY_COMMIT"
-          bun install --cwd "$identity_dir" --frozen-lockfile
-          bun --cwd "$identity_dir" build
-
-      - name: Foundry version
-        run: forge --version
-
       - name: Test SDK
         run: bun --cwd packages/sdk test
 
       - name: Test Sentinel
         env:
-          GITHUB_CLIENT_ID: pledge-cash-ci
-          GITHUB_CLIENT_SECRET: pledge-cash-ci-social-secret
-          IDENTITY_APP_CLIENTS: >-
-            [{"id":"pledge-cash","secret":"0123456789012345678901234567890123456789","name":"PledgeCash","origins":["http://localhost:5173"],"siweStatement":"Sign in to pledge.cash alerts.","walletLinkSiweStatement":"Link this wallet to pledge.cash Sentinel notifications."}]
-          IDENTITY_BASE_URL: http://localhost:8790
-          IDENTITY_OIDC_CLIENTS: >-
-            [{"clientId":"pledge-cash","clientSecret":"abcdefghijklmnopqrstuvwxyz0123456789ABCD","name":"PledgeCash","redirectUris":["http://localhost:8787/auth/oauth2/callback/peezy"],"audiences":[]}]
-          IDENTITY_PORT: "8790"
-          IDENTITY_SECRET: pledge-cash-ci-identity-secret-000000000000
-          IDENTITY_TRUSTED_ORIGINS: http://localhost:5173
-          PEEZY_IDENTITY_TEST_APP_CLIENT_SECRET: "0123456789012345678901234567890123456789"
-          PEEZY_IDENTITY_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/peezy_identity_ci
-          PEEZY_IDENTITY_TEST_OIDC_CLIENT_SECRET: abcdefghijklmnopqrstuvwxyz0123456789ABCD
-          PEEZY_IDENTITY_TEST_URL: http://localhost:8790
           SENTINEL_AUTH_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-        run: |
-          bun --cwd services/sentinel -e '
-            import postgres from "postgres";
-            const sql = postgres(process.env.SENTINEL_AUTH_TEST_DATABASE_URL);
-            await sql.unsafe("CREATE DATABASE peezy_identity_ci");
-            await sql.end({ timeout: 5 });
-          '
-
-          identity_dir="${RUNNER_TEMP}/peezy-identity"
-          identity_log="${RUNNER_TEMP}/peezy-identity.log"
-          DATABASE_URL="$PEEZY_IDENTITY_TEST_DATABASE_URL" \
-            bun --cwd "$identity_dir" dev >"$identity_log" 2>&1 &
-          identity_pid=$!
-          cleanup_identity() {
-            test_status=$?
-            kill "$identity_pid" 2>/dev/null || true
-            wait "$identity_pid" 2>/dev/null || true
-            if [ "$test_status" -ne 0 ]; then
-              sed -n '1,240p' "$identity_log"
-            fi
-          }
-          trap cleanup_identity EXIT
-
-          ready=0
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent "$PEEZY_IDENTITY_TEST_URL/health/ready" >/dev/null; then
-              ready=1
-              break
-            fi
-            if ! kill -0 "$identity_pid" 2>/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" -ne 1 ]; then
-            sed -n '1,240p' "$identity_log"
-            exit 1
-          fi
-
-          bun --cwd services/sentinel test
-
-      - name: Run Sentinel Anvil integration
-        env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-        run: bun --cwd services/sentinel integration:anvil
+        run: bun --cwd services/sentinel test
